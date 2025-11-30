@@ -1,0 +1,11 @@
+{
+	"required": true,
+	"package": "com.p2s.mixin.client",
+	"compatibilityLevel": "JAVA_21",
+	"client": [
+		"P2SClientMixin"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	}
+}

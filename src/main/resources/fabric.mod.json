@@ -1,0 +1,41 @@
+{
+	"schemaVersion": 1,
+	"id": "prompt2structure",
+	"version": "${version}",
+	"name": "Prompt to Structure",
+	"description": "Generate and build structures from LLM prompts.",
+	"authors": [
+		"kterna"
+	],
+	"contact": {
+		"homepage": "https://fabricmc.net/",
+		"sources": "https://github.com/FabricMC/fabric-example-mod"
+	},
+	"license": "CC0-1.0",
+	"icon": "assets/prompt2structure/icon.png",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"com.p2s.P2SMod"
+		],
+		"client": [
+			"com.p2s.P2SModClient"
+		]
+	},
+	"mixins": [
+		"p2s.mixins.json",
+		{
+			"config": "p2s.client.mixins.json",
+			"environment": "client"
+		}
+	],
+	"depends": {
+		"fabricloader": ">=0.15.11",
+		"minecraft": "~1.21",
+		"java": ">=21",
+		"fabric-api": "*"
+	},
+	"suggests": {
+		"another-mod": "*"
+	}
+}
