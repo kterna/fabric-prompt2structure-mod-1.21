@@ -1,6 +1,0 @@
-{
-  "apiUrl": "https://open.bigmodel.cn/api/paas/v4",
-  "apiKey": "15b5398c9c904bf787c3ef1a0d69844a.OcJNL22E1VY4HjZI",
-  "model": "GLM-4.1V-Thinking-Flash",
-  "httpTimeoutSeconds": 60
-}

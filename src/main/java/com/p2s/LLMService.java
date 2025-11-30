@@ -23,27 +23,6 @@ public final class LLMService {
     private static volatile OkHttpClient CLIENT = buildClient(ModConfig.HTTP_TIMEOUT_SECONDS);
     private static volatile int CLIENT_TIMEOUT_SECONDS = ModConfig.HTTP_TIMEOUT_SECONDS;
 
-    public static final String AI_SYSTEM_PROMPT = """
-            You are a Minecraft Architect. 
-            Target: Generate a structure based on user prompt.
-            Output Format: JSON ONLY. No markdown, no comments.
-            Schema:
-            {
-              "palette": {"KEY": "minecraft:block_id"},
-              "structure": [
-                {"actions": [{"type": "fill", "block": "KEY", "from": [x,y,z], "to": [x,y,z]}]}
-              ]
-            }
-            Actions:
-            1. "fill": Fill a solid cuboid.
-            2. "frame": Create hollow walls/box (faces only) for the cuboid region.
-            3. "set": Place blocks at specific list of coordinates "at": [[x,y,z],...].
-            Rules:
-            - Coordinates are relative to 0,0,0.
-            - Use standard Minecraft Java Edition block IDs (e.g., minecraft:oak_log).
-            - Optimize: Use "fill" and "frame" for large areas to save tokens.
-            """;
-
     private LLMService() {
     }
 
@@ -51,6 +30,7 @@ public final class LLMService {
         return CompletableFuture.supplyAsync(() -> {
             String bodyJson = buildBody(userPrompt);
             P2SMod.LOGGER.info("LLM request -> url={}, model={}, timeout={}s", ModConfig.API_URL, ModConfig.MODEL, ModConfig.HTTP_TIMEOUT_SECONDS);
+            P2SMod.LOGGER.info("Active prompt preset: {}", ModConfig.activePromptName());
             P2SMod.LOGGER.info("LLM prompt: {}", userPrompt);
             Request request = new Request.Builder()
                     .url(ModConfig.API_URL)
@@ -80,7 +60,7 @@ public final class LLMService {
         JsonArray messages = new JsonArray();
         JsonObject systemMsg = new JsonObject();
         systemMsg.addProperty("role", "system");
-        systemMsg.addProperty("content", AI_SYSTEM_PROMPT);
+        systemMsg.addProperty("content", ModConfig.currentSystemPrompt());
         messages.add(systemMsg);
 
         JsonObject userMsg = new JsonObject();

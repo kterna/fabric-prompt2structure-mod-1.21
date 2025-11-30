@@ -17,6 +17,6 @@ public class P2SMod implements ModInitializer {
 	public void onInitialize() {
 		ModCommandRegistry.register();
 		LOGGER.info("Prompt-to-Structure module loaded. {}", ModConfig.describeConfigSource());
-		LOGGER.info("Using API URL: {}, model: {}, timeout: {}s", ModConfig.API_URL, ModConfig.MODEL, ModConfig.HTTP_TIMEOUT_SECONDS);
+		LOGGER.info("Using API URL: {}, model: {}, timeout: {}s, prompt: {}", ModConfig.API_URL, ModConfig.MODEL, ModConfig.HTTP_TIMEOUT_SECONDS, ModConfig.activePromptName());
 	}
 }

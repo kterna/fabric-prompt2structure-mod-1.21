@@ -2,6 +2,7 @@ package com.p2s;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonElement;
 import net.fabricmc.loader.api.FabricLoader;
 
 import java.io.IOException;
@@ -26,7 +27,7 @@ public final class ScriptStorage {
     private ScriptStorage() {
     }
 
-    public static synchronized String save(String prompt, String content, String fullMessage, String suggestedName) {
+    public static synchronized String save(String prompt, StructureBuilder.VbsScript script, String fullMessage, String suggestedName) {
         ensureDir();
         String name = sanitizeName(suggestedName != null ? suggestedName : generateName(prompt));
         Path file = ROOT.resolve(name + ".json");
@@ -37,7 +38,9 @@ public final class ScriptStorage {
         Entry entry = new Entry();
         entry.name = name;
         entry.prompt = prompt;
-        entry.content = content;
+        // Persist the parsed script as JSON tree (no escaped string)
+        StructureBuilder.VbsScript scriptToSave = script == null ? new StructureBuilder.VbsScript() : script;
+        entry.content = GSON.toJsonTree(scriptToSave);
         entry.assistantMessage = fullMessage;
         entry.timestamp = System.currentTimeMillis();
         try {
@@ -133,9 +136,25 @@ public final class ScriptStorage {
     public static class Entry {
         public String name;
         public String prompt;
-        public String content;
+        public JsonElement content;
         public String assistantMessage;
         public long timestamp;
+
+        public StructureBuilder.VbsScript toScript() {
+            if (content == null || content.isJsonNull()) {
+                return null;
+            }
+            try {
+                if (content.isJsonPrimitive() && content.getAsJsonPrimitive().isString()) {
+                    // legacy stored as stringified JSON
+                    return StructureBuilder.parse(content.getAsString());
+                }
+                return GSON.fromJson(content, StructureBuilder.VbsScript.class);
+            } catch (Exception e) {
+                P2SMod.LOGGER.warn("Parse stored script failed for {}: {}", name, e.getMessage());
+                return null;
+            }
+        }
     }
 
     public static class EntryInfo {

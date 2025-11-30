@@ -10,6 +10,8 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.DirectionProperty;
+import net.minecraft.world.level.block.state.properties.Property;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -76,7 +78,7 @@ public final class StructureBuilder {
         if (from == null || to == null) {
             return;
         }
-        BlockState state = getState(palette, missingPaletteKeys, action.block);
+        BlockState state = getState(palette, missingPaletteKeys, action.block, action.facing);
 
         int minX = Math.min(from[0], to[0]);
         int minY = Math.min(from[1], to[1]);
@@ -101,7 +103,7 @@ public final class StructureBuilder {
         if (from == null || to == null) {
             return;
         }
-        BlockState state = getState(palette, missingPaletteKeys, action.block);
+        BlockState state = getState(palette, missingPaletteKeys, action.block, action.facing);
 
         int minX = Math.min(from[0], to[0]);
         int minY = Math.min(from[1], to[1]);
@@ -128,7 +130,7 @@ public final class StructureBuilder {
         if (action.at == null) {
             return;
         }
-        BlockState state = getState(palette, missingPaletteKeys, action.block);
+        BlockState state = getState(palette, missingPaletteKeys, action.block, action.facing);
         for (List<Integer> point : action.at) {
             int[] coords = coords(point);
             if (coords == null) {
@@ -146,14 +148,14 @@ public final class StructureBuilder {
         return new int[]{list.get(0), list.get(1), list.get(2)};
     }
 
-    private static BlockState getState(Map<String, BlockState> palette, Set<String> missingPaletteKeys, String key) {
+    private static BlockState getState(Map<String, BlockState> palette, Set<String> missingPaletteKeys, String key, String facing) {
         if (key != null && palette.containsKey(key)) {
-            return palette.get(key);
+            return applyFacing(palette.get(key), facing);
         }
         if (missingPaletteKeys.add(String.valueOf(key))) {
             P2SMod.LOGGER.warn("Palette key '{}' missing, fallback to stone", key);
         }
-        return Blocks.STONE.defaultBlockState();
+        return applyFacing(Blocks.STONE.defaultBlockState(), facing);
     }
 
     private static BlockState resolveBlockState(String rawId, String paletteKey) {
@@ -232,6 +234,22 @@ public final class StructureBuilder {
         return prev[n];
     }
 
+    private static BlockState applyFacing(BlockState state, String facing) {
+        if (facing == null || facing.isBlank()) {
+            return state;
+        }
+        var dir = net.minecraft.core.Direction.byName(facing.trim().toLowerCase());
+        if (dir == null) {
+            return state;
+        }
+        for (Property<?> property : state.getProperties()) {
+            if (property instanceof DirectionProperty dirProp && dirProp.getPossibleValues().contains(dir)) {
+                return state.setValue(dirProp, dir);
+            }
+        }
+        return state;
+    }
+
     public static class VbsScript {
         public Map<String, String> palette = new HashMap<>();
         public List<VbsLayer> structure = new ArrayList<>();
@@ -247,5 +265,6 @@ public final class StructureBuilder {
         public List<Integer> from;
         public List<Integer> to;
         public List<List<Integer>> at;
+        public String facing;
     }
 }

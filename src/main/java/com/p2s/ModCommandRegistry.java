@@ -7,6 +7,7 @@ import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.commands.SharedSuggestionProvider;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
@@ -70,6 +71,19 @@ public final class ModCommandRegistry {
                                         return ok ? 1 : 0;
                                     }))
             );
+
+            dispatcher.register(
+                    Commands.literal("p2sprompt")
+                            .requires(source -> source.hasPermission(2))
+                            .then(Commands.literal("list").executes(ctx -> listPrompts(ctx.getSource())))
+                            .then(Commands.literal("set")
+                                    .then(Commands.argument("name", StringArgumentType.word())
+                                            .suggests((ctx, builder) -> {
+                                                return SharedSuggestionProvider.suggest(ModConfig.promptMap().keySet(), builder);
+                                            })
+                                            .executes(ctx -> setPrompt(ctx.getSource(), StringArgumentType.getString(ctx, "name")))))
+                            .executes(ctx -> showCurrentPrompt(ctx.getSource()))
+            );
         });
     }
 
@@ -89,7 +103,7 @@ public final class ModCommandRegistry {
             MinecraftServer server = source.getServer();
             server.execute(() -> {
                 try {
-                    String savedName = ScriptStorage.save(prompt, result.rawContent(), result.fullMessage(), null);
+                    String savedName = ScriptStorage.save(prompt, result.script(), result.fullMessage(), null);
                     StructureBuilder.build(world, origin, result.script());
                     source.sendSuccess(() -> Component.literal("Build completed (saved as " + savedName + ")"), false);
                 } catch (Exception e) {
@@ -136,11 +150,9 @@ public final class ModCommandRegistry {
             ctx.getSource().sendFailure(Component.literal("No saved script: " + name));
             return 0;
         }
-        StructureBuilder.VbsScript script;
-        try {
-            script = StructureBuilder.parse(entry.content);
-        } catch (Exception e) {
-            ctx.getSource().sendFailure(Component.literal("Saved script invalid: " + e.getMessage()));
+        StructureBuilder.VbsScript script = entry.toScript();
+        if (script == null) {
+            ctx.getSource().sendFailure(Component.literal("Saved script invalid or empty"));
             return 0;
         }
 
@@ -148,6 +160,36 @@ public final class ModCommandRegistry {
         BlockPos origin = new BlockPos(x, y, z);
         StructureBuilder.build(world, origin, script);
         ctx.getSource().sendSuccess(() -> Component.literal("Built saved script: " + name), false);
+        return 1;
+    }
+
+    private static int listPrompts(CommandSourceStack source) {
+        var prompts = ModConfig.promptMap();
+        if (prompts.isEmpty()) {
+            source.sendFailure(Component.literal("No prompts configured"));
+            return 0;
+        }
+        String current = ModConfig.activePromptName();
+        source.sendSuccess(() -> Component.literal("Available prompts (current: " + current + "):"), false);
+        prompts.keySet().forEach(name -> source.sendSuccess(
+                () -> Component.literal((name.equals(current) ? "* " : "  ") + name),
+                false));
+        return prompts.size();
+    }
+
+    private static int setPrompt(CommandSourceStack source, String name) {
+        boolean ok = ModConfig.setActivePrompt(name, true);
+        if (!ok) {
+            source.sendFailure(Component.literal("Prompt not found: " + name));
+            return 0;
+        }
+        source.sendSuccess(() -> Component.literal("Active prompt set to: " + name), false);
+        return 1;
+    }
+
+    private static int showCurrentPrompt(CommandSourceStack source) {
+        String current = ModConfig.activePromptName();
+        source.sendSuccess(() -> Component.literal("Current prompt: " + current), false);
         return 1;
     }
 }
