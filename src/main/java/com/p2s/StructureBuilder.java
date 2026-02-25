@@ -14,8 +14,10 @@ import net.minecraft.world.level.block.state.properties.DirectionProperty;
 import net.minecraft.world.level.block.state.properties.Property;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -31,6 +33,14 @@ public final class StructureBuilder {
             return GSON.fromJson(json, VbsScript.class);
         } catch (JsonSyntaxException e) {
             throw new IllegalArgumentException("无法解析 VBS JSON", e);
+        }
+    }
+
+    public static VbsScriptV2 parseV2(String json) {
+        try {
+            return GSON.fromJson(json, VbsScriptV2.class);
+        } catch (JsonSyntaxException e) {
+            throw new IllegalArgumentException("无法解析 VBS V2 JSON", e);
         }
     }
 
@@ -60,6 +70,120 @@ public final class StructureBuilder {
                 }
             }
         }
+    }
+
+    public static void buildV2(ServerLevel world, BlockPos origin, VbsScriptV2 script) {
+        if (script == null || script.structures == null) {
+            throw new IllegalArgumentException("结构数据为空");
+        }
+
+        P2SMod.LOGGER.info("Building V2 structure at {} with {} parts", origin, script.structures.size());
+        Map<String, BlockState> palette = resolvePalette(script.palette);
+        BlockPos.MutableBlockPos mutable = new BlockPos.MutableBlockPos();
+        Set<String> missingPaletteKeys = new HashSet<>();
+
+        List<StructurePart> sorted = new ArrayList<>(script.structures);
+        sorted.sort(Comparator.comparingInt(part -> part == null ? 0 : part.priority));
+
+        for (StructurePart part : sorted) {
+            if (part == null || part.actions == null) {
+                continue;
+            }
+            for (VbsAction action : part.actions) {
+                if (action == null || action.type == null) {
+                    continue;
+                }
+                switch (action.type.toLowerCase()) {
+                    case "fill" -> handleFill(world, origin, palette, missingPaletteKeys, mutable, action);
+                    case "frame" -> handleFrame(world, origin, palette, missingPaletteKeys, mutable, action);
+                    case "set" -> handleSet(world, origin, palette, missingPaletteKeys, mutable, action);
+                    default -> P2SMod.LOGGER.warn("未知动作类型: {}", action.type);
+                }
+            }
+        }
+    }
+
+    public static VbsScriptV2 mergeScripts(VbsScriptV2 base, VbsScriptV2 delta) {
+        if (base == null) {
+            return delta;
+        }
+        if (delta == null) {
+            return base;
+        }
+
+        VbsScriptV2 merged = new VbsScriptV2();
+
+        if (base.palette != null) {
+            merged.palette.putAll(base.palette);
+        }
+        if (delta.palette != null) {
+            merged.palette.putAll(delta.palette);
+        }
+
+        Map<String, StructurePart> partMap = new LinkedHashMap<>();
+        if (base.structures != null) {
+            for (StructurePart part : base.structures) {
+                if (part != null && part.name != null) {
+                    partMap.put(part.name, part);
+                }
+            }
+        }
+        if (delta.structures != null) {
+            for (StructurePart part : delta.structures) {
+                if (part != null && part.name != null) {
+                    partMap.put(part.name, part);
+                }
+            }
+        }
+        merged.structures = new ArrayList<>(partMap.values());
+        return merged;
+    }
+
+    public static VbsScriptV2 fromV1(VbsScript v1) {
+        if (v1 == null) {
+            return null;
+        }
+        VbsScriptV2 v2 = new VbsScriptV2();
+        if (v1.palette != null) {
+            v2.palette.putAll(v1.palette);
+        }
+        if (v1.structure != null) {
+            for (int i = 0; i < v1.structure.size(); i++) {
+                VbsLayer layer = v1.structure.get(i);
+                if (layer == null) {
+                    continue;
+                }
+                StructurePart part = new StructurePart();
+                part.name = "layer_" + i;
+                part.priority = i * 10;
+                part.actions = layer.actions;
+                v2.structures.add(part);
+            }
+        }
+        return v2;
+    }
+
+    public static VbsScript toV1(VbsScriptV2 v2) {
+        if (v2 == null) {
+            return null;
+        }
+        VbsScript v1 = new VbsScript();
+        if (v2.palette != null) {
+            v1.palette.putAll(v2.palette);
+        }
+        if (v2.structures != null) {
+            List<StructurePart> parts = new ArrayList<>(v2.structures);
+            parts.sort(Comparator.comparingInt(part -> part == null ? 0 : part.priority));
+            for (StructurePart part : parts) {
+                if (part == null) {
+                    continue;
+                }
+                VbsLayer layer = new VbsLayer();
+                layer.actions = part.actions;
+                v1.structure.add(layer);
+            }
+        }
+        return v1;
     }
 
     private static Map<String, BlockState> resolvePalette(Map<String, String> paletteDef) {
@@ -253,6 +377,17 @@ public final class StructureBuilder {
     public static class VbsScript {
         public Map<String, String> palette = new HashMap<>();
         public List<VbsLayer> structure = new ArrayList<>();
+    }
+
+    public static class VbsScriptV2 {
+        public Map<String, String> palette = new HashMap<>();
+        public List<StructurePart> structures = new ArrayList<>();
+    }
+
+    public static class StructurePart {
+        public String name;
+        public int priority = 0;
+        public List<VbsAction> actions = new ArrayList<>();
     }
 
     public static class VbsLayer {

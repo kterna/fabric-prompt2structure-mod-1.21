@@ -1,5 +1,6 @@
 package com.p2s;
 
+import com.google.gson.JsonObject;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
@@ -9,9 +10,14 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.SharedSuggestionProvider;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Vec3i;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+
+import java.util.ArrayList;
+import java.util.List;
 
 public final class ModCommandRegistry {
     private ModCommandRegistry() {
@@ -26,6 +32,55 @@ public final class ModCommandRegistry {
                                     .then(Commands.argument("z", IntegerArgumentType.integer())
                                             .then(Commands.argument("prompt", StringArgumentType.greedyString())
                                                     .executes(ModCommandRegistry::runCommand)))));
+            p2sCommand.then(Commands.literal("select")
+                    .then(Commands.literal("pos1")
+                            .then(Commands.argument("x", IntegerArgumentType.integer())
+                                    .then(Commands.argument("y", IntegerArgumentType.integer())
+                                            .then(Commands.argument("z", IntegerArgumentType.integer())
+                                                    .executes(ModCommandRegistry::selectPos1)))))
+                    .then(Commands.literal("pos2")
+                            .then(Commands.argument("x", IntegerArgumentType.integer())
+                                    .then(Commands.argument("y", IntegerArgumentType.integer())
+                                            .then(Commands.argument("z", IntegerArgumentType.integer())
+                                                    .executes(ModCommandRegistry::selectPos2)))))
+                    .then(Commands.literal("clear").executes(ModCommandRegistry::selectClear))
+                    .then(Commands.literal("show").executes(ModCommandRegistry::selectShow)));
+
+            p2sCommand.then(Commands.literal("session")
+                    .then(Commands.literal("start").executes(ctx -> {
+                        SessionManager.startSession(ctx.getSource().getPlayerOrException());
+                        return 1;
+                    }))
+                    .then(Commands.literal("end").executes(ctx -> {
+                        SessionManager.endSession(ctx.getSource().getPlayerOrException());
+                        return 1;
+                    }))
+                    .then(Commands.literal("undo").executes(ctx -> {
+                        SessionManager.undo(ctx.getSource().getPlayerOrException());
+                        return 1;
+                    }))
+                    .then(Commands.literal("save")
+                            .then(Commands.argument("name", StringArgumentType.word())
+                                    .executes(ctx -> {
+                                        SessionManager.save(ctx.getSource().getPlayerOrException(), StringArgumentType.getString(ctx, "name"));
+                                        return 1;
+                                    }))
+                            .executes(ctx -> {
+                                SessionManager.save(ctx.getSource().getPlayerOrException(), null);
+                                return 1;
+                            }))
+            );
+
+            p2sCommand.then(Commands.literal("chat")
+                    .then(Commands.argument("message", StringArgumentType.greedyString())
+                            .executes(ctx -> {
+                                SessionManager.handleChatMessage(ctx.getSource().getPlayerOrException(), StringArgumentType.getString(ctx, "message"));
+                                return 1;
+                            })));
+
+            p2sCommand.then(Commands.literal("gen")
+                    .then(Commands.argument("prompt", StringArgumentType.greedyString())
+                            .executes(ctx -> generateWithSelection(ctx.getSource(), StringArgumentType.getString(ctx, "prompt")))));
             dispatcher.register(p2sCommand);
 
             dispatcher.register(
@@ -103,8 +158,12 @@ public final class ModCommandRegistry {
             MinecraftServer server = source.getServer();
             server.execute(() -> {
                 try {
-                    String savedName = ScriptStorage.save(prompt, result.script(), result.fullMessage(), null);
-                    StructureBuilder.build(world, origin, result.script());
+                    if (result.script() == null) {
+                        source.sendFailure(Component.literal("AI response did not include a structure"));
+                        return;
+                    }
+                    String savedName = ScriptStorage.saveV2(prompt, result.script(), result.fullMessage(), null);
+                    StructureBuilder.buildV2(world, origin, result.script());
                     source.sendSuccess(() -> Component.literal("Build completed (saved as " + savedName + ")"), false);
                 } catch (Exception e) {
                     source.sendFailure(Component.literal("Build failed: " + e.getMessage()));
@@ -150,7 +209,7 @@ public final class ModCommandRegistry {
             ctx.getSource().sendFailure(Component.literal("No saved script: " + name));
             return 0;
         }
-        StructureBuilder.VbsScript script = entry.toScript();
+        StructureBuilder.VbsScriptV2 script = entry.toScriptV2();
         if (script == null) {
             ctx.getSource().sendFailure(Component.literal("Saved script invalid or empty"));
             return 0;
@@ -158,8 +217,108 @@ public final class ModCommandRegistry {
 
         ServerLevel world = ctx.getSource().getLevel();
         BlockPos origin = new BlockPos(x, y, z);
-        StructureBuilder.build(world, origin, script);
+        StructureBuilder.buildV2(world, origin, script);
         ctx.getSource().sendSuccess(() -> Component.literal("Built saved script: " + name), false);
+        return 1;
+    }
+
+    private static int selectPos1(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = context.getSource().getPlayerOrException();
+        int x = IntegerArgumentType.getInteger(context, "x");
+        int y = IntegerArgumentType.getInteger(context, "y");
+        int z = IntegerArgumentType.getInteger(context, "z");
+        SelectionManager.setPos1(player, new BlockPos(x, y, z));
+        context.getSource().sendSuccess(() -> Component.literal("Pos1 set: " + x + "," + y + "," + z), false);
+        return 1;
+    }
+
+    private static int selectPos2(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = context.getSource().getPlayerOrException();
+        int x = IntegerArgumentType.getInteger(context, "x");
+        int y = IntegerArgumentType.getInteger(context, "y");
+        int z = IntegerArgumentType.getInteger(context, "z");
+        SelectionManager.setPos2(player, new BlockPos(x, y, z));
+        context.getSource().sendSuccess(() -> Component.literal("Pos2 set: " + x + "," + y + "," + z), false);
+        return 1;
+    }
+
+    private static int selectClear(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = context.getSource().getPlayerOrException();
+        SelectionManager.clear(player);
+        context.getSource().sendSuccess(() -> Component.literal("Selection cleared"), false);
+        return 1;
+    }
+
+    private static int selectShow(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer player = context.getSource().getPlayerOrException();
+        SelectionManager.Selection sel = SelectionManager.get(player.getUUID());
+        if (sel == null || (!sel.hasPos1() && !sel.hasPos2())) {
+            context.getSource().sendSuccess(() -> Component.literal("No selection"), false);
+            return 0;
+        }
+        String p1 = sel.pos1() == null ? "-" : sel.pos1().getX() + "," + sel.pos1().getY() + "," + sel.pos1().getZ();
+        String p2 = sel.pos2() == null ? "-" : sel.pos2().getX() + "," + sel.pos2().getY() + "," + sel.pos2().getZ();
+        context.getSource().sendSuccess(() -> Component.literal("Pos1: " + p1), false);
+        context.getSource().sendSuccess(() -> Component.literal("Pos2: " + p2), false);
+        if (sel.isComplete()) {
+            Vec3i size = sel.size();
+            context.getSource().sendSuccess(() -> Component.literal("Size: " + size.getX() + "x" + size.getY() + "x" + size.getZ()), false);
+        }
+        return 1;
+    }
+
+    private static int generateWithSelection(CommandSourceStack source, String prompt) throws CommandSyntaxException {
+        ServerPlayer player = source.getPlayerOrException();
+        SelectionManager.Selection sel = SelectionManager.get(player.getUUID());
+        BlockPos origin = player.blockPosition();
+        Vec3i size = null;
+        if (sel != null && sel.isComplete()) {
+            origin = sel.min();
+            size = sel.size();
+        }
+        final BlockPos originFinal = origin;
+        String systemPrompt = ModConfig.currentSystemPrompt();
+        if (size != null) {
+            systemPrompt = systemPrompt + "\n\n" + SessionManager.buildAreaConstraint(size);
+        }
+
+        List<JsonObject> messages = new ArrayList<>();
+        JsonObject systemMsg = new JsonObject();
+        systemMsg.addProperty("role", "system");
+        systemMsg.addProperty("content", systemPrompt);
+        messages.add(systemMsg);
+        JsonObject userMsg = new JsonObject();
+        userMsg.addProperty("role", "user");
+        userMsg.addProperty("content", prompt);
+        messages.add(userMsg);
+
+        source.sendSuccess(() -> Component.literal("Requesting structure from AI..."), false);
+
+        LLMService.requestWithHistory(messages).thenAccept(result -> {
+            MinecraftServer server = source.getServer();
+            server.execute(() -> {
+                if (result.script() == null) {
+                    source.sendFailure(Component.literal("AI response did not include a structure"));
+                    return;
+                }
+                try {
+                    String savedName = ScriptStorage.saveV2(prompt, result.script(), result.rawAssistantMessage().toString(), null);
+                    StructureBuilder.buildV2(source.getLevel(), originFinal, result.script());
+                    source.sendSuccess(() -> Component.literal("Build completed (saved as " + savedName + ")"), false);
+                } catch (Exception e) {
+                    source.sendFailure(Component.literal("Build failed: " + e.getMessage()));
+                    P2SMod.LOGGER.error("Build failed", e);
+                }
+            });
+        }).exceptionally(ex -> {
+            MinecraftServer server = source.getServer();
+            server.execute(() -> {
+                source.sendFailure(Component.literal("Request failed: " + ex.getMessage()));
+                P2SMod.LOGGER.error("LLM generation failed", ex);
+            });
+            return null;
+        });
+
         return 1;
     }
 

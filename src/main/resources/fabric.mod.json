@@ -13,14 +13,18 @@
 	},
 	"license": "CC0-1.0",
 	"icon": "assets/prompt2structure/icon.png",
-	"environment": "server",
+	"environment": "*",
 	"entrypoints": {
 		"main": [
 			"com.p2s.P2SMod"
+		],
+		"client": [
+			"com.p2s.P2SModClient"
 		]
 	},
 	"mixins": [
-		"p2s.mixins.json"
+		"p2s.mixins.json",
+		"p2s.client.mixins.json"
 	],
 	"depends": {
 		"fabricloader": ">=0.15.11",

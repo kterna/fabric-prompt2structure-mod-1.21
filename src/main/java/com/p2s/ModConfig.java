@@ -20,8 +20,9 @@ public final class ModConfig {
     private static final String DEFAULT_API_URL = "http://localhost:8000/v1/chat/completions";
     private static final String DEFAULT_MODEL = "gpt-4o-mini";
     private static final int DEFAULT_TIMEOUT_SECONDS = 30;
+    private static final boolean DEFAULT_USE_TOOL_CALL = true;
     private static final String DEFAULT_PROMPT_NAME = "default";
-    public static final String DEFAULT_SYSTEM_PROMPT = """
+    public static final String DEFAULT_SYSTEM_PROMPT_V1 = """
             You are a Minecraft Architect. 
             Target: Generate a structure based on user prompt.
             Output Format: JSON ONLY. No markdown, no comments.
@@ -43,10 +44,40 @@ public final class ModConfig {
             - Optimize: Use "fill" and "frame" for large areas to save tokens.
             """;
 
+    public static final String DEFAULT_SYSTEM_PROMPT = """
+            You are a Minecraft Architect. You build structures by calling the apply_structure tool.
+
+            ## Tool: apply_structure
+            - palette: Map short names to minecraft:block_id
+            - structures: Array of named parts, each with a priority and actions
+
+            ## Priority Convention
+            - 0: foundation/clearing
+            - 10: main structure (walls, floors)
+            - 20: openings (windows, doors — overwrites walls)
+            - 30: roof/ceiling
+            - 40: interior/decoration
+            - 50: final touches
+
+            ## Actions
+            - "fill": Solid cuboid from [x,y,z] to [x,y,z]
+            - "frame": Hollow cuboid (faces only)
+            - "set": Individual blocks at [[x,y,z], ...]
+            - Optional "facing": "north|south|east|west|up|down"
+
+            ## Rules
+            - Coordinates relative to (0,0,0)
+            - Use standard Minecraft Java Edition block IDs
+            - Always split structure into logical named parts with appropriate priorities
+            - When modifying an existing structure, only return the changed parts (same name = replace that part)
+            - You may reply with just text (no tool call) if you need to ask the user a question
+            """;
+
     public static volatile String API_URL;
     public static volatile String API_KEY;
     public static volatile String MODEL;
     public static volatile int HTTP_TIMEOUT_SECONDS;
+    public static volatile boolean USE_TOOL_CALL;
     public static volatile Map<String, String> PROMPTS;
     public static volatile String ACTIVE_PROMPT_NAME;
 
@@ -63,6 +94,7 @@ public final class ModConfig {
         defaults.apiKey = "replace-with-api-key";
         defaults.model = DEFAULT_MODEL;
         defaults.httpTimeoutSeconds = DEFAULT_TIMEOUT_SECONDS;
+        defaults.useToolCall = DEFAULT_USE_TOOL_CALL;
         defaults.prompts = defaultPrompts();
         defaults.activePrompt = DEFAULT_PROMPT_NAME;
 
@@ -111,6 +143,24 @@ public final class ModConfig {
             }
         }
         if (configValue != null && configValue > 0) {
+            return configValue;
+        }
+        return defaultValue;
+    }
+
+    private static boolean pickEnvOrConfigBool(String envKey, Boolean configValue, boolean defaultValue) {
+        String env = System.getenv(envKey);
+        if (env != null && !env.isBlank()) {
+            String val = env.trim().toLowerCase();
+            if ("true".equals(val) || "1".equals(val) || "yes".equals(val)) {
+                return true;
+            }
+            if ("false".equals(val) || "0".equals(val) || "no".equals(val)) {
+                return false;
+            }
+            P2SMod.LOGGER.warn("环境变量 {} 不是有效布尔值，将使用配置或默认值", envKey);
+        }
+        if (configValue != null) {
             return configValue;
         }
         return defaultValue;
@@ -197,6 +247,7 @@ public final class ModConfig {
         API_KEY = pickEnvOrConfig("P2S_API_KEY", file.apiKey, "replace-with-api-key");
         MODEL = pickEnvOrConfig("P2S_MODEL", file.model, DEFAULT_MODEL);
         HTTP_TIMEOUT_SECONDS = pickEnvOrConfigInt("P2S_TIMEOUT_SECONDS", file.httpTimeoutSeconds, DEFAULT_TIMEOUT_SECONDS);
+        USE_TOOL_CALL = pickEnvOrConfigBool("P2S_USE_TOOL_CALL", file.useToolCall, DEFAULT_USE_TOOL_CALL);
         PROMPTS = new LinkedHashMap<>(file.prompts == null ? defaultPrompts() : file.prompts);
         ensureDefaultPromptEntry(PROMPTS);
         ACTIVE_PROMPT_NAME = pickPromptName("P2S_PROMPT", file.activePrompt, PROMPTS);
@@ -207,6 +258,7 @@ public final class ModConfig {
         String apiKey;
         String model;
         Integer httpTimeoutSeconds;
+        Boolean useToolCall;
         Map<String, String> prompts;
         String activePrompt;
     }
@@ -243,6 +295,7 @@ public final class ModConfig {
     private static Map<String, String> defaultPrompts() {
         Map<String, String> defaults = new LinkedHashMap<>();
         defaults.put(DEFAULT_PROMPT_NAME, DEFAULT_SYSTEM_PROMPT);
+        defaults.put("legacy_v1", DEFAULT_SYSTEM_PROMPT_V1);
         defaults.put("cozy_cabin", DEFAULT_SYSTEM_PROMPT + """
 
 Style preset: Cozy wooden cabin. Keep footprint <= 12x12, height <= 12. Palette: spruce_log frame, oak_planks walls, spruce_stairs + spruce_slab roof, glass_pane windows, cobblestone/chiseled_stone_bricks chimney, spruce_door. Roof pitched (slope ~3:1), 1-block foundation, windows 2x2 with flower_pots, lanterns at entry. Interior must include: bed, crafting_table, furnace, chest. Add campfire on chimney for smoke.""");

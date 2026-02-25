@@ -1,5 +1,6 @@
 package com.p2s;
 
+import com.p2s.network.P2SNetworkPayloads;
 import net.fabricmc.api.ModInitializer;
 
 import org.slf4j.Logger;
@@ -15,8 +16,10 @@ public class P2SMod implements ModInitializer {
 
 	@Override
 	public void onInitialize() {
+		P2SNetworkPayloads.register();
 		ModCommandRegistry.register();
+		ServerNetworkHandler.register();
 		LOGGER.info("Prompt-to-Structure module loaded. {}", ModConfig.describeConfigSource());
-		LOGGER.info("Using API URL: {}, model: {}, timeout: {}s, prompt: {}", ModConfig.API_URL, ModConfig.MODEL, ModConfig.HTTP_TIMEOUT_SECONDS, ModConfig.activePromptName());
+		LOGGER.info("Using API URL: {}, model: {}, timeout: {}s, prompt: {}, toolCall: {}", ModConfig.API_URL, ModConfig.MODEL, ModConfig.HTTP_TIMEOUT_SECONDS, ModConfig.activePromptName(), ModConfig.USE_TOOL_CALL);
 	}
 }

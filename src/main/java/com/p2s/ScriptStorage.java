@@ -28,6 +28,16 @@ public final class ScriptStorage {
     }
 
     public static synchronized String save(String prompt, StructureBuilder.VbsScript script, String fullMessage, String suggestedName) {
+        StructureBuilder.VbsScript scriptToSave = script == null ? new StructureBuilder.VbsScript() : script;
+        return saveInternal(prompt, scriptToSave, fullMessage, suggestedName);
+    }
+
+    public static synchronized String saveV2(String prompt, StructureBuilder.VbsScriptV2 script, String fullMessage, String suggestedName) {
+        StructureBuilder.VbsScriptV2 scriptToSave = script == null ? new StructureBuilder.VbsScriptV2() : script;
+        return saveInternal(prompt, scriptToSave, fullMessage, suggestedName);
+    }
+
+    private static String saveInternal(String prompt, Object script, String fullMessage, String suggestedName) {
         ensureDir();
         String name = sanitizeName(suggestedName != null ? suggestedName : generateName(prompt));
         Path file = ROOT.resolve(name + ".json");
@@ -38,9 +48,7 @@ public final class ScriptStorage {
         Entry entry = new Entry();
         entry.name = name;
         entry.prompt = prompt;
-        // Persist the parsed script as JSON tree (no escaped string)
-        StructureBuilder.VbsScript scriptToSave = script == null ? new StructureBuilder.VbsScript() : script;
-        entry.content = GSON.toJsonTree(scriptToSave);
+        entry.content = GSON.toJsonTree(script);
         entry.assistantMessage = fullMessage;
         entry.timestamp = System.currentTimeMillis();
         try {
@@ -140,6 +148,38 @@ public final class ScriptStorage {
         public String assistantMessage;
         public long timestamp;
 
+        public StructureBuilder.VbsScriptV2 toScriptV2() {
+            if (content == null || content.isJsonNull()) {
+                return null;
+            }
+            try {
+                if (content.isJsonPrimitive() && content.getAsJsonPrimitive().isString()) {
+                    // legacy stored as stringified JSON
+                    StructureBuilder.VbsScript v1 = StructureBuilder.parse(content.getAsString());
+                    return StructureBuilder.fromV1(v1);
+                }
+                if (content.isJsonObject()) {
+                    var obj = content.getAsJsonObject();
+                    if (obj.has("structures")) {
+                        return GSON.fromJson(content, StructureBuilder.VbsScriptV2.class);
+                    }
+                    if (obj.has("structure")) {
+                        StructureBuilder.VbsScript v1 = GSON.fromJson(content, StructureBuilder.VbsScript.class);
+                        return StructureBuilder.fromV1(v1);
+                    }
+                }
+                StructureBuilder.VbsScriptV2 v2 = GSON.fromJson(content, StructureBuilder.VbsScriptV2.class);
+                if (v2 != null && v2.structures != null) {
+                    return v2;
+                }
+                StructureBuilder.VbsScript v1 = GSON.fromJson(content, StructureBuilder.VbsScript.class);
+                return StructureBuilder.fromV1(v1);
+            } catch (Exception e) {
+                P2SMod.LOGGER.warn("Parse stored script failed for {}: {}", name, e.getMessage());
+                return null;
+            }
+        }
+
         public StructureBuilder.VbsScript toScript() {
             if (content == null || content.isJsonNull()) {
                 return null;
@@ -148,6 +188,10 @@ public final class ScriptStorage {
                 if (content.isJsonPrimitive() && content.getAsJsonPrimitive().isString()) {
                     // legacy stored as stringified JSON
                     return StructureBuilder.parse(content.getAsString());
+                }
+                if (content.isJsonObject() && content.getAsJsonObject().has("structures")) {
+                    StructureBuilder.VbsScriptV2 v2 = GSON.fromJson(content, StructureBuilder.VbsScriptV2.class);
+                    return StructureBuilder.toV1(v2);
                 }
                 return GSON.fromJson(content, StructureBuilder.VbsScript.class);
             } catch (Exception e) {

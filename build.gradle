@@ -25,6 +25,7 @@ loom {
 	mods {
 		"prompt2structure" {
 			sourceSet sourceSets.main
+			sourceSet sourceSets.client
 		}
 	}
 
