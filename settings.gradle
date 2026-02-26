@@ -1,3 +1,5 @@
+import groovy.json.JsonSlurper
+
 pluginManagement {
 	repositories {
 		maven {
@@ -7,4 +9,13 @@ pluginManagement {
 		mavenCentral()
 		gradlePluginPortal()
 	}
+}
+
+def settings = new JsonSlurper().parseText(file('settings.json').text)
+for (String version : settings.versions) {
+	include(":$version")
+
+	def proj = project(":$version")
+	proj.projectDir = file("versions/$version")
+	proj.buildFileName = "../../common.gradle"
 }

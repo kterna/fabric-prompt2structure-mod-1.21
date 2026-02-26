@@ -1,0 +1,99 @@
+apply plugin: 'fabric-loom'
+apply plugin: 'maven-publish'
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+	archivesName = "${project.archives_base_name}-mc${project.minecraft_version}"
+}
+
+repositories {
+	mavenCentral()
+}
+
+loom {
+	splitEnvironmentSourceSets()
+
+	mods {
+		"${project.mod_id}" {
+			sourceSet sourceSets.main
+			sourceSet sourceSets.client
+		}
+	}
+}
+
+def sharedSrcRoot = rootProject.file('src')
+
+sourceSets {
+	main {
+		java.srcDirs = [
+			new File(sharedSrcRoot, 'main/java'),
+			new File(project.projectDir, 'src/main/java')
+		]
+		resources.srcDirs = [
+			new File(sharedSrcRoot, 'main/resources'),
+			new File(project.projectDir, 'src/main/resources')
+		]
+	}
+	client {
+		java.srcDirs = [
+			new File(sharedSrcRoot, 'client/java'),
+			new File(project.projectDir, 'src/client/java')
+		]
+		resources.srcDirs = [
+			new File(sharedSrcRoot, 'client/resources'),
+			new File(project.projectDir, 'src/client/resources')
+		]
+	}
+}
+
+dependencies {
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+	mappings loom.officialMojangMappings()
+	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+	modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+
+	modImplementation include("com.squareup.okhttp3:okhttp:4.12.0")
+	modImplementation include("com.google.code.gson:gson:2.11.0")
+	modImplementation include("com.squareup.okio:okio:3.9.1")
+}
+
+processResources {
+	inputs.property "version", project.version
+
+	filesMatching("fabric.mod.json") {
+		expand "version": inputs.properties.version
+	}
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.release = 21
+}
+
+java {
+	withSourcesJar()
+
+	sourceCompatibility = JavaVersion.VERSION_21
+	targetCompatibility = JavaVersion.VERSION_21
+}
+
+jar {
+	inputs.property "archivesName", project.base.archivesName
+
+	from(rootProject.file("LICENSE")) {
+		rename { "${it}_${inputs.properties.archivesName}" }
+	}
+}
+
+publishing {
+	publications {
+		create("mavenJava", MavenPublication) {
+			artifactId = project.archives_base_name
+			from components.java
+		}
+	}
+
+	repositories {
+	}
+}
