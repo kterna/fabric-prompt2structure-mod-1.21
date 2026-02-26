@@ -11,19 +11,21 @@ public final class ClientSessionState {
     private static int partCount = 0;
     private static int totalBlocks = 0;
     private static String partsSummary = "";
+    private static String structureSummary = "";
     private static String status = "";
     private static final List<ChatMessage> messages = new ArrayList<>();
 
     private ClientSessionState() {
     }
 
-    public static void onSessionSync(boolean activeFlag, String id, int turns, int parts, int blocks, String summary) {
+    public static void onSessionSync(boolean activeFlag, String id, int turns, int parts, int blocks, String summary, String structure) {
         active = activeFlag;
         sessionId = id == null ? "" : id;
         turnCount = turns;
         partCount = parts;
         totalBlocks = blocks;
         partsSummary = summary == null ? "" : summary;
+        structureSummary = structure == null ? "" : structure;
         if (!activeFlag) {
             status = "";
             messages.clear();
@@ -98,6 +100,10 @@ public final class ClientSessionState {
 
     public static String getPartsSummary() {
         return partsSummary;
+    }
+
+    public static String getStructureSummary() {
+        return structureSummary;
     }
 
     public static String getStatus() {

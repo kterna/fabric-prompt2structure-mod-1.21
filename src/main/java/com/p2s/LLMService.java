@@ -13,6 +13,8 @@ import okhttp3.Response;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -57,7 +59,10 @@ public final class LLMService {
     public static CompletableFuture<SessionResult> requestWithHistory(java.util.List<JsonObject> messages) {
         return CompletableFuture.supplyAsync(() -> {
             String bodyJson = buildBodyForMessages(messages, ModConfig.USE_TOOL_CALL, false);
+            int messageCount = messages == null ? 0 : messages.size();
+            int payloadBytes = bodyJson == null ? 0 : bodyJson.length();
             P2SMod.LOGGER.info("LLM session request -> url={}, model={}, timeout={}s", ModConfig.API_URL, ModConfig.MODEL, ModConfig.HTTP_TIMEOUT_SECONDS);
+            P2SMod.LOGGER.info("LLM session payload -> messages={}, bytes={}, toolCall={}", messageCount, payloadBytes, ModConfig.USE_TOOL_CALL);
             Request request = new Request.Builder()
                     .url(ModConfig.API_URL)
                     .post(RequestBody.create(bodyJson, JSON))
@@ -252,8 +257,21 @@ public final class LLMService {
 
         tool.add("function", function);
 
+        JsonObject getTool = new JsonObject();
+        getTool.addProperty("type", "function");
+        JsonObject getFunction = new JsonObject();
+        getFunction.addProperty("name", "get_current_structure");
+        getFunction.addProperty("description", "Read the current structure JSON for the active session.");
+        JsonObject getParameters = new JsonObject();
+        getParameters.addProperty("type", "object");
+        getParameters.add("properties", new JsonObject());
+        getParameters.addProperty("additionalProperties", false);
+        getFunction.add("parameters", getParameters);
+        getTool.add("function", getFunction);
+
         JsonArray tools = new JsonArray();
         tools.add(tool);
+        tools.add(getTool);
         return tools;
     }
 
@@ -308,26 +326,69 @@ public final class LLMService {
 
         String textContent = message.has("content") && !message.get("content").isJsonNull()
                 ? message.get("content").getAsString() : "";
+        int textLen = textContent == null ? 0 : textContent.length();
 
-        ToolCallParseResult toolResult = parseToolCall(message);
-        if (toolResult != null && toolResult.script != null) {
-            return new SessionResult(textContent, toolResult.script, message, toolResult.toolCallId);
+        List<ToolCall> toolCalls = extractToolCalls(message);
+        if (!toolCalls.isEmpty()) {
+            P2SMod.LOGGER.info("LLM session parse -> toolCalls={}, textLen={}, hasScript=false", toolCalls.size(), textLen);
+            return new SessionResult(textContent, null, message, toolCalls);
         }
         if (!ModConfig.USE_TOOL_CALL && textContent != null && !textContent.isBlank()) {
             try {
                 String content = cleanContent(textContent);
                 StructureBuilder.VbsScriptV2 script = parseScriptFromContent(content);
-                return new SessionResult(textContent, script, message, null);
+                P2SMod.LOGGER.info("LLM session parse -> toolCalls=0, textLen={}, hasScript=true (json content)", textLen);
+                return new SessionResult(textContent, script, message, toolCalls);
             } catch (Exception ignored) {
                 // fall through to text-only response
             }
         }
-        return new SessionResult(textContent, null, message, null);
+        P2SMod.LOGGER.info("LLM session parse -> toolCalls=0, textLen={}, hasScript=false", textLen);
+        return new SessionResult(textContent, null, message, toolCalls);
     }
 
     private static StructureBuilder.VbsScriptV2 parseScriptFromContent(String content) {
         JsonElement elem = JsonParser.parseString(content);
         return parseScriptFromJson(elem);
+    }
+
+    private static List<ToolCall> extractToolCalls(JsonObject message) {
+        List<ToolCall> result = new ArrayList<>();
+        if (message == null) {
+            return result;
+        }
+
+        if (message.has("tool_calls") && message.get("tool_calls").isJsonArray()) {
+            JsonArray toolCalls = message.getAsJsonArray("tool_calls");
+            for (JsonElement elem : toolCalls) {
+                if (!elem.isJsonObject()) {
+                    continue;
+                }
+                JsonObject call = elem.getAsJsonObject();
+                if (!call.has("function")) {
+                    continue;
+                }
+                JsonObject fn = call.getAsJsonObject("function");
+                if (fn == null || !fn.has("name")) {
+                    continue;
+                }
+                String name = fn.get("name").getAsString();
+                String callId = call.has("id") ? call.get("id").getAsString() : "";
+                JsonElement argsElem = fn.get("arguments");
+                result.add(new ToolCall(callId, name, argsElem));
+            }
+        }
+
+        if (result.isEmpty() && message.has("function_call") && message.get("function_call").isJsonObject()) {
+            JsonObject fn = message.getAsJsonObject("function_call");
+            if (fn.has("name")) {
+                String name = fn.get("name").getAsString();
+                JsonElement argsElem = fn.get("arguments");
+                result.add(new ToolCall("", name, argsElem));
+            }
+        }
+
+        return result;
     }
 
     private static StructureBuilder.VbsScriptV2 parseScriptFromJson(JsonElement elem) {
@@ -397,7 +458,7 @@ public final class LLMService {
         return null;
     }
 
-    private static StructureBuilder.VbsScriptV2 parseToolArguments(JsonElement argsElem) {
+    static StructureBuilder.VbsScriptV2 parseToolArguments(JsonElement argsElem) {
         if (argsElem == null || argsElem.isJsonNull()) {
             return null;
         }
@@ -496,7 +557,10 @@ public final class LLMService {
             String textContent,
             StructureBuilder.VbsScriptV2 script,
             JsonObject rawAssistantMessage,
-            String toolCallId
+            List<ToolCall> toolCalls
     ) {
+    }
+
+    public record ToolCall(String id, String name, JsonElement arguments) {
     }
 }

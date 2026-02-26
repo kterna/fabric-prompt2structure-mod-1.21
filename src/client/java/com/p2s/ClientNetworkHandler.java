@@ -24,7 +24,8 @@ public final class ClientNetworkHandler {
                         payload.turnCount(),
                         payload.partCount(),
                         payload.totalBlocks(),
-                        payload.partsSummary()
+                        payload.partsSummary(),
+                        payload.structureSummary()
                 )));
 
         ClientPlayNetworking.registerGlobalReceiver(S2CBuildProgressPayload.TYPE, (payload, context) ->

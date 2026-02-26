@@ -2,30 +2,62 @@ package com.p2s;
 
 import com.p2s.network.C2SChatMessagePayload;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
+import net.minecraft.util.FormattedCharSequence;
 import org.lwjgl.glfw.GLFW;
 
 import java.util.List;
 
 public class P2SChatScreen extends Screen {
+    private static final int PADDING = 8;
+    private static final int INPUT_HEIGHT = 20;
+    private static final int BUTTON_WIDTH = 22;
+    private static final int LINE_SPACING = 2;
+    private static final int PANEL_MIN_WIDTH = 240;
+
     private EditBox input;
+    private Button sendButton;
+    private double scrollOffset;
 
     public P2SChatScreen() {
-        super(Component.literal("P2S Chat"));
+        super(Component.literal("P2S Session"));
     }
 
     @Override
     protected void init() {
-        int padding = 10;
-        int inputHeight = 20;
-        int inputY = this.height - inputHeight - padding;
-        input = new EditBox(this.font, padding, inputY, this.width - padding * 2, inputHeight, Component.literal(""));
+        super.init();
+        createWidgets();
+    }
+
+    @Override
+    public void resize(Minecraft client, int width, int height) {
+        super.resize(client, width, height);
+        createWidgets();
+        clampScroll();
+    }
+
+    private void createWidgets() {
+        clearWidgets();
+
+        int panelWidth = getPanelWidth();
+        int panelX = getPanelX(panelWidth);
+        int inputY = getInputY();
+        int inputWidth = panelWidth - PADDING * 2 - BUTTON_WIDTH - 4;
+
+        input = new EditBox(this.font, panelX + PADDING, inputY, inputWidth, INPUT_HEIGHT, Component.literal(""));
         input.setMaxLength(512);
         input.setFocused(true);
         addRenderableWidget(input);
+
+        sendButton = Button.builder(Component.literal(">"), btn -> sendMessage())
+                .bounds(panelX + PADDING + inputWidth + 4, inputY, BUTTON_WIDTH, INPUT_HEIGHT)
+                .build();
+        addRenderableWidget(sendButton);
     }
 
     @Override
@@ -61,40 +93,214 @@ public class P2SChatScreen extends Screen {
     }
 
     @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+        int maxScroll = getMaxScroll();
+        if (maxScroll <= 0) {
+            return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
+        }
+        int step = (this.font.lineHeight + LINE_SPACING) * 3;
+        scrollOffset = clamp(scrollOffset + verticalAmount * step, 0, maxScroll);
+        return true;
+    }
+
+    @Override
     public void render(GuiGraphics gfx, int mouseX, int mouseY, float delta) {
-        renderBackground(gfx, mouseX, mouseY, delta);
+        int panelWidth = getPanelWidth();
+        int panelX = getPanelX(panelWidth);
+        int panelLeft = panelX;
+        int panelRight = this.width;
+        int panelTop = 0;
+        int panelBottom = this.height;
 
-        int padding = 10;
-        int panelTop = padding;
-        int panelBottom = this.height - padding * 2 - 20;
-        int panelHeight = panelBottom - panelTop;
-        int panelWidth = this.width - padding * 2;
+        gfx.fill(panelLeft, panelTop, panelRight, panelBottom, 0xAA000000);
 
-        gfx.fill(padding - 2, panelTop - 2, padding + panelWidth + 2, panelTop + panelHeight + 2, 0x66000000);
-
-        List<ClientSessionState.ChatMessage> messages = ClientSessionState.getMessages();
-        int lineHeight = this.font.lineHeight + 2;
-        int maxLines = panelHeight / lineHeight;
-        int start = Math.max(0, messages.size() - maxLines);
-        int y = panelTop;
-
-        for (int i = start; i < messages.size(); i++) {
-            ClientSessionState.ChatMessage msg = messages.get(i);
-            String line = msg.role() + ": " + msg.text();
-            gfx.drawString(this.font, line, padding, y, 0xFFFFFF, true);
-            y += lineHeight;
-        }
-
-        if (input != null) {
-            input.render(gfx, mouseX, mouseY, delta);
-        }
-
-        String status = ClientSessionState.getStatus();
-        if (status != null && !status.isBlank()) {
-            gfx.drawString(this.font, "Status: " + status, padding, this.height - padding - 32, 0xAAAAAA, true);
-        }
+        drawHeader(gfx, panelX, panelWidth);
+        drawMessages(gfx, panelX, panelWidth);
+        drawStatus(gfx, panelX);
 
         super.render(gfx, mouseX, mouseY, delta);
+    }
+
+    @Override
+    public void renderBackground(GuiGraphics gfx, int mouseX, int mouseY, float delta) {
+        // No full-screen dimming. The chat panel draws its own background.
+    }
+
+    private void drawHeader(GuiGraphics gfx, int panelX, int panelWidth) {
+        int y = PADDING;
+        gfx.drawString(this.font, "P2S Session", panelX + PADDING, y, 0xFFFFFF, true);
+        y += this.font.lineHeight + 2;
+
+        if (ClientSessionState.isActive()) {
+            String info = "Session " + ClientSessionState.getSessionId() + " | Turns " + ClientSessionState.getTurnCount();
+            gfx.drawString(this.font, info, panelX + PADDING, y, 0xAAAAAA, true);
+        } else {
+            gfx.drawString(this.font, "No active session (send a message to start)", panelX + PADDING, y, 0xAAAAAA, true);
+        }
+
+        List<FormattedCharSequence> summaryLines = getSummaryLines(panelWidth - PADDING * 2);
+        if (!summaryLines.isEmpty()) {
+            y += this.font.lineHeight + 4;
+            gfx.drawString(this.font, "Current Structure", panelX + PADDING, y, 0xAAAAAA, true);
+            y += this.font.lineHeight + 2;
+            for (FormattedCharSequence line : summaryLines) {
+                gfx.drawString(this.font, line, panelX + PADDING, y, 0xCCCCCC, true);
+                y += this.font.lineHeight + LINE_SPACING;
+            }
+        }
+    }
+
+    private void drawStatus(GuiGraphics gfx, int panelX) {
+        String status = ClientSessionState.getStatus();
+        if (status == null || status.isBlank()) {
+            return;
+        }
+        gfx.drawString(this.font, "Status: " + status, panelX + PADDING, getStatusY(), 0xAAAAAA, true);
+    }
+
+    private void drawMessages(GuiGraphics gfx, int panelX, int panelWidth) {
+        int contentWidth = panelWidth - PADDING * 2;
+        int messageTop = getMessageTop(panelWidth);
+        int messageBottom = getMessageBottom();
+        int messageAreaHeight = Math.max(0, messageBottom - messageTop);
+
+        int totalHeight = computeContentHeight(contentWidth);
+        int maxScroll = Math.max(0, totalHeight - messageAreaHeight);
+        scrollOffset = clamp(scrollOffset, 0, maxScroll);
+
+        int y = messageBottom + (int) scrollOffset;
+        List<ClientSessionState.ChatMessage> messages = ClientSessionState.getMessages();
+
+        for (int i = messages.size() - 1; i >= 0 && y > messageTop; i--) {
+            ClientSessionState.ChatMessage msg = messages.get(i);
+            String role = msg.role();
+            String prefix = rolePrefix(role);
+            int color = roleColor(role);
+
+            List<FormattedCharSequence> lines = this.font.split(Component.literal(prefix + msg.text()), contentWidth);
+            for (int li = lines.size() - 1; li >= 0; li--) {
+                y -= this.font.lineHeight + LINE_SPACING;
+                if (y < messageTop) {
+                    return;
+                }
+                gfx.drawString(this.font, lines.get(li), panelX + PADDING, y, color, true);
+            }
+            y -= LINE_SPACING;
+        }
+    }
+
+    private int computeContentHeight(int contentWidth) {
+        int total = 0;
+        List<ClientSessionState.ChatMessage> messages = ClientSessionState.getMessages();
+        for (ClientSessionState.ChatMessage msg : messages) {
+            String line = rolePrefix(msg.role()) + msg.text();
+            int lines = this.font.split(Component.literal(line), contentWidth).size();
+            total += lines * (this.font.lineHeight + LINE_SPACING);
+            total += LINE_SPACING;
+        }
+        return total;
+    }
+
+    private int getMaxScroll() {
+        int panelWidth = getPanelWidth();
+        int contentWidth = panelWidth - PADDING * 2;
+        int messageAreaHeight = Math.max(0, getMessageBottom() - getMessageTop(panelWidth));
+        int totalHeight = computeContentHeight(contentWidth);
+        return Math.max(0, totalHeight - messageAreaHeight);
+    }
+
+    private void clampScroll() {
+        scrollOffset = clamp(scrollOffset, 0, getMaxScroll());
+    }
+
+    private int getPanelWidth() {
+        return Math.max(PANEL_MIN_WIDTH, this.width * 2 / 5);
+    }
+
+    private int getPanelX(int panelWidth) {
+        return this.width - panelWidth;
+    }
+
+    private int getHeaderHeight(int panelWidth) {
+        int base = this.font.lineHeight * 2 + 6;
+        List<FormattedCharSequence> summaryLines = getSummaryLines(panelWidth - PADDING * 2);
+        if (summaryLines.isEmpty()) {
+            return base;
+        }
+        int extra = this.font.lineHeight + 4;
+        extra += summaryLines.size() * (this.font.lineHeight + LINE_SPACING);
+        extra += LINE_SPACING;
+        return base + extra;
+    }
+
+    private int getInputY() {
+        return this.height - INPUT_HEIGHT - PADDING;
+    }
+
+    private int getStatusY() {
+        return getInputY() - this.font.lineHeight - 4;
+    }
+
+    private int getMessageTop(int panelWidth) {
+        return PADDING + getHeaderHeight(panelWidth);
+    }
+
+    private int getMessageBottom() {
+        return getStatusY() - 4;
+    }
+
+    private List<FormattedCharSequence> getSummaryLines(int contentWidth) {
+        String summary = ClientSessionState.getStructureSummary();
+        if (summary == null || summary.isBlank()) {
+            return List.of();
+        }
+        String[] lines = summary.split("\\n");
+        List<FormattedCharSequence> result = new java.util.ArrayList<>();
+        for (String line : lines) {
+            if (line == null || line.isBlank()) {
+                continue;
+            }
+            result.addAll(this.font.split(Component.literal(line), contentWidth));
+        }
+        return result;
+    }
+
+    private static int roleColor(String role) {
+        if (role == null) {
+            return 0xFFFFFF;
+        }
+        String lower = role.toLowerCase();
+        if (lower.contains("you") || lower.contains("user")) {
+            return 0xFFFFFF;
+        }
+        if (lower.contains("ai") || lower.contains("assistant")) {
+            return 0x55FF55;
+        }
+        return 0xAAAAAA;
+    }
+
+    private static String rolePrefix(String role) {
+        if (role == null) {
+            return "";
+        }
+        String lower = role.toLowerCase();
+        if (lower.contains("you") || lower.contains("user")) {
+            return "You: ";
+        }
+        if (lower.contains("ai") || lower.contains("assistant")) {
+            return "AI: ";
+        }
+        return role + ": ";
+    }
+
+    private static double clamp(double value, double min, double max) {
+        if (value < min) {
+            return min;
+        }
+        if (value > max) {
+            return max;
+        }
+        return value;
     }
 
     private void sendMessage() {
@@ -112,6 +318,7 @@ public class P2SChatScreen extends Screen {
         ClientSessionState.setStatus("thinking");
         input.setValue("");
         input.moveCursorToEnd(false);
+        scrollOffset = 0;
     }
 
     @Override

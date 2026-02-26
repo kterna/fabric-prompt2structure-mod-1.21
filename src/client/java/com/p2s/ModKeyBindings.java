@@ -29,7 +29,11 @@ public final class ModKeyBindings {
                 }
             }
             while (OPEN_CHAT.consumeClick()) {
-                client.setScreen(new P2SChatScreen());
+                if (client.screen instanceof P2SChatScreen) {
+                    client.setScreen(null);
+                } else {
+                    client.setScreen(new P2SChatScreen());
+                }
             }
         });
     }

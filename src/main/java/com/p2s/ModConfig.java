@@ -51,6 +51,14 @@ public final class ModConfig {
             - palette: Map short names to minecraft:block_id
             - structures: Array of named parts, each with a priority and actions
 
+            ## Tool: get_current_structure
+            - Read the current structure JSON for the active session
+
+            ## Tool Call Loop
+            - You may call tools multiple times in one user turn
+            - After each tool call you will receive a tool result with success/failure
+            - When you are done, reply with a user-facing message
+
             ## Priority Convention
             - 0: foundation/clearing
             - 10: main structure (walls, floors)
