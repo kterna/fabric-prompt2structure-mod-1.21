@@ -31,7 +31,7 @@
 3) 如需重复使用，`/p2sload` 指定存档名与坐标即可。
 
 ## 构建
-- 开发环境（当前版本）：`./gradlew :1.21.1:runServer`
+- 开发环境（按版本选择）：`./gradlew :1.21:runServer` 或 `./gradlew :1.21.1:runServer`
 - 发布（聚合所有已配置版本）：`./gradlew build`
 - 版本列表配置：`settings.json`
 

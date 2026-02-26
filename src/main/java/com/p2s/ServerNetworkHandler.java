@@ -14,18 +14,28 @@ public final class ServerNetworkHandler {
     public static void register() {
         ServerPlayNetworking.registerGlobalReceiver(C2SSetSelectionPayload.TYPE, (payload, context) -> {
             ServerPlayer player = context.player();
-            context.server().execute(() -> SelectionManager.handleClientSelection(player, payload.pointIndex(), payload.pos()));
+            runOnPlayerServer(player, () -> SelectionManager.handleClientSelection(player, payload.pointIndex(), payload.pos()));
         });
 
         ServerPlayNetworking.registerGlobalReceiver(C2SChatMessagePayload.TYPE, (payload, context) -> {
             ServerPlayer player = context.player();
-            context.server().execute(() -> SessionManager.handleChatMessage(player, payload.message()));
+            runOnPlayerServer(player, () -> SessionManager.handleChatMessage(player, payload.message()));
         });
 
         ServerPlayNetworking.registerGlobalReceiver(C2SSessionActionPayload.TYPE, (payload, context) -> {
             ServerPlayer player = context.player();
-            context.server().execute(() -> SessionManager.handleSessionAction(player, payload.action(), payload.payload()));
+            runOnPlayerServer(player, () -> SessionManager.handleSessionAction(player, payload.action(), payload.payload()));
         });
+    }
+
+    private static void runOnPlayerServer(ServerPlayer player, Runnable task) {
+        if (player == null || task == null) {
+            return;
+        }
+        var server = player.getServer();
+        if (server != null) {
+            server.execute(task);
+        }
     }
 
     public static void sendToClient(ServerPlayer player, CustomPacketPayload payload) {
