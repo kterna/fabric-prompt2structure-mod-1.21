@@ -3,11 +3,12 @@ package com.p2s;
 import com.p2s.network.C2SSetSelectionPayload;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
 
 public final class ClientSelectionManager {
     private static BlockPos pos1;
     private static BlockPos pos2;
-    private static boolean selectMode = false;
 
     private ClientSelectionManager() {
     }
@@ -17,12 +18,11 @@ public final class ClientSelectionManager {
         pos2 = p2;
     }
 
-    public static boolean isSelectMode() {
-        return selectMode;
-    }
-
-    public static void toggleSelectMode() {
-        selectMode = !selectMode;
+    public static boolean isSelectionToolHeld(Player player) {
+        if (player == null) {
+            return false;
+        }
+        return isSelectionTool(player.getMainHandItem()) || isSelectionTool(player.getOffhandItem());
     }
 
     public static BlockPos getPos1() {
@@ -38,17 +38,24 @@ public final class ClientSelectionManager {
     }
 
     public static void onLeftClick(BlockPos pos) {
-        if (!selectMode || pos == null) {
+        if (pos == null) {
             return;
         }
         sendC2SSetSelection(0, pos);
     }
 
     public static void onRightClick(BlockPos pos) {
-        if (!selectMode || pos == null) {
+        if (pos == null) {
             return;
         }
         sendC2SSetSelection(1, pos);
+    }
+
+    private static boolean isSelectionTool(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) {
+            return false;
+        }
+        return P2SClientConfig.isSelectionItem(stack.getItem());
     }
 
     private static void sendC2SSetSelection(int pointIndex, BlockPos pos) {

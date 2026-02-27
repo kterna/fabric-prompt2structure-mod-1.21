@@ -21,8 +21,9 @@ public final class HudOverlay {
             int y = 8;
             GuiGraphics gfx = drawContext;
 
-            boolean selectMode = ClientSelectionManager.isSelectMode();
-            gfx.drawString(client.font, Component.literal("Selection: " + (selectMode ? "ON" : "OFF")), x, y, 0xFFFFFF, true);
+            boolean canSelect = ClientSelectionManager.isSelectionToolHeld(client.player);
+            String selectionItem = P2SClientConfig.getSelectionItemId();
+            gfx.drawString(client.font, Component.literal("Selection: " + (canSelect ? "READY" : "HOLD " + selectionItem)), x, y, 0xFFFFFF, true);
             y += 10;
 
             BlockPos p1 = ClientSelectionManager.getPos1();

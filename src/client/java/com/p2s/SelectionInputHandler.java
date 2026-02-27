@@ -10,7 +10,7 @@ public final class SelectionInputHandler {
 
     public static void register() {
         AttackBlockCallback.EVENT.register((player, world, hand, pos, direction) -> {
-            if (!ClientSelectionManager.isSelectMode()) {
+            if (!ClientSelectionManager.isSelectionToolHeld(player)) {
                 return InteractionResult.PASS;
             }
             ClientSelectionManager.onLeftClick(pos);
@@ -18,7 +18,7 @@ public final class SelectionInputHandler {
         });
 
         UseBlockCallback.EVENT.register((player, world, hand, hitResult) -> {
-            if (!ClientSelectionManager.isSelectMode()) {
+            if (!ClientSelectionManager.isSelectionToolHeld(player)) {
                 return InteractionResult.PASS;
             }
             ClientSelectionManager.onRightClick(hitResult.getBlockPos());

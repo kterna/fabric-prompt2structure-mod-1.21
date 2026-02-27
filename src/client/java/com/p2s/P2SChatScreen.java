@@ -22,6 +22,7 @@ public class P2SChatScreen extends Screen {
 
     private EditBox input;
     private Button sendButton;
+    private Button configButton;
     private double scrollOffset;
 
     public P2SChatScreen() {
@@ -58,6 +59,11 @@ public class P2SChatScreen extends Screen {
                 .bounds(panelX + PADDING + inputWidth + 4, inputY, BUTTON_WIDTH, INPUT_HEIGHT)
                 .build();
         addRenderableWidget(sendButton);
+
+        configButton = Button.builder(Component.literal("Config"), btn -> this.minecraft.setScreen(new P2SConfigScreen(this)))
+                .bounds(panelX + panelWidth - PADDING - 56, PADDING, 56, INPUT_HEIGHT)
+                .build();
+        addRenderableWidget(configButton);
     }
 
     @Override

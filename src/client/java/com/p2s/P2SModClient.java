@@ -6,6 +6,7 @@ import net.fabricmc.api.ClientModInitializer;
 public class P2SModClient implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
+        P2SClientConfig.reload();
         P2SNetworkPayloads.register();
         ClientNetworkHandler.register();
         ModKeyBindings.registerTickHandler();
