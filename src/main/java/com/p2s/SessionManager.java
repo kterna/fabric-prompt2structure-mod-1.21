@@ -1,16 +1,17 @@
 package com.p2s;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import com.p2s.network.S2CChatResponsePayload;
+import com.p2s.network.S2CPatchPreviewPayload;
+import com.p2s.network.S2CSessionSyncPayload;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
-import com.p2s.network.S2CChatResponsePayload;
-import com.p2s.network.S2CSessionSyncPayload;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.level.block.Blocks;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -19,6 +20,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 public final class SessionManager {
     private static final Gson GSON = new Gson();
@@ -28,6 +31,19 @@ public final class SessionManager {
     private static final int MAX_TOOL_JSON_CHARS = 12000;
     private static final int MAX_SUMMARY_LINES = 20;
     private static final int MAX_SUMMARY_CHARS = 4000;
+    private static final int MAX_PREVIEW_SUMMARY_CHARS = 512;
+    private static final int MAX_PREVIEW_DETAIL_CHARS = 12000;
+    private static final int MAX_PREVIEW_OPERATION_LINES = 40;
+    private static final int MAX_PREVIEW_WARNING_LINES = 20;
+
+    private static final String SESSION_TOOL_CONTRACT = """
+            ## IDE Session Contract
+            - Use read_workspace_state first when you need current structure/revision/bounds.
+            - Propose all edits with propose_patch; do not directly build blocks.
+            - The user reviews a preview and confirms apply/discard.
+            - Keep patches minimal and focused on requested changes.
+            - Only call read_workspace_state/propose_patch/explain_plan in session mode.
+            """;
 
     private SessionManager() {
     }
@@ -43,13 +59,22 @@ public final class SessionManager {
         int msgLen = safeLength(message);
         boolean inFlight = session != null && session.inFlight;
         P2SMod.LOGGER.info("AgentLoop receive -> player={}, session={}, msgLen={}, inFlight={}", playerName, sessionId, msgLen, inFlight);
+
         if (session.inFlight) {
             P2SMod.LOGGER.warn("AgentLoop reject busy -> player={}, session={}", playerName, sessionId);
             sendChatResponse(player, "Busy with previous request.", false, "error");
             return;
         }
 
+        if (session.pendingPatch != null && session.runtimeState == RuntimeState.AWAITING_CONFIRM) {
+            sendChatResponse(player, "Pending patch awaiting decision. Use Apply or Discard first.", false, "awaiting_confirm");
+            sendSessionSync(player, session);
+            sendPatchPreview(player, session.pendingPatch.preview);
+            return;
+        }
+
         session.inFlight = true;
+        session.runtimeState = RuntimeState.PLANNING;
 
         JsonObject userMsg = new JsonObject();
         userMsg.addProperty("role", "user");
@@ -60,7 +85,8 @@ public final class SessionManager {
         int historyAfter = session.history == null ? 0 : session.history.size();
         P2SMod.LOGGER.info("AgentLoop history -> player={}, session={}, size {}->{}", playerName, sessionId, historyBefore, historyAfter);
 
-        sendChatResponse(player, "", false, "thinking");
+        sendChatResponse(player, "", false, "planning");
+        sendSessionSync(player, session);
 
         runAgentLoop(player, session, MAX_AGENT_LOOPS);
     }
@@ -69,22 +95,35 @@ public final class SessionManager {
         if (player == null || session == null) {
             return;
         }
+
         String playerName = player.getGameProfile().getName();
         String sessionId = session.id;
         List<JsonObject> historySnapshot = deepCopyMessages(session.history);
         int snapshotSize = historySnapshot.size();
+        session.runtimeState = RuntimeState.PLANNING;
         P2SMod.LOGGER.info("AgentLoop llm request -> player={}, session={}, snapshotSize={}, remaining={}", playerName, sessionId, snapshotSize, remaining);
         long llmStartMs = System.currentTimeMillis();
+        long timeoutSeconds = Math.max(1, ModConfig.SESSION_JOB_TIMEOUT_SECONDS);
 
-        LLMService.requestWithHistory(historySnapshot).thenAccept(result -> {
+        LLMService.requestWithHistory(historySnapshot)
+                .orTimeout(timeoutSeconds, TimeUnit.SECONDS)
+                .thenAccept(result -> {
             MinecraftServer server = player.getServer();
+            if (server == null) {
+                return;
+            }
             server.execute(() -> handleAgentResult(player, session, result, remaining, llmStartMs));
         }).exceptionally(ex -> {
             MinecraftServer server = player.getServer();
+            if (server == null) {
+                return null;
+            }
             server.execute(() -> {
                 session.inFlight = false;
+                session.runtimeState = RuntimeState.FAILED;
                 P2SMod.LOGGER.error("AgentLoop failed -> player={}, session={}", playerName, sessionId, ex);
-                sendChatResponse(player, "Request failed: " + ex.getMessage(), false, "error");
+                sendChatResponse(player, "Request failed: " + formatAgentError(ex, timeoutSeconds), false, "error");
+                sendSessionSync(player, session);
             });
             return null;
         });
@@ -94,12 +133,15 @@ public final class SessionManager {
         if (player == null || session == null) {
             return;
         }
+
         String playerName = player.getGameProfile().getName();
         String sessionId = session.id;
 
         if (result == null) {
             session.inFlight = false;
+            session.runtimeState = RuntimeState.FAILED;
             sendChatResponse(player, "Request failed: empty response", false, "error");
+            sendSessionSync(player, session);
             return;
         }
 
@@ -123,56 +165,61 @@ public final class SessionManager {
                 trimHistory(session);
             }
 
-            if (toolResult.structureChanged) {
-                sendChatResponse(player, "", true, "building");
-                long buildStartMs = System.currentTimeMillis();
-                P2SMod.LOGGER.info("AgentLoop build start -> player={}, session={}, origin={}, size={}",
-                        playerName, sessionId, posString(session.origin), sizeString(session.size));
-                rebuildStructure(player, session);
-                long buildMs = System.currentTimeMillis() - buildStartMs;
-                P2SMod.LOGGER.info("AgentLoop build done -> player={}, session={}, ms={}, parts={}, blocks={}",
-                        playerName, sessionId, buildMs, countParts(session.current), countBlocks(session.current));
-                sendChatResponse(player, "", true, "done");
+            if (toolResult.autoApplyRequested) {
+                toolResult.autoApplied = commitPendingPatch(player, session, true);
+            }
+
+            if (result.textContent() != null && !result.textContent().isBlank()) {
+                String status = session.pendingPatch != null
+                        ? "awaiting_confirm"
+                        : (toolResult.autoApplied ? "committed" : "thinking");
+                sendChatResponse(player, result.textContent(), false, status);
             }
 
             sendSessionSync(player, session);
+            if (toolResult.previewUpdated) {
+                sendPatchPreview(player, session.pendingPatch == null ? null : session.pendingPatch.preview);
+            }
 
             if (remaining <= 0) {
                 session.inFlight = false;
-                sendChatResponse(player, "Tool calls exceeded max iterations.", false, "error");
+                if (session.pendingPatch != null) {
+                    session.runtimeState = RuntimeState.AWAITING_CONFIRM;
+                    sendChatResponse(player, "Patch prepared. Please review and confirm.", false, "awaiting_confirm");
+                } else if (toolResult.autoApplied) {
+                    session.runtimeState = RuntimeState.IDLE;
+                } else {
+                    session.runtimeState = RuntimeState.FAILED;
+                    sendChatResponse(player, "Tool calls exceeded max iterations.", false, "error");
+                }
+                sendSessionSync(player, session);
                 return;
             }
 
-            sendChatResponse(player, "", toolResult.structureChanged, "thinking");
+            session.runtimeState = session.pendingPatch == null ? RuntimeState.PLANNING : RuntimeState.AWAITING_CONFIRM;
+            sendChatResponse(player, "", false, session.pendingPatch == null ? "thinking" : "awaiting_confirm");
             runAgentLoop(player, session, remaining - 1);
             return;
         }
 
-        session.turnCount += 1;
-
         if (hasScript) {
-            int beforeParts = countParts(session.current);
-            int beforeBlocks = countBlocks(session.current);
-            if (session.current != null) {
-                session.versions.push(copyScript(session.current));
-            }
-            session.current = StructureBuilder.mergeScripts(session.current, result.script());
-            int afterParts = countParts(session.current);
-            int afterBlocks = countBlocks(session.current);
-            P2SMod.LOGGER.info("AgentLoop apply -> player={}, session={}, parts {}->{}, blocks {}->{}",
-                    playerName, sessionId, beforeParts, afterParts, beforeBlocks, afterBlocks);
-            sendChatResponse(player, result.textContent(), true, "building");
-            long buildStartMs = System.currentTimeMillis();
-            P2SMod.LOGGER.info("AgentLoop build start -> player={}, session={}, origin={}, size={}",
-                    playerName, sessionId, posString(session.origin), sizeString(session.size));
-            rebuildStructure(player, session);
-            long buildMs = System.currentTimeMillis() - buildStartMs;
-            P2SMod.LOGGER.info("AgentLoop build done -> player={}, session={}, ms={}, parts={}, blocks={}",
-                    playerName, sessionId, buildMs, afterParts, afterBlocks);
-            sendChatResponse(player, "", true, "done");
+            applyLegacyScriptAsCommit(player, session, result.script(), result.textContent());
+            session.inFlight = false;
+            return;
+        }
+
+        if (result.textContent() != null && !result.textContent().isBlank()) {
+            sendChatResponse(player, result.textContent(), false, session.pendingPatch != null ? "awaiting_confirm" : "done");
         } else {
-            P2SMod.LOGGER.info("AgentLoop text-only -> player={}, session={}, textLen={}", playerName, sessionId, textLen);
-            sendChatResponse(player, result.textContent(), false, "done");
+            sendChatResponse(player, "", false, session.pendingPatch != null ? "awaiting_confirm" : "done");
+        }
+
+        if (session.pendingPatch != null) {
+            session.runtimeState = RuntimeState.AWAITING_CONFIRM;
+            sendPatchPreview(player, session.pendingPatch.preview);
+        } else {
+            session.runtimeState = RuntimeState.IDLE;
+            session.turnCount += 1;
         }
 
         sendSessionSync(player, session);
@@ -185,45 +232,79 @@ public final class SessionManager {
             return result;
         }
 
-        boolean pushed = false;
-        StructureBuilder.VbsScriptV2 working = session.current;
-
         for (LLMService.ToolCall call : toolCalls) {
             if (call == null || call.name() == null) {
                 continue;
             }
+
             String toolName = call.name();
             switch (toolName) {
-                case "apply_structure" -> {
-                    StructureBuilder.VbsScriptV2 delta = LLMService.parseToolArguments(call.arguments());
-                    if (delta == null) {
-                        result.toolMessages.add(buildToolMessage(call, buildToolError(toolName, "Invalid tool arguments")));
-                        P2SMod.LOGGER.warn("AgentLoop tool apply_structure failed -> player={}, session={}, reason=parse_failed", playerName, sessionId);
-                        continue;
-                    }
-                    if (!pushed && session.current != null) {
-                        session.versions.push(copyScript(session.current));
-                        pushed = true;
-                    }
-                    working = StructureBuilder.mergeScripts(working, delta);
-                    result.structureChanged = true;
-                    int parts = countParts(working);
-                    int blocks = countBlocks(working);
+                case "read_workspace_state" -> {
                     JsonObject payload = buildToolSuccess(toolName);
-                    payload.addProperty("summary", buildToolSummary(working));
-                    payload.addProperty("parts", parts);
-                    payload.addProperty("blocks", blocks);
+                    payload.add("state", buildWorkspaceStatePayload(session));
                     result.toolMessages.add(buildToolMessage(call, payload));
-                    P2SMod.LOGGER.info("AgentLoop tool apply_structure ok -> player={}, session={}, parts={}, blocks={}", playerName, sessionId, parts, blocks);
+                    P2SMod.LOGGER.info("AgentLoop tool read_workspace_state -> player={}, session={}", playerName, sessionId);
                 }
-                case "get_current_structure" -> {
+                case "propose_patch" -> {
+                    session.runtimeState = RuntimeState.VALIDATING;
+                    PatchModels.StructurePatch patch = parsePatchArguments(call.arguments());
+                    if (patch == null) {
+                        result.toolMessages.add(buildToolMessage(call, buildToolError(toolName, "Invalid patch arguments")));
+                        P2SMod.LOGGER.warn("AgentLoop tool propose_patch failed -> player={}, session={}, reason=parse_failed", playerName, sessionId);
+                        break;
+                    }
+
+                    StructureBuilder.VbsScriptV2 base = copyScript(session.current);
+                    StructureBuilder.VbsScriptV2 next = StructurePatchEngine.applyPatchToModel(base, patch);
+                    StructurePatchEngine.DiffResult diff = StructurePatchEngine.diff(base, next);
+                    PatchModels.ValidationResult validation = PatchValidator.validate(
+                            patch,
+                            session.revision,
+                            session.size,
+                            next,
+                            diff,
+                            ModConfig.MAX_PATCH_OPS,
+                            ModConfig.MAX_BLOCKS_PER_COMMIT
+                    );
+
+                    if (!validation.ok) {
+                        JsonObject payload = buildToolError(toolName, String.join("; ", validation.errors));
+                        payload.addProperty("risk", validation.riskLevel);
+                        payload.addProperty("changed", validation.estimatedChangedBlocks);
+                        result.toolMessages.add(buildToolMessage(call, payload));
+                        session.runtimeState = RuntimeState.FAILED;
+                        break;
+                    }
+
+                    PendingPatch pending = new PendingPatch();
+                    pending.patch = patch;
+                    pending.baseScript = base;
+                    pending.nextScript = next;
+                    pending.diff = diff;
+                    pending.validation = validation;
+                    pending.preview = buildPatchPreview(patch, validation, diff, session.revision);
+                    pending.revisionBefore = session.revision;
+                    pending.revisionAfter = nextRevision();
+                    validation.requiresConfirm = requiresConfirm(pending.preview.changedBlocks);
+                    session.pendingPatch = pending;
+                    session.runtimeState = RuntimeState.PATCH_GENERATED;
+
                     JsonObject payload = buildToolSuccess(toolName);
-                    StructureBuilder.VbsScriptV2 target = working;
-                    JsonObject structurePayload = buildCurrentStructurePayload(target);
-                    payload.add("current", structurePayload);
+                    payload.addProperty("preview", pending.preview.summary);
+                    payload.addProperty("changed", pending.preview.changedBlocks);
+                    payload.addProperty("risk", pending.preview.riskLevel);
+                    payload.addProperty("requires_confirm", validation.requiresConfirm);
                     result.toolMessages.add(buildToolMessage(call, payload));
-                    P2SMod.LOGGER.info("AgentLoop tool get_current_structure -> player={}, session={}, empty={}",
-                            playerName, sessionId, working == null);
+
+                    result.previewUpdated = true;
+                    result.autoApplyRequested = !validation.requiresConfirm;
+                    P2SMod.LOGGER.info("AgentLoop tool propose_patch ok -> player={}, session={}, changed={}, risk={}",
+                            playerName, sessionId, pending.preview.changedBlocks, pending.preview.riskLevel);
+                }
+                case "explain_plan" -> {
+                    JsonObject payload = buildToolSuccess(toolName);
+                    payload.addProperty("accepted", true);
+                    result.toolMessages.add(buildToolMessage(call, payload));
                 }
                 default -> {
                     result.toolMessages.add(buildToolMessage(call, buildToolError(toolName, "Unknown tool")));
@@ -232,8 +313,8 @@ public final class SessionManager {
             }
         }
 
-        if (result.structureChanged) {
-            session.current = working;
+        if (session.pendingPatch != null) {
+            session.runtimeState = RuntimeState.AWAITING_CONFIRM;
         }
         return result;
     }
@@ -246,7 +327,10 @@ public final class SessionManager {
             case "start" -> startSession(player);
             case "end" -> endSession(player);
             case "undo" -> undo(player);
+            case "redo" -> redo(player);
             case "save" -> save(player, payload);
+            case "apply" -> applyPendingPatch(player);
+            case "discard" -> discardPendingPatch(player);
             default -> player.displayClientMessage(Component.literal("Unknown session action: " + action), false);
         }
     }
@@ -258,6 +342,7 @@ public final class SessionManager {
         Session session = createSession(player);
         sessions.put(player.getUUID(), session);
         sendSessionSync(player, session);
+        sendPatchPreview(player, null);
         P2SMod.LOGGER.info("Session start -> player={}, session={}, origin={}, size={}",
                 player.getGameProfile().getName(), session.id, posString(session.origin), sizeString(session.size));
         player.displayClientMessage(Component.literal("Session started: " + session.id), false);
@@ -270,6 +355,7 @@ public final class SessionManager {
         }
         Session removed = sessions.remove(player.getUUID());
         sendSessionSync(player, null);
+        sendPatchPreview(player, null);
         P2SMod.LOGGER.info("Session end -> player={}, session={}, turns={}, parts={}, blocks={}",
                 player.getGameProfile().getName(),
                 removed == null ? "-" : removed.id,
@@ -284,19 +370,47 @@ public final class SessionManager {
             return;
         }
         Session session = sessions.get(player.getUUID());
-        if (session == null || session.versions.isEmpty()) {
+        if (session == null || session.undoStack.isEmpty()) {
             player.displayClientMessage(Component.literal("Nothing to undo"), false);
             return;
         }
-        session.current = session.versions.pop();
-        rebuildStructure(player, session);
+
+        CommitEntry commit = session.undoStack.pop();
+        StructurePatchEngine.applyBlockOps(player.serverLevel(), session.origin, commit.inverseOps);
+
+        session.current = copyScript(commit.beforeScript);
+        session.revision = commit.revisionBefore;
+        session.redoStack.push(commit);
+        session.pendingPatch = null;
+        session.runtimeState = RuntimeState.IDLE;
+
+        sendPatchPreview(player, null);
         sendSessionSync(player, session);
-        P2SMod.LOGGER.info("Session undo -> player={}, session={}, parts={}, blocks={}",
-                player.getGameProfile().getName(),
-                session.id,
-                session.current == null || session.current.structures == null ? 0 : session.current.structures.size(),
-                countBlocks(session.current));
-        player.displayClientMessage(Component.literal("Undo applied"), false);
+        player.displayClientMessage(Component.literal("Undo applied: " + commit.summary), false);
+    }
+
+    public static void redo(ServerPlayer player) {
+        if (player == null) {
+            return;
+        }
+        Session session = sessions.get(player.getUUID());
+        if (session == null || session.redoStack.isEmpty()) {
+            player.displayClientMessage(Component.literal("Nothing to redo"), false);
+            return;
+        }
+
+        CommitEntry commit = session.redoStack.pop();
+        StructurePatchEngine.applyBlockOps(player.serverLevel(), session.origin, commit.forwardOps);
+
+        session.current = copyScript(commit.afterScript);
+        session.revision = commit.revisionAfter;
+        session.undoStack.push(commit);
+        session.pendingPatch = null;
+        session.runtimeState = RuntimeState.IDLE;
+
+        sendPatchPreview(player, null);
+        sendSessionSync(player, session);
+        player.displayClientMessage(Component.literal("Redo applied: " + commit.summary), false);
     }
 
     public static void save(ServerPlayer player, String name) {
@@ -318,6 +432,110 @@ public final class SessionManager {
         return sessions.get(playerId);
     }
 
+    private static void applyPendingPatch(ServerPlayer player) {
+        if (player == null) {
+            return;
+        }
+
+        Session session = sessions.get(player.getUUID());
+        if (session == null) {
+            player.displayClientMessage(Component.literal("No active session"), false);
+            return;
+        }
+        if (session.inFlight) {
+            player.displayClientMessage(Component.literal("Busy with current request"), false);
+            return;
+        }
+        if (session.pendingPatch == null) {
+            player.displayClientMessage(Component.literal("No pending patch to apply"), false);
+            return;
+        }
+
+        PendingPatch pending = session.pendingPatch;
+        if (pending.validation == null || !pending.validation.ok) {
+            player.displayClientMessage(Component.literal("Pending patch failed validation"), false);
+            return;
+        }
+
+        if (!commitPendingPatch(player, session, false)) {
+            player.displayClientMessage(Component.literal("Failed to apply patch"), false);
+        }
+    }
+
+    private static boolean commitPendingPatch(ServerPlayer player, Session session, boolean autoApply) {
+        if (player == null || session == null || session.pendingPatch == null) {
+            return false;
+        }
+
+        PendingPatch pending = session.pendingPatch;
+        if (pending.validation == null || !pending.validation.ok || pending.diff == null) {
+            session.runtimeState = RuntimeState.FAILED;
+            sendChatResponse(player, "Pending patch failed validation", false, "error");
+            sendSessionSync(player, session);
+            return false;
+        }
+        if (player.serverLevel() == null || session.origin == null) {
+            session.runtimeState = RuntimeState.FAILED;
+            sendChatResponse(player, "Cannot apply patch in current world context", false, "error");
+            sendSessionSync(player, session);
+            return false;
+        }
+
+        session.runtimeState = RuntimeState.APPLYING;
+        sendChatResponse(player, "", true, "applying");
+
+        StructurePatchEngine.applyBlockOps(player.serverLevel(), session.origin, pending.diff.forwardOps);
+
+        CommitEntry commit = new CommitEntry();
+        commit.id = UUID.randomUUID().toString();
+        commit.revisionBefore = pending.revisionBefore;
+        commit.revisionAfter = pending.revisionAfter;
+        commit.beforeScript = copyScript(pending.baseScript);
+        commit.afterScript = copyScript(pending.nextScript);
+        commit.forwardOps = new ArrayList<>(pending.diff.forwardOps);
+        commit.inverseOps = new ArrayList<>(pending.diff.inverseOps);
+        commit.summary = pending.preview == null ? "patch" : pending.preview.summary;
+        commit.patch = pending.patch;
+
+        session.current = copyScript(pending.nextScript);
+        session.revision = pending.revisionAfter;
+        session.pendingPatch = null;
+        session.undoStack.push(commit);
+        session.redoStack.clear();
+        session.turnCount += 1;
+        session.runtimeState = RuntimeState.COMMITTED;
+
+        sendPatchPreview(player, null);
+        String prefix = autoApply ? "Patch auto-applied: " : "Patch applied: ";
+        sendChatResponse(player, prefix + commit.summary, true, "committed");
+        sendSessionSync(player, session);
+
+        session.runtimeState = RuntimeState.IDLE;
+        sendSessionSync(player, session);
+        return true;
+    }
+
+    private static void discardPendingPatch(ServerPlayer player) {
+        if (player == null) {
+            return;
+        }
+
+        Session session = sessions.get(player.getUUID());
+        if (session == null || session.pendingPatch == null) {
+            player.displayClientMessage(Component.literal("No pending patch"), false);
+            return;
+        }
+
+        session.pendingPatch = null;
+        session.runtimeState = RuntimeState.CANCELLED;
+        sendPatchPreview(player, null);
+        sendChatResponse(player, "Patch discarded", false, "cancelled");
+        sendSessionSync(player, session);
+
+        session.runtimeState = RuntimeState.IDLE;
+        sendSessionSync(player, session);
+    }
+
     private static Session ensureSession(ServerPlayer player) {
         Session existing = sessions.get(player.getUUID());
         if (existing != null) {
@@ -334,14 +552,16 @@ public final class SessionManager {
             origin = sel.min();
             size = sel.size();
         }
-        String systemPrompt = ModConfig.currentSystemPrompt();
+
+        StringBuilder prompt = new StringBuilder(ModConfig.currentSystemPrompt());
+        prompt.append("\n\n").append(SESSION_TOOL_CONTRACT);
         if (size != null) {
-            systemPrompt = systemPrompt + "\n\n" + buildAreaConstraint(size);
+            prompt.append("\n\n").append(buildAreaConstraint(size));
         }
 
         JsonObject systemMsg = new JsonObject();
         systemMsg.addProperty("role", "system");
-        systemMsg.addProperty("content", systemPrompt);
+        systemMsg.addProperty("content", prompt.toString());
 
         Session session = new Session();
         session.id = UUID.randomUUID().toString();
@@ -349,36 +569,39 @@ public final class SessionManager {
         session.size = size;
         session.history = new ArrayList<>();
         session.history.add(systemMsg);
+        session.revision = "rev-0";
+        session.runtimeState = RuntimeState.IDLE;
         return session;
     }
 
-    private static void rebuildStructure(ServerPlayer player, Session session) {
-        if (player == null || session == null || session.current == null) {
-            return;
-        }
-        ServerLevel world = player.serverLevel();
-        if (session.size != null) {
-            clearArea(world, session.origin, session.size);
-        }
-        StructureBuilder.buildV2(world, session.origin, session.current);
-    }
+    private static void applyLegacyScriptAsCommit(ServerPlayer player, Session session, StructureBuilder.VbsScriptV2 script, String text) {
+        StructureBuilder.VbsScriptV2 before = copyScript(session.current);
+        StructureBuilder.VbsScriptV2 merged = StructureBuilder.mergeScripts(session.current, script);
+        StructurePatchEngine.DiffResult diff = StructurePatchEngine.diff(before, merged);
+        StructurePatchEngine.applyBlockOps(player.serverLevel(), session.origin, diff.forwardOps);
 
-    private static void clearArea(ServerLevel world, BlockPos origin, Vec3i size) {
-        if (world == null || origin == null || size == null) {
-            return;
-        }
-        int maxX = origin.getX() + size.getX() - 1;
-        int maxY = origin.getY() + size.getY() - 1;
-        int maxZ = origin.getZ() + size.getZ() - 1;
-        BlockPos.MutableBlockPos mutable = new BlockPos.MutableBlockPos();
-        for (int x = origin.getX(); x <= maxX; x++) {
-            for (int y = origin.getY(); y <= maxY; y++) {
-                for (int z = origin.getZ(); z <= maxZ; z++) {
-                    mutable.set(x, y, z);
-                    world.setBlockAndUpdate(mutable, Blocks.AIR.defaultBlockState());
-                }
-            }
-        }
+        CommitEntry commit = new CommitEntry();
+        commit.id = UUID.randomUUID().toString();
+        commit.revisionBefore = session.revision;
+        commit.revisionAfter = nextRevision();
+        commit.beforeScript = before;
+        commit.afterScript = copyScript(merged);
+        commit.forwardOps = new ArrayList<>(diff.forwardOps);
+        commit.inverseOps = new ArrayList<>(diff.inverseOps);
+        commit.summary = "legacy script merge";
+
+        session.current = copyScript(merged);
+        session.revision = commit.revisionAfter;
+        session.undoStack.push(commit);
+        session.redoStack.clear();
+        session.turnCount += 1;
+        session.runtimeState = RuntimeState.COMMITTED;
+
+        sendChatResponse(player, text == null ? "Applied generated structure." : text, true, "committed");
+        sendSessionSync(player, session);
+
+        session.runtimeState = RuntimeState.IDLE;
+        sendSessionSync(player, session);
     }
 
     private static void trimHistory(Session session) {
@@ -399,13 +622,180 @@ public final class SessionManager {
     }
 
     private static StructureBuilder.VbsScriptV2 copyScript(StructureBuilder.VbsScriptV2 script) {
-        return GSON.fromJson(GSON.toJson(script), StructureBuilder.VbsScriptV2.class);
+        return script == null ? null : GSON.fromJson(GSON.toJson(script), StructureBuilder.VbsScriptV2.class);
     }
 
-    private static String buildToolSummary(StructureBuilder.VbsScriptV2 script) {
-        int parts = script == null || script.structures == null ? 0 : script.structures.size();
-        int blocks = countBlocks(script);
-        return "Structure applied: " + parts + " parts. " + blocks + " blocks.";
+    private static JsonObject buildWorkspaceStatePayload(Session session) {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("revision", session.revision == null ? "" : session.revision);
+
+        JsonObject origin = new JsonObject();
+        origin.addProperty("x", session.origin == null ? 0 : session.origin.getX());
+        origin.addProperty("y", session.origin == null ? 0 : session.origin.getY());
+        origin.addProperty("z", session.origin == null ? 0 : session.origin.getZ());
+        payload.add("origin", origin);
+
+        if (session.size != null) {
+            JsonObject size = new JsonObject();
+            size.addProperty("x", session.size.getX());
+            size.addProperty("y", session.size.getY());
+            size.addProperty("z", session.size.getZ());
+            payload.add("size", size);
+        }
+
+        payload.addProperty("part_count", countParts(session.current));
+        payload.addProperty("total_blocks", countBlocks(session.current));
+        payload.addProperty("summary", buildStructureSummary(session.current));
+
+        if (session.current == null) {
+            payload.addProperty("empty", true);
+            return payload;
+        }
+
+        JsonElement scriptJson = GSON.toJsonTree(session.current);
+        String jsonText = GSON.toJson(scriptJson);
+        if (jsonText.length() <= MAX_TOOL_JSON_CHARS) {
+            payload.add("script", scriptJson);
+        } else {
+            payload.addProperty("truncated", true);
+            payload.addProperty("script_json", jsonText.substring(0, MAX_TOOL_JSON_CHARS));
+        }
+        return payload;
+    }
+
+    private static PatchModels.StructurePatch parsePatchArguments(JsonElement argsElem) {
+        if (argsElem == null || argsElem.isJsonNull()) {
+            return null;
+        }
+        try {
+            JsonElement parsed = argsElem;
+            if (argsElem.isJsonPrimitive() && argsElem.getAsJsonPrimitive().isString()) {
+                String raw = argsElem.getAsString();
+                if (raw == null || raw.isBlank()) {
+                    return null;
+                }
+                parsed = JsonParser.parseString(raw);
+            }
+
+            PatchModels.StructurePatch patch = GSON.fromJson(parsed, PatchModels.StructurePatch.class);
+            normalizePatch(patch);
+            return patch;
+        } catch (Exception e) {
+            P2SMod.LOGGER.warn("Failed to parse patch arguments: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private static void normalizePatch(PatchModels.StructurePatch patch) {
+        if (patch == null) {
+            return;
+        }
+        if (patch.baseRevision == null) {
+            patch.baseRevision = "";
+        }
+        if (patch.intent == null) {
+            patch.intent = "";
+        }
+        if (patch.messageToUser == null) {
+            patch.messageToUser = "";
+        }
+        if (patch.operations == null) {
+            patch.operations = new ArrayList<>();
+        }
+        for (PatchModels.PatchOperation op : patch.operations) {
+            if (op == null) {
+                continue;
+            }
+            if (op.actionsAdd == null) {
+                op.actionsAdd = new ArrayList<>();
+            }
+            if (op.actionsRemoveMatch == null) {
+                op.actionsRemoveMatch = new ArrayList<>();
+            }
+            if (op.paletteDelta == null) {
+                op.paletteDelta = Map.of();
+            }
+        }
+    }
+
+    private static boolean requiresConfirm(int changedBlocks) {
+        if (ModConfig.CONFIRM_REQUIRED) {
+            return true;
+        }
+        int threshold = ModConfig.RISK_AUTO_APPLY_THRESHOLD;
+        if (threshold < 0) {
+            return true;
+        }
+        return changedBlocks > threshold;
+    }
+
+    private static PatchModels.Preview buildPatchPreview(
+            PatchModels.StructurePatch patch,
+            PatchModels.ValidationResult validation,
+            StructurePatchEngine.DiffResult diff,
+            String currentRevision
+    ) {
+        PatchModels.Preview preview = new PatchModels.Preview();
+        preview.changedBlocks = diff == null ? 0 : diff.changedBlocks;
+        preview.riskLevel = validation == null ? "low" : validation.riskLevel;
+
+        String summary;
+        if (patch != null && patch.messageToUser != null && !patch.messageToUser.isBlank()) {
+            summary = patch.messageToUser.trim();
+        } else if (validation != null && validation.summary != null && !validation.summary.isBlank()) {
+            summary = validation.summary;
+        } else {
+            summary = "Patch proposal";
+        }
+        preview.summary = truncateText(summary, MAX_PREVIEW_SUMMARY_CHARS);
+
+        StringBuilder detail = new StringBuilder();
+        detail.append("Revision: ").append(currentRevision == null ? "" : currentRevision).append("\n");
+        detail.append("Changed blocks: ").append(preview.changedBlocks).append("\n");
+        detail.append("Risk: ").append(preview.riskLevel).append("\n");
+
+        if (patch != null && patch.operations != null && !patch.operations.isEmpty()) {
+            detail.append("Operations:\n");
+            int limit = Math.min(MAX_PREVIEW_OPERATION_LINES, patch.operations.size());
+            for (int i = 0; i < limit; i++) {
+                PatchModels.PatchOperation op = patch.operations.get(i);
+                detail.append("- ").append(formatPatchOperation(op)).append("\n");
+            }
+            int more = patch.operations.size() - limit;
+            if (more > 0) {
+                detail.append("- ...(+").append(more).append(" more operations)\n");
+            }
+        }
+
+        if (validation != null && !validation.warnings.isEmpty()) {
+            detail.append("Warnings:\n");
+            int limit = Math.min(MAX_PREVIEW_WARNING_LINES, validation.warnings.size());
+            for (int i = 0; i < limit; i++) {
+                String warning = validation.warnings.get(i);
+                detail.append("- ").append(warning).append("\n");
+                preview.warnings.add(warning);
+            }
+            int more = validation.warnings.size() - limit;
+            if (more > 0) {
+                detail.append("- ...(+").append(more).append(" more warnings)\n");
+            }
+        }
+
+        preview.detail = truncateText(detail.toString().trim(), MAX_PREVIEW_DETAIL_CHARS);
+        return preview;
+    }
+
+    private static String formatPatchOperation(PatchModels.PatchOperation op) {
+        if (op == null) {
+            return "unknown";
+        }
+        String name = op.op == null ? "unknown" : op.op;
+        String part = op.part == null ? "" : op.part;
+        int add = op.actionsAdd == null ? 0 : op.actionsAdd.size();
+        int remove = op.actionsRemoveMatch == null ? 0 : op.actionsRemoveMatch.size();
+        int palette = op.paletteDelta == null ? 0 : op.paletteDelta.size();
+        return name + (part.isBlank() ? "" : "(" + part + ")") +
+                " add=" + add + " remove=" + remove + " palette=" + palette;
     }
 
     private static int countParts(StructureBuilder.VbsScriptV2 script) {
@@ -567,29 +957,32 @@ public final class SessionManager {
         return toolMsg;
     }
 
-    private static JsonObject buildCurrentStructurePayload(StructureBuilder.VbsScriptV2 script) {
-        JsonObject payload = new JsonObject();
-        payload.addProperty("parts", countParts(script));
-        payload.addProperty("blocks", countBlocks(script));
-        if (script == null) {
-            payload.addProperty("empty", true);
-            return payload;
+    private static String formatAgentError(Throwable ex, long timeoutSeconds) {
+        Throwable cause = ex;
+        while (cause != null && cause.getCause() != null && cause.getCause() != cause) {
+            cause = cause.getCause();
         }
-        com.google.gson.JsonElement scriptJson = GSON.toJsonTree(script);
-        String jsonText = GSON.toJson(scriptJson);
-        if (jsonText.length() <= MAX_TOOL_JSON_CHARS) {
-            payload.add("script", scriptJson);
-        } else {
-            payload.addProperty("truncated", true);
-            payload.addProperty("script_json", jsonText.substring(0, MAX_TOOL_JSON_CHARS));
-            payload.addProperty("summary", buildStructureSummary(script));
+        if (cause instanceof TimeoutException) {
+            return "Timed out after " + timeoutSeconds + "s";
         }
-        return payload;
+        String message = cause == null ? null : cause.getMessage();
+        if (message == null || message.isBlank()) {
+            message = ex == null ? "" : ex.getMessage();
+        }
+        return message == null || message.isBlank() ? "Unknown error" : message;
     }
 
-    private static class ToolCallProcessingResult {
-        private boolean structureChanged = false;
-        private final List<JsonObject> toolMessages = new ArrayList<>();
+    private static String truncateText(String text, int maxChars) {
+        if (text == null) {
+            return "";
+        }
+        if (maxChars <= 0 || text.length() <= maxChars) {
+            return text;
+        }
+        if (maxChars <= 3) {
+            return text.substring(0, maxChars);
+        }
+        return text.substring(0, maxChars - 3) + "...";
     }
 
     private static int safeLength(String text) {
@@ -666,6 +1059,7 @@ public final class SessionManager {
         if (player == null) {
             return;
         }
+
         boolean active = session != null;
         String sessionId = active ? session.id : "";
         int turns = active ? session.turnCount : 0;
@@ -674,6 +1068,13 @@ public final class SessionManager {
         String summary = active ? partsSummary(session.current) : "";
         String structureSummary = active ? buildStructureSummary(session.current) : "";
 
+        String runtimeState = active ? toRuntimeStateName(session.runtimeState) : "";
+        String revision = active ? (session.revision == null ? "" : session.revision) : "";
+        boolean hasPending = active && session.pendingPatch != null;
+        String pendingSummary = hasPending && session.pendingPatch.preview != null ? session.pendingPatch.preview.summary : "";
+        String pendingRisk = hasPending && session.pendingPatch.preview != null ? session.pendingPatch.preview.riskLevel : "";
+        int pendingChanged = hasPending && session.pendingPatch.preview != null ? session.pendingPatch.preview.changedBlocks : 0;
+
         ServerNetworkHandler.sendToClient(player, new S2CSessionSyncPayload(
                 active,
                 sessionId,
@@ -681,8 +1082,21 @@ public final class SessionManager {
                 partCount,
                 totalBlocks,
                 summary,
-                structureSummary
+                structureSummary,
+                runtimeState,
+                revision,
+                hasPending,
+                pendingSummary,
+                pendingRisk,
+                pendingChanged
         ));
+    }
+
+    private static String toRuntimeStateName(RuntimeState state) {
+        if (state == null) {
+            return "";
+        }
+        return state.name().toLowerCase();
     }
 
     private static String partsSummary(StructureBuilder.VbsScriptV2 script) {
@@ -702,12 +1116,33 @@ public final class SessionManager {
         return sb.toString();
     }
 
+    private static void sendPatchPreview(ServerPlayer player, PatchModels.Preview preview) {
+        if (player == null) {
+            return;
+        }
+        if (preview == null) {
+            ServerNetworkHandler.sendToClient(player, new S2CPatchPreviewPayload(false, "", "", 0, ""));
+            return;
+        }
+        ServerNetworkHandler.sendToClient(player, new S2CPatchPreviewPayload(
+                true,
+                preview.summary == null ? "" : preview.summary,
+                preview.detail == null ? "" : preview.detail,
+                preview.changedBlocks,
+                preview.riskLevel == null ? "" : preview.riskLevel
+        ));
+    }
+
     private static void sendChatResponse(ServerPlayer player, String text, boolean hasStructure, String status) {
         ServerNetworkHandler.sendToClient(player, new S2CChatResponsePayload(
                 text == null ? "" : text,
                 hasStructure,
                 status == null ? "" : status
         ));
+    }
+
+    private static String nextRevision() {
+        return "rev-" + UUID.randomUUID();
     }
 
     static String buildAreaConstraint(Vec3i size) {
@@ -719,14 +1154,61 @@ public final class SessionManager {
                 "Max coordinates: (" + (sizeX - 1) + ", " + (sizeY - 1) + ", " + (sizeZ - 1) + ").";
     }
 
+    private static final class ToolCallProcessingResult {
+        private boolean previewUpdated = false;
+        private boolean autoApplyRequested = false;
+        private boolean autoApplied = false;
+        private final List<JsonObject> toolMessages = new ArrayList<>();
+    }
+
+    private enum RuntimeState {
+        IDLE,
+        PLANNING,
+        PATCH_GENERATED,
+        VALIDATING,
+        AWAITING_CONFIRM,
+        APPLYING,
+        COMMITTED,
+        FAILED,
+        CANCELLED
+    }
+
+    private static final class PendingPatch {
+        private PatchModels.StructurePatch patch;
+        private StructureBuilder.VbsScriptV2 baseScript;
+        private StructureBuilder.VbsScriptV2 nextScript;
+        private StructurePatchEngine.DiffResult diff;
+        private PatchModels.ValidationResult validation;
+        private PatchModels.Preview preview;
+        private String revisionBefore;
+        private String revisionAfter;
+    }
+
+    private static final class CommitEntry {
+        private String id;
+        private String revisionBefore;
+        private String revisionAfter;
+        private StructureBuilder.VbsScriptV2 beforeScript;
+        private StructureBuilder.VbsScriptV2 afterScript;
+        private List<PatchModels.BlockOp> forwardOps = new ArrayList<>();
+        private List<PatchModels.BlockOp> inverseOps = new ArrayList<>();
+        private String summary;
+        private PatchModels.StructurePatch patch;
+    }
+
     public static class Session {
         String id;
         BlockPos origin;
         Vec3i size;
         List<JsonObject> history;
-        Deque<StructureBuilder.VbsScriptV2> versions = new ArrayDeque<>();
         StructureBuilder.VbsScriptV2 current;
         int turnCount = 0;
         boolean inFlight = false;
+
+        String revision;
+        RuntimeState runtimeState = RuntimeState.IDLE;
+        PendingPatch pendingPatch;
+        Deque<CommitEntry> undoStack = new ArrayDeque<>();
+        Deque<CommitEntry> redoStack = new ArrayDeque<>();
     }
 }
