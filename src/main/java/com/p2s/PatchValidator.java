@@ -4,6 +4,7 @@ import net.minecraft.core.Vec3i;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 public final class PatchValidator {
@@ -57,6 +58,7 @@ public final class PatchValidator {
             result.addError("Patch operation count exceeds limit: " + opCount + " > " + maxPatchOps);
         }
         validatePatchOperations(patch, result);
+        validateBlockReferences(patch, candidateScript, result);
 
         String baseRevision = patch.baseRevision == null ? "" : patch.baseRevision.trim();
         if (!baseRevision.isBlank() && currentRevision != null && !currentRevision.isBlank() && !baseRevision.equals(currentRevision)) {
@@ -67,6 +69,7 @@ public final class PatchValidator {
         if (size != null) {
             validateBounds(candidateScript, size, result);
         }
+        addOverrideWarnings(candidateScript, result);
 
         int changed = diff == null ? 0 : diff.changedBlocks;
         result.estimatedChangedBlocks = changed;
@@ -135,6 +138,66 @@ public final class PatchValidator {
 
             validateAddActions(op.actionsAdd, prefix, result);
             validateRemoveMatches(op.actionsRemoveMatch, prefix, result);
+        }
+    }
+
+    private static void validateBlockReferences(
+            PatchModels.StructurePatch patch,
+            StructureBuilder.VbsScriptV2 candidateScript,
+            PatchModels.ValidationResult result
+    ) {
+        if (patch == null || patch.operations == null) {
+            return;
+        }
+        Map<String, String> palette = candidateScript == null || candidateScript.palette == null
+                ? Map.of()
+                : candidateScript.palette;
+
+        for (int i = 0; i < patch.operations.size(); i++) {
+            PatchModels.PatchOperation op = patch.operations.get(i);
+            if (op == null) {
+                continue;
+            }
+            String prefix = "Operation[" + i + "]";
+            if (op.paletteDelta != null && !op.paletteDelta.isEmpty()) {
+                for (Map.Entry<String, String> entry : op.paletteDelta.entrySet()) {
+                    String key = entry.getKey();
+                    String value = entry.getValue();
+                    if (isBlank(key)) {
+                        result.addError(prefix + " palette_delta has blank key");
+                        continue;
+                    }
+                    if (isBlank(value)) {
+                        result.addError(prefix + " palette_delta[" + key + "] missing block id");
+                        continue;
+                    }
+                    if (StructureBuilder.resolveDirectBlockState(value) == null) {
+                        result.addError(prefix + " palette_delta[" + key + "] invalid block id '" + value + "'");
+                    }
+                }
+            }
+
+            if (op.actionsAdd == null) {
+                continue;
+            }
+            for (int j = 0; j < op.actionsAdd.size(); j++) {
+                StructureBuilder.VbsAction action = op.actionsAdd.get(j);
+                if (action == null) {
+                    continue;
+                }
+                String block = action.block;
+                String path = prefix + ".actions_add[" + j + "]";
+                if (isBlank(block)) {
+                    continue;
+                }
+                if (palette.containsKey(block)) {
+                    continue;
+                }
+                if (StructureBuilder.resolveDirectBlockState(block) != null) {
+                    continue;
+                }
+                result.addError(path + " block '" + block + "' not in palette and not a valid block id");
+            }
         }
     }
 
@@ -352,5 +415,50 @@ public final class PatchValidator {
             return "";
         }
         return value.trim().toLowerCase();
+    }
+
+    private static void addOverrideWarnings(StructureBuilder.VbsScriptV2 script, PatchModels.ValidationResult result) {
+        StructurePatchEngine.OverrideStats stats = StructurePatchEngine.analyzeOverrides(script);
+        if (stats.overriddenBlocks <= 0) {
+            return;
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("Overlapping parts: ").append(stats.overriddenBlocks)
+                .append(" blocks overwritten by later parts (")
+                .append(stats.overriddenByHigherPriority).append(" by higher priority, ")
+                .append(stats.overriddenBySamePriority).append(" by same priority).");
+        String topOverriders = formatTopCounts(stats.overriderCounts, 3);
+        if (!topOverriders.isBlank()) {
+            sb.append(" Top overwriters: ").append(topOverriders).append(".");
+        }
+        String topOverridden = formatTopCounts(stats.overriddenCounts, 3);
+        if (!topOverridden.isBlank()) {
+            sb.append(" Most overwritten: ").append(topOverridden).append(".");
+        }
+        result.addWarning(sb.toString());
+    }
+
+    private static String formatTopCounts(Map<String, Integer> counts, int limit) {
+        if (counts == null || counts.isEmpty()) {
+            return "";
+        }
+        List<Map.Entry<String, Integer>> entries = new ArrayList<>(counts.entrySet());
+        entries.sort((a, b) -> {
+            int cmp = Integer.compare(b.getValue(), a.getValue());
+            if (cmp != 0) {
+                return cmp;
+            }
+            return a.getKey().compareTo(b.getKey());
+        });
+        int size = Math.min(limit, entries.size());
+        List<String> parts = new ArrayList<>();
+        for (int i = 0; i < size; i++) {
+            Map.Entry<String, Integer> entry = entries.get(i);
+            if (entry.getKey() == null || entry.getKey().isBlank()) {
+                continue;
+            }
+            parts.add(entry.getKey() + "(+" + entry.getValue() + ")");
+        }
+        return String.join(", ", parts);
     }
 }

@@ -341,6 +341,15 @@ public final class StructurePatchEngine {
         if (key != null && palette != null) {
             base = palette.get(key);
         }
+        if (base == null && key != null && !key.isBlank()) {
+            BlockState direct = StructureBuilder.resolveDirectBlockState(key);
+            if (direct != null) {
+                if (missingPaletteKeys.add(key)) {
+                    P2SMod.LOGGER.info("Patch materialize: palette key '{}' missing, used direct block id", key);
+                }
+                base = direct;
+            }
+        }
         if (base == null) {
             if (key != null && !key.isBlank() && missingPaletteKeys.add(key)) {
                 P2SMod.LOGGER.warn("Patch materialize: palette key '{}' missing, fallback stone", key);
@@ -348,6 +357,37 @@ public final class StructurePatchEngine {
             base = Blocks.STONE.defaultBlockState();
         }
         return StructureBuilder.applyFacingState(base, action.facing);
+    }
+
+    public static OverrideStats analyzeOverrides(StructureBuilder.VbsScriptV2 script) {
+        OverrideStats stats = new OverrideStats();
+        if (script == null || script.structures == null || script.structures.isEmpty()) {
+            return stats;
+        }
+
+        List<StructureBuilder.StructurePart> sorted = new ArrayList<>(script.structures);
+        sorted.sort(Comparator.comparingInt(part -> part == null ? 0 : part.priority));
+        Map<Int3, BlockSource> written = new HashMap<>();
+
+        for (StructureBuilder.StructurePart part : sorted) {
+            if (part == null || part.actions == null) {
+                continue;
+            }
+            for (StructureBuilder.VbsAction action : part.actions) {
+                if (action == null || action.type == null) {
+                    continue;
+                }
+                String type = action.type.trim().toLowerCase();
+                switch (type) {
+                    case "fill" -> analyzeFill(written, stats, part, action);
+                    case "frame" -> analyzeFrame(written, stats, part, action);
+                    case "set" -> analyzeSet(written, stats, part, action);
+                    default -> {
+                    }
+                }
+            }
+        }
+        return stats;
     }
 
     private static void writeFill(Map<Int3, BlockState> map, StructureBuilder.VbsAction action, BlockState state) {
@@ -408,6 +448,93 @@ public final class StructurePatchEngine {
         }
     }
 
+    private static void analyzeFill(Map<Int3, BlockSource> written, OverrideStats stats, StructureBuilder.StructurePart part, StructureBuilder.VbsAction action) {
+        int[] from = coords(action.from);
+        int[] to = coords(action.to);
+        if (from == null || to == null) {
+            return;
+        }
+        int minX = Math.min(from[0], to[0]);
+        int minY = Math.min(from[1], to[1]);
+        int minZ = Math.min(from[2], to[2]);
+        int maxX = Math.max(from[0], to[0]);
+        int maxY = Math.max(from[1], to[1]);
+        int maxZ = Math.max(from[2], to[2]);
+        for (int x = minX; x <= maxX; x++) {
+            for (int y = minY; y <= maxY; y++) {
+                for (int z = minZ; z <= maxZ; z++) {
+                    recordWrite(written, stats, part, x, y, z);
+                }
+            }
+        }
+    }
+
+    private static void analyzeFrame(Map<Int3, BlockSource> written, OverrideStats stats, StructureBuilder.StructurePart part, StructureBuilder.VbsAction action) {
+        int[] from = coords(action.from);
+        int[] to = coords(action.to);
+        if (from == null || to == null) {
+            return;
+        }
+        int minX = Math.min(from[0], to[0]);
+        int minY = Math.min(from[1], to[1]);
+        int minZ = Math.min(from[2], to[2]);
+        int maxX = Math.max(from[0], to[0]);
+        int maxY = Math.max(from[1], to[1]);
+        int maxZ = Math.max(from[2], to[2]);
+        for (int x = minX; x <= maxX; x++) {
+            for (int y = minY; y <= maxY; y++) {
+                for (int z = minZ; z <= maxZ; z++) {
+                    boolean boundary = x == minX || x == maxX || y == minY || y == maxY || z == minZ || z == maxZ;
+                    if (!boundary) {
+                        continue;
+                    }
+                    recordWrite(written, stats, part, x, y, z);
+                }
+            }
+        }
+    }
+
+    private static void analyzeSet(Map<Int3, BlockSource> written, OverrideStats stats, StructureBuilder.StructurePart part, StructureBuilder.VbsAction action) {
+        if (action.at == null) {
+            return;
+        }
+        for (List<Integer> point : action.at) {
+            int[] c = coords(point);
+            if (c == null) {
+                continue;
+            }
+            recordWrite(written, stats, part, c[0], c[1], c[2]);
+        }
+    }
+
+    private static void recordWrite(Map<Int3, BlockSource> written, OverrideStats stats, StructureBuilder.StructurePart part, int x, int y, int z) {
+        if (stats == null) {
+            return;
+        }
+        stats.totalWrites++;
+        Int3 key = new Int3(x, y, z);
+        BlockSource next = new BlockSource(part == null ? "" : part.name, part == null ? 0 : part.priority);
+        BlockSource prev = written.put(key, next);
+        if (prev == null) {
+            return;
+        }
+        if (prev.partName.equals(next.partName)) {
+            return;
+        }
+        stats.overriddenBlocks++;
+        if (next.priority > prev.priority) {
+            stats.overriddenByHigherPriority++;
+        } else {
+            stats.overriddenBySamePriority++;
+        }
+        if (!next.partName.isBlank()) {
+            stats.overriderCounts.merge(next.partName, 1, Integer::sum);
+        }
+        if (!prev.partName.isBlank()) {
+            stats.overriddenCounts.merge(prev.partName, 1, Integer::sum);
+        }
+    }
+
     private static int[] coords(List<Integer> list) {
         if (list == null || list.size() < 3) {
             return null;
@@ -416,6 +543,21 @@ public final class StructurePatchEngine {
     }
 
     private record Int3(int x, int y, int z) {
+    }
+
+    private record BlockSource(String partName, int priority) {
+        private BlockSource {
+            partName = partName == null ? "" : partName;
+        }
+    }
+
+    public static final class OverrideStats {
+        public int totalWrites = 0;
+        public int overriddenBlocks = 0;
+        public int overriddenByHigherPriority = 0;
+        public int overriddenBySamePriority = 0;
+        public final Map<String, Integer> overriderCounts = new HashMap<>();
+        public final Map<String, Integer> overriddenCounts = new HashMap<>();
     }
 
     public static final class DiffResult {

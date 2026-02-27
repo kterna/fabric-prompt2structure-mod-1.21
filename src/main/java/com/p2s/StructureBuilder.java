@@ -194,6 +194,60 @@ public final class StructureBuilder {
         return resolveBlockState(rawId, paletteKey);
     }
 
+    public static BlockState resolveDirectBlockState(String rawId) {
+        if (rawId == null || rawId.isBlank()) {
+            return null;
+        }
+        String trimmed = rawId.trim().toLowerCase();
+        ResourceLocation id = ResourceLocation.tryParse(trimmed);
+        if (id == null && !trimmed.contains(":")) {
+            id = ResourceLocation.tryParse("minecraft:" + trimmed);
+        }
+        if (id == null) {
+            return null;
+        }
+        Block block = BuiltInRegistries.BLOCK.getOptional(id).orElse(null);
+        return block == null ? null : block.defaultBlockState();
+    }
+
+    public static List<String> searchBlockIds(String query, int limit) {
+        String normalized = normalizeBlockQuery(query);
+        if (normalized.isBlank()) {
+            return List.of();
+        }
+        int capped = Math.min(Math.max(limit, 1), 50);
+        String normalizedNoNs = normalized.startsWith("minecraft:") ? normalized.substring(10) : normalized;
+        String[] tokens = normalizedNoNs.split("[^a-z0-9_]+");
+
+        List<BlockMatch> matches = new ArrayList<>();
+        for (ResourceLocation id : BuiltInRegistries.BLOCK.keySet()) {
+            String idStr = id.toString().toLowerCase();
+            String path = id.getPath().toLowerCase();
+            int score = scoreBlockCandidate(normalized, normalizedNoNs, tokens, idStr, path);
+            if (score == Integer.MAX_VALUE) {
+                continue;
+            }
+            matches.add(new BlockMatch(id.toString(), score));
+        }
+
+        matches.sort(Comparator.comparingInt((BlockMatch m) -> m.score).thenComparing(m -> m.id));
+        List<String> out = new ArrayList<>();
+        int size = Math.min(capped, matches.size());
+        for (int i = 0; i < size; i++) {
+            out.add(matches.get(i).id);
+        }
+        return out;
+    }
+
+    public static String closestBlockId(String query) {
+        String normalized = normalizeBlockQuery(query);
+        if (normalized.isBlank()) {
+            return "";
+        }
+        ResourceLocation closest = findClosestBlock(normalized);
+        return closest == null ? "" : closest.toString();
+    }
+
     public static BlockState applyFacingState(BlockState state, String facing) {
         return applyFacing(state, facing);
     }
@@ -288,6 +342,15 @@ public final class StructureBuilder {
         if (key != null && palette.containsKey(key)) {
             return applyFacing(palette.get(key), facing);
         }
+        if (key != null && !key.isBlank()) {
+            BlockState direct = resolveDirectBlockState(key);
+            if (direct != null) {
+                if (missingPaletteKeys.add(key)) {
+                    P2SMod.LOGGER.info("Palette key '{}' missing, used direct block id", key);
+                }
+                return applyFacing(direct, facing);
+            }
+        }
         if (missingPaletteKeys.add(String.valueOf(key))) {
             P2SMod.LOGGER.warn("Palette key '{}' missing, fallback to stone", key);
         }
@@ -346,6 +409,49 @@ public final class StructureBuilder {
             }
         }
         return bestScore <= 6 ? best : null;
+    }
+
+    private static final class BlockMatch {
+        private final String id;
+        private final int score;
+
+        private BlockMatch(String id, int score) {
+            this.id = id;
+            this.score = score;
+        }
+    }
+
+    private static String normalizeBlockQuery(String query) {
+        if (query == null) {
+            return "";
+        }
+        return query.trim().toLowerCase().replace(' ', '_');
+    }
+
+    private static int scoreBlockCandidate(String normalized, String normalizedNoNs, String[] tokens, String idStr, String path) {
+        if (normalized.isBlank()) {
+            return Integer.MAX_VALUE;
+        }
+        if (idStr.contains(normalized) || path.contains(normalized) || path.contains(normalizedNoNs)) {
+            return 0;
+        }
+        boolean hasToken = false;
+        boolean allTokens = true;
+        for (String token : tokens) {
+            if (token.isBlank()) {
+                continue;
+            }
+            hasToken = true;
+            if (!idStr.contains(token) && !path.contains(token)) {
+                allTokens = false;
+                break;
+            }
+        }
+        if (hasToken && allTokens) {
+            return 1;
+        }
+        int score = Math.min(levenshtein(normalizedNoNs, path), levenshtein(normalized, idStr));
+        return score <= 8 ? score + 2 : Integer.MAX_VALUE;
     }
 
     private static int levenshtein(String a, String b) {

@@ -24,7 +24,7 @@ public final class ModConfig {
     private static final int DEFAULT_MAX_PATCH_OPS = 20000;
     private static final int DEFAULT_MAX_BLOCKS_PER_COMMIT = 50000;
     private static final boolean DEFAULT_CONFIRM_REQUIRED = true;
-    private static final int DEFAULT_SESSION_JOB_TIMEOUT_SECONDS = 60;
+    private static final int DEFAULT_SESSION_JOB_TIMEOUT_SECONDS = 120;
     private static final int DEFAULT_RISK_AUTO_APPLY_THRESHOLD = -1;
     private static final String DEFAULT_PROMPT_NAME = "default";
     public static final String DEFAULT_SYSTEM_PROMPT_V1 = """
@@ -53,9 +53,10 @@ public final class ModConfig {
             You are a Minecraft Architect agent in IDE mode.
 
             ## Workflow
-            1) First read workspace state via read_workspace_state.
-            2) Then propose edits via propose_patch.
+            1) First read workspace state via read_workspace_state (may return a staged revision if a patch is pending).
+            2) Then propose edits via propose_patch using that revision.
             3) Do not directly build blocks. The server applies patch only after user confirmation.
+            4) If propose_patch returns errors or warnings, fix them before asking user to apply.
 
             ## Tool: propose_patch
             - base_revision: revision string from read_workspace_state
@@ -66,9 +67,13 @@ public final class ModConfig {
             ## Tool: read_workspace_state
             - Read current structure, origin/size limits, and revision before editing.
 
+            ## Tool: search_block_ids
+            - Query valid block IDs by keyword when unsure.
+
             ## Rules
             - Coordinates are relative to (0,0,0)
             - Use valid Java block IDs in palette
+            - action.block may be a palette key or full block id (prefer palette key)
             - Keep changes minimal and incremental
             - Prefer patch_actions for small edits
             - Use upsert_part for replacing a whole logical part

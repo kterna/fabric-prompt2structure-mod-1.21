@@ -293,7 +293,7 @@ public final class LLMService {
         readTool.addProperty("type", "function");
         JsonObject readFn = new JsonObject();
         readFn.addProperty("name", "read_workspace_state");
-        readFn.addProperty("description", "Read current workspace structure, revision, bounds and summary before proposing a patch.");
+        readFn.addProperty("description", "Read current (staged) workspace structure, revision, bounds and summary before proposing a patch.");
         JsonObject readParams = new JsonObject();
         readParams.addProperty("type", "object");
         readParams.add("properties", new JsonObject());
@@ -301,6 +301,34 @@ public final class LLMService {
         readFn.add("parameters", readParams);
         readTool.add("function", readFn);
         tools.add(readTool);
+
+        JsonObject searchTool = new JsonObject();
+        searchTool.addProperty("type", "function");
+        JsonObject searchFn = new JsonObject();
+        searchFn.addProperty("name", "search_block_ids");
+        searchFn.addProperty("description", "Search valid block IDs by keyword or partial id.");
+        JsonObject searchParams = new JsonObject();
+        searchParams.addProperty("type", "object");
+        JsonObject searchProps = new JsonObject();
+
+        JsonObject searchQuery = new JsonObject();
+        searchQuery.addProperty("type", "string");
+        searchQuery.addProperty("description", "Keyword or partial block id to search.");
+        searchProps.add("query", searchQuery);
+
+        JsonObject searchLimit = new JsonObject();
+        searchLimit.addProperty("type", "integer");
+        searchLimit.addProperty("description", "Max results (1-50).");
+        searchProps.add("limit", searchLimit);
+
+        searchParams.add("properties", searchProps);
+        JsonArray searchRequired = new JsonArray();
+        searchRequired.add("query");
+        searchParams.add("required", searchRequired);
+        searchParams.addProperty("additionalProperties", false);
+        searchFn.add("parameters", searchParams);
+        searchTool.add("function", searchFn);
+        tools.add(searchTool);
 
         JsonObject patchTool = new JsonObject();
         patchTool.addProperty("type", "function");

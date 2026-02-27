@@ -1,6 +1,7 @@
 package com.p2s;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -41,8 +42,12 @@ public final class SessionManager {
             - Use read_workspace_state first when you need current structure/revision/bounds.
             - Propose all edits with propose_patch; do not directly build blocks.
             - The user reviews a preview and confirms apply/discard.
+            - If a patch is pending, read_workspace_state returns a staged revision that includes pending changes.
+              Use that staged revision for subsequent propose_patch calls (changes stay un-applied until confirm).
+            - Use search_block_ids when unsure about a block id.
+            - If propose_patch returns errors or warnings, adjust the patch before asking user to apply.
             - Keep patches minimal and focused on requested changes.
-            - Only call read_workspace_state/propose_patch/explain_plan in session mode.
+            - Only call read_workspace_state/propose_patch/explain_plan/search_block_ids in session mode.
             """;
 
     private SessionManager() {
@@ -103,7 +108,10 @@ public final class SessionManager {
         session.runtimeState = RuntimeState.PLANNING;
         P2SMod.LOGGER.info("AgentLoop llm request -> player={}, session={}, snapshotSize={}, remaining={}", playerName, sessionId, snapshotSize, remaining);
         long llmStartMs = System.currentTimeMillis();
-        long timeoutSeconds = Math.max(1, ModConfig.SESSION_JOB_TIMEOUT_SECONDS);
+        long timeoutSeconds = Math.max(
+                1,
+                Math.max(ModConfig.SESSION_JOB_TIMEOUT_SECONDS, ModConfig.HTTP_TIMEOUT_SECONDS + 5)
+        );
 
         LLMService.requestWithHistory(historySnapshot)
                 .orTimeout(timeoutSeconds, TimeUnit.SECONDS)
@@ -254,12 +262,37 @@ public final class SessionManager {
                         break;
                     }
 
-                    StructureBuilder.VbsScriptV2 base = copyScript(session.current);
-                    StructureBuilder.VbsScriptV2 next = StructurePatchEngine.applyPatchToModel(base, patch);
-                    StructurePatchEngine.DiffResult diff = StructurePatchEngine.diff(base, next);
-                    PatchModels.ValidationResult validation = PatchValidator.validate(
+                    String committedRevision = session.revision == null ? "" : session.revision;
+                    String stagedRevision = committedRevision;
+                    StructureBuilder.VbsScriptV2 stagedBase = session.current;
+                    if (session.pendingPatch != null && session.pendingPatch.nextScript != null) {
+                        stagedBase = session.pendingPatch.nextScript;
+                        if (session.pendingPatch.revisionAfter != null && !session.pendingPatch.revisionAfter.isBlank()) {
+                            stagedRevision = session.pendingPatch.revisionAfter;
+                        }
+                    }
+
+                    String patchBase = patch.baseRevision == null ? "" : patch.baseRevision.trim();
+                    if (!patchBase.isBlank()
+                            && !patchBase.equals(committedRevision)
+                            && !patchBase.equals(stagedRevision)) {
+                        result.toolMessages.add(buildToolMessage(call, buildToolError(toolName, "Patch base_revision mismatch")));
+                        session.runtimeState = RuntimeState.FAILED;
+                        break;
+                    }
+
+                    StructureBuilder.VbsScriptV2 committedBase = copyScript(session.current);
+                    StructureBuilder.VbsScriptV2 next = StructurePatchEngine.applyPatchToModel(stagedBase, patch);
+                    StructurePatchEngine.DiffResult diff = StructurePatchEngine.diff(committedBase, next);
+
+                    PatchModels.StructurePatch mergedPatch = mergePatches(
+                            session.pendingPatch == null ? null : session.pendingPatch.patch,
                             patch,
-                            session.revision,
+                            committedRevision
+                    );
+                    PatchModels.ValidationResult validation = PatchValidator.validate(
+                            mergedPatch,
+                            committedRevision,
                             session.size,
                             next,
                             diff,
@@ -269,6 +302,11 @@ public final class SessionManager {
 
                     if (!validation.ok) {
                         JsonObject payload = buildToolError(toolName, String.join("; ", validation.errors));
+                        JsonArray errorArray = new JsonArray();
+                        for (String error : validation.errors) {
+                            errorArray.add(error);
+                        }
+                        payload.add("errors", errorArray);
                         payload.addProperty("risk", validation.riskLevel);
                         payload.addProperty("changed", validation.estimatedChangedBlocks);
                         result.toolMessages.add(buildToolMessage(call, payload));
@@ -277,13 +315,13 @@ public final class SessionManager {
                     }
 
                     PendingPatch pending = new PendingPatch();
-                    pending.patch = patch;
-                    pending.baseScript = base;
+                    pending.patch = mergedPatch;
+                    pending.baseScript = committedBase;
                     pending.nextScript = next;
                     pending.diff = diff;
                     pending.validation = validation;
-                    pending.preview = buildPatchPreview(patch, validation, diff, session.revision);
-                    pending.revisionBefore = session.revision;
+                    pending.preview = buildPatchPreview(mergedPatch, validation, diff, committedRevision);
+                    pending.revisionBefore = committedRevision;
                     pending.revisionAfter = nextRevision();
                     validation.requiresConfirm = requiresConfirm(pending.preview.changedBlocks);
                     session.pendingPatch = pending;
@@ -294,6 +332,14 @@ public final class SessionManager {
                     payload.addProperty("changed", pending.preview.changedBlocks);
                     payload.addProperty("risk", pending.preview.riskLevel);
                     payload.addProperty("requires_confirm", validation.requiresConfirm);
+                    if (!validation.warnings.isEmpty()) {
+                        JsonArray warningArray = new JsonArray();
+                        for (String warning : validation.warnings) {
+                            warningArray.add(warning);
+                        }
+                        payload.add("warnings", warningArray);
+                        payload.addProperty("warning_count", validation.warnings.size());
+                    }
                     result.toolMessages.add(buildToolMessage(call, payload));
 
                     result.previewUpdated = true;
@@ -304,6 +350,30 @@ public final class SessionManager {
                 case "explain_plan" -> {
                     JsonObject payload = buildToolSuccess(toolName);
                     payload.addProperty("accepted", true);
+                    result.toolMessages.add(buildToolMessage(call, payload));
+                }
+                case "search_block_ids" -> {
+                    SearchBlockArgs args = parseSearchBlockArgs(call.arguments());
+                    if (args == null || args.query == null || args.query.isBlank()) {
+                        result.toolMessages.add(buildToolMessage(call, buildToolError(toolName, "Missing query")));
+                        break;
+                    }
+                    List<String> matches = StructureBuilder.searchBlockIds(args.query, args.limit);
+                    String closest = StructureBuilder.closestBlockId(args.query);
+                    JsonObject payload = buildToolSuccess(toolName);
+                    payload.addProperty("query", args.query);
+                    payload.addProperty("limit", args.limit);
+                    JsonArray matchArray = new JsonArray();
+                    for (String match : matches) {
+                        matchArray.add(match);
+                    }
+                    payload.add("matches", matchArray);
+                    if (closest != null && !closest.isBlank()) {
+                        payload.addProperty("closest", closest);
+                    }
+                    if (matches.isEmpty()) {
+                        payload.addProperty("warning", "No matches");
+                    }
                     result.toolMessages.add(buildToolMessage(call, payload));
                 }
                 default -> {
@@ -627,7 +697,24 @@ public final class SessionManager {
 
     private static JsonObject buildWorkspaceStatePayload(Session session) {
         JsonObject payload = new JsonObject();
-        payload.addProperty("revision", session.revision == null ? "" : session.revision);
+        String committedRevision = session.revision == null ? "" : session.revision;
+        boolean hasPending = session.pendingPatch != null && session.pendingPatch.nextScript != null;
+        String stagedRevision = committedRevision;
+        if (hasPending && session.pendingPatch.revisionAfter != null && !session.pendingPatch.revisionAfter.isBlank()) {
+            stagedRevision = session.pendingPatch.revisionAfter;
+        }
+        StructureBuilder.VbsScriptV2 effectiveScript = hasPending ? session.pendingPatch.nextScript : session.current;
+
+        payload.addProperty("revision", stagedRevision);
+        if (hasPending) {
+            payload.addProperty("staged", true);
+            payload.addProperty("committed_revision", committedRevision);
+            if (session.pendingPatch.preview != null) {
+                payload.addProperty("pending_summary", session.pendingPatch.preview.summary == null ? "" : session.pendingPatch.preview.summary);
+                payload.addProperty("pending_changed_blocks", session.pendingPatch.preview.changedBlocks);
+                payload.addProperty("pending_risk", session.pendingPatch.preview.riskLevel == null ? "" : session.pendingPatch.preview.riskLevel);
+            }
+        }
 
         JsonObject origin = new JsonObject();
         origin.addProperty("x", session.origin == null ? 0 : session.origin.getX());
@@ -643,16 +730,16 @@ public final class SessionManager {
             payload.add("size", size);
         }
 
-        payload.addProperty("part_count", countParts(session.current));
-        payload.addProperty("total_blocks", countBlocks(session.current));
-        payload.addProperty("summary", buildStructureSummary(session.current));
+        payload.addProperty("part_count", countParts(effectiveScript));
+        payload.addProperty("total_blocks", countBlocks(effectiveScript));
+        payload.addProperty("summary", buildStructureSummary(effectiveScript));
 
-        if (session.current == null) {
+        if (effectiveScript == null) {
             payload.addProperty("empty", true);
             return payload;
         }
 
-        JsonElement scriptJson = GSON.toJsonTree(session.current);
+        JsonElement scriptJson = GSON.toJsonTree(effectiveScript);
         String jsonText = GSON.toJson(scriptJson);
         if (jsonText.length() <= MAX_TOOL_JSON_CHARS) {
             payload.add("script", scriptJson);
@@ -682,6 +769,42 @@ public final class SessionManager {
             return patch;
         } catch (Exception e) {
             P2SMod.LOGGER.warn("Failed to parse patch arguments: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private static SearchBlockArgs parseSearchBlockArgs(JsonElement argsElem) {
+        if (argsElem == null || argsElem.isJsonNull()) {
+            return null;
+        }
+        try {
+            JsonElement parsed = argsElem;
+            if (argsElem.isJsonPrimitive() && argsElem.getAsJsonPrimitive().isString()) {
+                String raw = argsElem.getAsString();
+                if (raw == null || raw.isBlank()) {
+                    return null;
+                }
+                parsed = JsonParser.parseString(raw);
+            }
+            if (!parsed.isJsonObject()) {
+                return null;
+            }
+            JsonObject obj = parsed.getAsJsonObject();
+            String query = obj.has("query") && obj.get("query").isJsonPrimitive()
+                    ? obj.get("query").getAsString()
+                    : "";
+            int limit = obj.has("limit") && obj.get("limit").isJsonPrimitive()
+                    ? obj.get("limit").getAsInt()
+                    : 10;
+            if (limit <= 0) {
+                limit = 10;
+            }
+            if (limit > 50) {
+                limit = 50;
+            }
+            return new SearchBlockArgs(query, limit);
+        } catch (Exception e) {
+            P2SMod.LOGGER.warn("Failed to parse search_block_ids arguments: {}", e.getMessage());
             return null;
         }
     }
@@ -716,6 +839,32 @@ public final class SessionManager {
                 op.paletteDelta = Map.of();
             }
         }
+    }
+
+    private static PatchModels.StructurePatch mergePatches(
+            PatchModels.StructurePatch existing,
+            PatchModels.StructurePatch incoming,
+            String committedRevision
+    ) {
+        PatchModels.StructurePatch merged = new PatchModels.StructurePatch();
+        merged.baseRevision = committedRevision == null ? "" : committedRevision;
+
+        String nextIntent = incoming == null ? "" : incoming.intent;
+        String prevIntent = existing == null ? "" : existing.intent;
+        merged.intent = !isBlank(nextIntent) ? nextIntent : prevIntent;
+
+        String nextMessage = incoming == null ? "" : incoming.messageToUser;
+        String prevMessage = existing == null ? "" : existing.messageToUser;
+        merged.messageToUser = !isBlank(nextMessage) ? nextMessage : prevMessage;
+
+        merged.operations = new ArrayList<>();
+        if (existing != null && existing.operations != null && !existing.operations.isEmpty()) {
+            merged.operations.addAll(existing.operations);
+        }
+        if (incoming != null && incoming.operations != null && !incoming.operations.isEmpty()) {
+            merged.operations.addAll(incoming.operations);
+        }
+        return merged;
     }
 
     private static boolean requiresConfirm(int changedBlocks) {
@@ -992,6 +1141,10 @@ public final class SessionManager {
         return text.trim().length();
     }
 
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
+    }
+
     private static String posString(BlockPos pos) {
         if (pos == null) {
             return "-";
@@ -1182,6 +1335,16 @@ public final class SessionManager {
         private PatchModels.Preview preview;
         private String revisionBefore;
         private String revisionAfter;
+    }
+
+    private static final class SearchBlockArgs {
+        private final String query;
+        private final int limit;
+
+        private SearchBlockArgs(String query, int limit) {
+            this.query = query;
+            this.limit = limit;
+        }
     }
 
     private static final class CommitEntry {
