@@ -22,5 +22,6 @@ public final class P2SNetworkPayloads {
         PayloadTypeRegistry.playS2C().register(S2CChatResponsePayload.TYPE, S2CChatResponsePayload.CODEC);
         PayloadTypeRegistry.playS2C().register(S2CSessionSyncPayload.TYPE, S2CSessionSyncPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(S2CBuildProgressPayload.TYPE, S2CBuildProgressPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(S2CPatchPreviewPayload.TYPE, S2CPatchPreviewPayload.CODEC);
     }
 }

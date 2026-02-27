@@ -1,6 +1,7 @@
 package com.p2s;
 
 import com.p2s.network.C2SChatMessagePayload;
+import com.p2s.network.C2SSessionActionPayload;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -19,10 +20,16 @@ public class P2SChatScreen extends Screen {
     private static final int BUTTON_WIDTH = 22;
     private static final int LINE_SPACING = 2;
     private static final int PANEL_MIN_WIDTH = 240;
+    private static final int TOP_BUTTON_HEIGHT = 20;
+    private static final int SMALL_BUTTON_WIDTH = 52;
 
     private EditBox input;
     private Button sendButton;
     private Button configButton;
+    private Button applyButton;
+    private Button discardButton;
+    private Button undoButton;
+    private Button redoButton;
     private double scrollOffset;
 
     public P2SChatScreen() {
@@ -64,6 +71,29 @@ public class P2SChatScreen extends Screen {
                 .bounds(panelX + panelWidth - PADDING - 56, PADDING, 56, INPUT_HEIGHT)
                 .build();
         addRenderableWidget(configButton);
+
+        int rowY = PADDING + TOP_BUTTON_HEIGHT + 4;
+        int rowStart = panelX + panelWidth - PADDING - (SMALL_BUTTON_WIDTH * 4 + 6);
+
+        applyButton = Button.builder(Component.literal("Apply"), btn -> sendSessionAction("apply", ""))
+                .bounds(rowStart, rowY, SMALL_BUTTON_WIDTH, TOP_BUTTON_HEIGHT)
+                .build();
+        addRenderableWidget(applyButton);
+
+        discardButton = Button.builder(Component.literal("Discard"), btn -> sendSessionAction("discard", ""))
+                .bounds(rowStart + SMALL_BUTTON_WIDTH + 2, rowY, SMALL_BUTTON_WIDTH, TOP_BUTTON_HEIGHT)
+                .build();
+        addRenderableWidget(discardButton);
+
+        undoButton = Button.builder(Component.literal("Undo"), btn -> sendSessionAction("undo", ""))
+                .bounds(rowStart + (SMALL_BUTTON_WIDTH + 2) * 2, rowY, SMALL_BUTTON_WIDTH, TOP_BUTTON_HEIGHT)
+                .build();
+        addRenderableWidget(undoButton);
+
+        redoButton = Button.builder(Component.literal("Redo"), btn -> sendSessionAction("redo", ""))
+                .bounds(rowStart + (SMALL_BUTTON_WIDTH + 2) * 3, rowY, SMALL_BUTTON_WIDTH, TOP_BUTTON_HEIGHT)
+                .build();
+        addRenderableWidget(redoButton);
     }
 
     @Override
@@ -111,6 +141,17 @@ public class P2SChatScreen extends Screen {
 
     @Override
     public void render(GuiGraphics gfx, int mouseX, int mouseY, float delta) {
+        if (applyButton != null) {
+            boolean pending = ClientSessionState.hasPendingPatch();
+            applyButton.active = pending;
+            discardButton.active = pending;
+        }
+        if (undoButton != null) {
+            boolean active = ClientSessionState.isActive();
+            undoButton.active = active;
+            redoButton.active = active;
+        }
+
         int panelWidth = getPanelWidth();
         int panelX = getPanelX(panelWidth);
         int panelLeft = panelX;
@@ -140,8 +181,43 @@ public class P2SChatScreen extends Screen {
         if (ClientSessionState.isActive()) {
             String info = "Session " + ClientSessionState.getSessionId() + " | Turns " + ClientSessionState.getTurnCount();
             gfx.drawString(this.font, info, panelX + PADDING, y, 0xAAAAAA, true);
+            y += this.font.lineHeight + 2;
+            String runtime = ClientSessionState.getRuntimeState();
+            String revision = ClientSessionState.getRevision();
+            if (runtime != null && !runtime.isBlank()) {
+                gfx.drawString(this.font, "State " + runtime + " | Rev " + revision, panelX + PADDING, y, 0x9999FF, true);
+            }
         } else {
             gfx.drawString(this.font, "No active session (send a message to start)", panelX + PADDING, y, 0xAAAAAA, true);
+        }
+
+        List<FormattedCharSequence> previewLines = getPreviewLines(panelWidth - PADDING * 2);
+        if (!previewLines.isEmpty()) {
+            y += this.font.lineHeight + 4;
+            int color = 0xFFDD88;
+            String risk = ClientSessionState.getPreviewRisk();
+            if (risk == null || risk.isBlank()) {
+                risk = ClientSessionState.getPendingRisk();
+            }
+            if (risk == null || risk.isBlank()) {
+                risk = "low";
+            }
+            if ("high".equalsIgnoreCase(risk)) {
+                color = 0xFF6666;
+            } else if ("medium".equalsIgnoreCase(risk)) {
+                color = 0xFFAA55;
+            }
+            int changed = ClientSessionState.getPreviewChangedBlocks();
+            if (changed <= 0) {
+                changed = ClientSessionState.getPendingChangedBlocks();
+            }
+            String title = "Pending Patch (" + changed + " blocks, " + risk + ")";
+            gfx.drawString(this.font, title, panelX + PADDING, y, color, true);
+            y += this.font.lineHeight + 2;
+            for (FormattedCharSequence line : previewLines) {
+                gfx.drawString(this.font, line, panelX + PADDING, y, 0xE0E0E0, true);
+                y += this.font.lineHeight + LINE_SPACING;
+            }
         }
 
         List<FormattedCharSequence> summaryLines = getSummaryLines(panelWidth - PADDING * 2);
@@ -228,7 +304,16 @@ public class P2SChatScreen extends Screen {
     }
 
     private int getHeaderHeight(int panelWidth) {
-        int base = this.font.lineHeight * 2 + 6;
+        int base = this.font.lineHeight * 4 + 10;
+        base += TOP_BUTTON_HEIGHT + 6;
+
+        List<FormattedCharSequence> previewLines = getPreviewLines(panelWidth - PADDING * 2);
+        if (!previewLines.isEmpty()) {
+            base += this.font.lineHeight + 4;
+            base += previewLines.size() * (this.font.lineHeight + LINE_SPACING);
+            base += LINE_SPACING;
+        }
+
         List<FormattedCharSequence> summaryLines = getSummaryLines(panelWidth - PADDING * 2);
         if (summaryLines.isEmpty()) {
             return base;
@@ -267,6 +352,35 @@ public class P2SChatScreen extends Screen {
                 continue;
             }
             result.addAll(this.font.split(Component.literal(line), contentWidth));
+        }
+        return result;
+    }
+
+    private List<FormattedCharSequence> getPreviewLines(int contentWidth) {
+        String summary = ClientSessionState.getPreviewSummary();
+        String detail = ClientSessionState.getPreviewDetail();
+        if (summary == null || summary.isBlank()) {
+            summary = ClientSessionState.getPendingSummary();
+        }
+        if ((summary == null || summary.isBlank()) && (detail == null || detail.isBlank())) {
+            return List.of();
+        }
+        List<FormattedCharSequence> result = new java.util.ArrayList<>();
+        if (summary != null && !summary.isBlank()) {
+            result.addAll(this.font.split(Component.literal(summary), contentWidth));
+        }
+        if (detail != null && !detail.isBlank()) {
+            String[] lines = detail.split("\\n");
+            for (String line : lines) {
+                if (line == null || line.isBlank()) {
+                    continue;
+                }
+                result.addAll(this.font.split(Component.literal(line), contentWidth));
+            }
+        }
+        int max = 12;
+        if (result.size() > max) {
+            return result.subList(0, max);
         }
         return result;
     }
@@ -325,6 +439,10 @@ public class P2SChatScreen extends Screen {
         input.setValue("");
         input.moveCursorToEnd(false);
         scrollOffset = 0;
+    }
+
+    private void sendSessionAction(String action, String payload) {
+        ClientPlayNetworking.send(new C2SSessionActionPayload(action == null ? "" : action, payload == null ? "" : payload));
     }
 
     @Override

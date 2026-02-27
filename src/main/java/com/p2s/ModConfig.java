@@ -21,6 +21,11 @@ public final class ModConfig {
     private static final String DEFAULT_MODEL = "gpt-4o-mini";
     private static final int DEFAULT_TIMEOUT_SECONDS = 30;
     private static final boolean DEFAULT_USE_TOOL_CALL = true;
+    private static final int DEFAULT_MAX_PATCH_OPS = 20000;
+    private static final int DEFAULT_MAX_BLOCKS_PER_COMMIT = 50000;
+    private static final boolean DEFAULT_CONFIRM_REQUIRED = true;
+    private static final int DEFAULT_SESSION_JOB_TIMEOUT_SECONDS = 60;
+    private static final int DEFAULT_RISK_AUTO_APPLY_THRESHOLD = -1;
     private static final String DEFAULT_PROMPT_NAME = "default";
     public static final String DEFAULT_SYSTEM_PROMPT_V1 = """
             You are a Minecraft Architect. 
@@ -45,40 +50,29 @@ public final class ModConfig {
             """;
 
     public static final String DEFAULT_SYSTEM_PROMPT = """
-            You are a Minecraft Architect. You build structures by calling the apply_structure tool.
+            You are a Minecraft Architect agent in IDE mode.
 
-            ## Tool: apply_structure
-            - palette: Map short names to minecraft:block_id
-            - structures: Array of named parts, each with a priority and actions
+            ## Workflow
+            1) First read workspace state via read_workspace_state.
+            2) Then propose edits via propose_patch.
+            3) Do not directly build blocks. The server applies patch only after user confirmation.
 
-            ## Tool: get_current_structure
-            - Read the current structure JSON for the active session
+            ## Tool: propose_patch
+            - base_revision: revision string from read_workspace_state
+            - operations: ordered patch operations
+            - op values: upsert_part | delete_part | patch_actions | set_palette
+            - actions support fill/frame/set with optional facing
 
-            ## Tool Call Loop
-            - You may call tools multiple times in one user turn
-            - After each tool call you will receive a tool result with success/failure
-            - When you are done, reply with a user-facing message
-
-            ## Priority Convention
-            - 0: foundation/clearing
-            - 10: main structure (walls, floors)
-            - 20: openings (windows, doors — overwrites walls)
-            - 30: roof/ceiling
-            - 40: interior/decoration
-            - 50: final touches
-
-            ## Actions
-            - "fill": Solid cuboid from [x,y,z] to [x,y,z]
-            - "frame": Hollow cuboid (faces only)
-            - "set": Individual blocks at [[x,y,z], ...]
-            - Optional "facing": "north|south|east|west|up|down"
+            ## Tool: read_workspace_state
+            - Read current structure, origin/size limits, and revision before editing.
 
             ## Rules
-            - Coordinates relative to (0,0,0)
-            - Use standard Minecraft Java Edition block IDs
-            - Always split structure into logical named parts with appropriate priorities
-            - When modifying an existing structure, only return the changed parts (same name = replace that part)
-            - You may reply with just text (no tool call) if you need to ask the user a question
+            - Coordinates are relative to (0,0,0)
+            - Use valid Java block IDs in palette
+            - Keep changes minimal and incremental
+            - Prefer patch_actions for small edits
+            - Use upsert_part for replacing a whole logical part
+            - Include a short user-facing summary in message_to_user
             """;
 
     public static volatile String API_URL;
@@ -86,6 +80,11 @@ public final class ModConfig {
     public static volatile String MODEL;
     public static volatile int HTTP_TIMEOUT_SECONDS;
     public static volatile boolean USE_TOOL_CALL;
+    public static volatile int MAX_PATCH_OPS;
+    public static volatile int MAX_BLOCKS_PER_COMMIT;
+    public static volatile boolean CONFIRM_REQUIRED;
+    public static volatile int SESSION_JOB_TIMEOUT_SECONDS;
+    public static volatile int RISK_AUTO_APPLY_THRESHOLD;
     public static volatile Map<String, String> PROMPTS;
     public static volatile String ACTIVE_PROMPT_NAME;
 
@@ -103,6 +102,11 @@ public final class ModConfig {
         defaults.model = DEFAULT_MODEL;
         defaults.httpTimeoutSeconds = DEFAULT_TIMEOUT_SECONDS;
         defaults.useToolCall = DEFAULT_USE_TOOL_CALL;
+        defaults.maxPatchOps = DEFAULT_MAX_PATCH_OPS;
+        defaults.maxBlocksPerCommit = DEFAULT_MAX_BLOCKS_PER_COMMIT;
+        defaults.confirmRequired = DEFAULT_CONFIRM_REQUIRED;
+        defaults.sessionJobTimeoutSeconds = DEFAULT_SESSION_JOB_TIMEOUT_SECONDS;
+        defaults.riskAutoApplyThreshold = DEFAULT_RISK_AUTO_APPLY_THRESHOLD;
         defaults.prompts = defaultPrompts();
         defaults.activePrompt = DEFAULT_PROMPT_NAME;
 
@@ -247,7 +251,8 @@ public final class ModConfig {
 
     public static synchronized void reload() {
         apply(loadFromFile());
-        P2SMod.LOGGER.info("Config reloaded: url={}, model={}, timeout={}s", API_URL, MODEL, HTTP_TIMEOUT_SECONDS);
+        P2SMod.LOGGER.info("Config reloaded: url={}, model={}, timeout={}s, maxPatchOps={}, maxBlocksPerCommit={}, confirmRequired={}",
+                API_URL, MODEL, HTTP_TIMEOUT_SECONDS, MAX_PATCH_OPS, MAX_BLOCKS_PER_COMMIT, CONFIRM_REQUIRED);
     }
 
     private static synchronized void apply(Values file) {
@@ -256,6 +261,11 @@ public final class ModConfig {
         MODEL = pickEnvOrConfig("P2S_MODEL", file.model, DEFAULT_MODEL);
         HTTP_TIMEOUT_SECONDS = pickEnvOrConfigInt("P2S_TIMEOUT_SECONDS", file.httpTimeoutSeconds, DEFAULT_TIMEOUT_SECONDS);
         USE_TOOL_CALL = pickEnvOrConfigBool("P2S_USE_TOOL_CALL", file.useToolCall, DEFAULT_USE_TOOL_CALL);
+        MAX_PATCH_OPS = pickEnvOrConfigInt("P2S_MAX_PATCH_OPS", file.maxPatchOps, DEFAULT_MAX_PATCH_OPS);
+        MAX_BLOCKS_PER_COMMIT = pickEnvOrConfigInt("P2S_MAX_BLOCKS_PER_COMMIT", file.maxBlocksPerCommit, DEFAULT_MAX_BLOCKS_PER_COMMIT);
+        CONFIRM_REQUIRED = pickEnvOrConfigBool("P2S_CONFIRM_REQUIRED", file.confirmRequired, DEFAULT_CONFIRM_REQUIRED);
+        SESSION_JOB_TIMEOUT_SECONDS = pickEnvOrConfigInt("P2S_SESSION_JOB_TIMEOUT_SECONDS", file.sessionJobTimeoutSeconds, DEFAULT_SESSION_JOB_TIMEOUT_SECONDS);
+        RISK_AUTO_APPLY_THRESHOLD = file.riskAutoApplyThreshold == null ? DEFAULT_RISK_AUTO_APPLY_THRESHOLD : file.riskAutoApplyThreshold;
         PROMPTS = new LinkedHashMap<>(file.prompts == null ? defaultPrompts() : file.prompts);
         ensureDefaultPromptEntry(PROMPTS);
         ACTIVE_PROMPT_NAME = pickPromptName("P2S_PROMPT", file.activePrompt, PROMPTS);
@@ -267,6 +277,11 @@ public final class ModConfig {
         String model;
         Integer httpTimeoutSeconds;
         Boolean useToolCall;
+        Integer maxPatchOps;
+        Integer maxBlocksPerCommit;
+        Boolean confirmRequired;
+        Integer sessionJobTimeoutSeconds;
+        Integer riskAutoApplyThreshold;
         Map<String, String> prompts;
         String activePrompt;
     }

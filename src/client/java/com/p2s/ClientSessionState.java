@@ -13,12 +13,36 @@ public final class ClientSessionState {
     private static String partsSummary = "";
     private static String structureSummary = "";
     private static String status = "";
+    private static String runtimeState = "";
+    private static String revision = "";
+    private static boolean hasPendingPatch = false;
+    private static String pendingSummary = "";
+    private static String pendingRisk = "";
+    private static int pendingChangedBlocks = 0;
+    private static String previewSummary = "";
+    private static String previewDetail = "";
+    private static String previewRisk = "";
+    private static int previewChangedBlocks = 0;
     private static final List<ChatMessage> messages = new ArrayList<>();
 
     private ClientSessionState() {
     }
 
-    public static void onSessionSync(boolean activeFlag, String id, int turns, int parts, int blocks, String summary, String structure) {
+    public static void onSessionSync(
+            boolean activeFlag,
+            String id,
+            int turns,
+            int parts,
+            int blocks,
+            String summary,
+            String structure,
+            String runtime,
+            String rev,
+            boolean pending,
+            String pendingPatchSummary,
+            String risk,
+            int changed
+    ) {
         active = activeFlag;
         sessionId = id == null ? "" : id;
         turnCount = turns;
@@ -26,9 +50,19 @@ public final class ClientSessionState {
         totalBlocks = blocks;
         partsSummary = summary == null ? "" : summary;
         structureSummary = structure == null ? "" : structure;
+        runtimeState = runtime == null ? "" : runtime;
+        revision = rev == null ? "" : rev;
+        hasPendingPatch = pending;
+        pendingSummary = pendingPatchSummary == null ? "" : pendingPatchSummary;
+        pendingRisk = risk == null ? "" : risk;
+        pendingChangedBlocks = Math.max(0, changed);
+        if (!pending) {
+            clearPreview();
+        }
         if (!activeFlag) {
             status = "";
             messages.clear();
+            clearPreview();
         }
     }
 
@@ -59,6 +93,17 @@ public final class ClientSessionState {
             sb.append(progress).append("%");
         }
         status = sb.toString();
+    }
+
+    public static void onPatchPreview(boolean hasPreview, String summary, String detail, int changedBlocks, String riskLevel) {
+        if (!hasPreview) {
+            clearPreview();
+            return;
+        }
+        previewSummary = summary == null ? "" : summary;
+        previewDetail = detail == null ? "" : detail;
+        previewRisk = riskLevel == null ? "" : riskLevel;
+        previewChangedBlocks = Math.max(0, changedBlocks);
     }
 
     public static void addUserMessage(String text) {
@@ -112,6 +157,53 @@ public final class ClientSessionState {
 
     public static void setStatus(String value) {
         status = value == null ? "" : value;
+    }
+
+    public static String getRuntimeState() {
+        return runtimeState;
+    }
+
+    public static String getRevision() {
+        return revision;
+    }
+
+    public static boolean hasPendingPatch() {
+        return hasPendingPatch;
+    }
+
+    public static String getPendingSummary() {
+        return pendingSummary;
+    }
+
+    public static String getPendingRisk() {
+        return pendingRisk;
+    }
+
+    public static int getPendingChangedBlocks() {
+        return pendingChangedBlocks;
+    }
+
+    public static String getPreviewSummary() {
+        return previewSummary;
+    }
+
+    public static String getPreviewDetail() {
+        return previewDetail;
+    }
+
+    public static String getPreviewRisk() {
+        return previewRisk;
+    }
+
+    public static int getPreviewChangedBlocks() {
+        return previewChangedBlocks;
+    }
+
+    private static void clearPreview() {
+        previewSummary = "";
+        previewDetail = "";
+        previewRisk = "";
+        previewChangedBlocks = 0;
     }
 
     public record ChatMessage(String role, String text) {

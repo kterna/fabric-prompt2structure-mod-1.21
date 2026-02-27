@@ -59,6 +59,18 @@ public final class ModCommandRegistry {
                         SessionManager.undo(ctx.getSource().getPlayerOrException());
                         return 1;
                     }))
+                    .then(Commands.literal("redo").executes(ctx -> {
+                        SessionManager.redo(ctx.getSource().getPlayerOrException());
+                        return 1;
+                    }))
+                    .then(Commands.literal("apply").executes(ctx -> {
+                        SessionManager.handleSessionAction(ctx.getSource().getPlayerOrException(), "apply", "");
+                        return 1;
+                    }))
+                    .then(Commands.literal("discard").executes(ctx -> {
+                        SessionManager.handleSessionAction(ctx.getSource().getPlayerOrException(), "discard", "");
+                        return 1;
+                    }))
                     .then(Commands.literal("save")
                             .then(Commands.argument("name", StringArgumentType.word())
                                     .executes(ctx -> {

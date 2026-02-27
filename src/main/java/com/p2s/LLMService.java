@@ -101,7 +101,7 @@ public final class LLMService {
 
         body.add("messages", messages);
         body.addProperty("temperature", 0.4);
-        applyToolOrResponseFormat(body, useToolCall, forceTool);
+        applyLegacyToolOrResponseFormat(body, useToolCall, forceTool);
         return GSON.toJson(body);
     }
 
@@ -110,13 +110,13 @@ public final class LLMService {
         body.addProperty("model", ModConfig.MODEL);
         body.add("messages", GSON.toJsonTree(messages));
         body.addProperty("temperature", 0.4);
-        applyToolOrResponseFormat(body, useToolCall, forceTool);
+        applySessionToolOrResponseFormat(body, useToolCall);
         return GSON.toJson(body);
     }
 
-    private static void applyToolOrResponseFormat(JsonObject body, boolean useToolCall, boolean forceTool) {
+    private static void applyLegacyToolOrResponseFormat(JsonObject body, boolean useToolCall, boolean forceTool) {
         if (useToolCall) {
-            body.add("tools", buildToolDefinitions());
+            body.add("tools", buildLegacyToolDefinitions());
             if (forceTool) {
                 JsonObject toolChoice = new JsonObject();
                 toolChoice.addProperty("type", "function");
@@ -134,7 +134,18 @@ public final class LLMService {
         }
     }
 
-    private static JsonArray buildToolDefinitions() {
+    private static void applySessionToolOrResponseFormat(JsonObject body, boolean useToolCall) {
+        if (useToolCall) {
+            body.add("tools", buildSessionToolDefinitions());
+            body.addProperty("tool_choice", "auto");
+            return;
+        }
+        JsonObject responseFormat = new JsonObject();
+        responseFormat.addProperty("type", "json_object");
+        body.add("response_format", responseFormat);
+    }
+
+    private static JsonArray buildLegacyToolDefinitions() {
         JsonObject tool = new JsonObject();
         tool.addProperty("type", "function");
 
@@ -273,6 +284,193 @@ public final class LLMService {
         tools.add(tool);
         tools.add(getTool);
         return tools;
+    }
+
+    private static JsonArray buildSessionToolDefinitions() {
+        JsonArray tools = new JsonArray();
+
+        JsonObject readTool = new JsonObject();
+        readTool.addProperty("type", "function");
+        JsonObject readFn = new JsonObject();
+        readFn.addProperty("name", "read_workspace_state");
+        readFn.addProperty("description", "Read current workspace structure, revision, bounds and summary before proposing a patch.");
+        JsonObject readParams = new JsonObject();
+        readParams.addProperty("type", "object");
+        readParams.add("properties", new JsonObject());
+        readParams.addProperty("additionalProperties", false);
+        readFn.add("parameters", readParams);
+        readTool.add("function", readFn);
+        tools.add(readTool);
+
+        JsonObject patchTool = new JsonObject();
+        patchTool.addProperty("type", "function");
+        JsonObject patchFn = new JsonObject();
+        patchFn.addProperty("name", "propose_patch");
+        patchFn.addProperty("description", "Propose an editable structure patch. Do not build directly.");
+
+        JsonObject params = new JsonObject();
+        params.addProperty("type", "object");
+        JsonObject properties = new JsonObject();
+
+        JsonObject baseRevision = new JsonObject();
+        baseRevision.addProperty("type", "string");
+        baseRevision.addProperty("description", "Workspace revision this patch is based on.");
+        properties.add("base_revision", baseRevision);
+
+        JsonObject intent = new JsonObject();
+        intent.addProperty("type", "string");
+        intent.addProperty("description", "Short user intent summary.");
+        properties.add("intent", intent);
+
+        JsonObject messageToUser = new JsonObject();
+        messageToUser.addProperty("type", "string");
+        messageToUser.addProperty("description", "One-line message shown to the user in preview.");
+        properties.add("message_to_user", messageToUser);
+
+        JsonObject operations = new JsonObject();
+        operations.addProperty("type", "array");
+        operations.addProperty("description", "Patch operations to apply to the structure model.");
+        JsonObject operationItem = new JsonObject();
+        operationItem.addProperty("type", "object");
+        JsonObject operationProps = new JsonObject();
+
+        JsonObject op = new JsonObject();
+        op.addProperty("type", "string");
+        JsonArray opEnum = new JsonArray();
+        opEnum.add("upsert_part");
+        opEnum.add("delete_part");
+        opEnum.add("patch_actions");
+        opEnum.add("set_palette");
+        op.add("enum", opEnum);
+        operationProps.add("op", op);
+
+        JsonObject part = new JsonObject();
+        part.addProperty("type", "string");
+        operationProps.add("part", part);
+
+        JsonObject priority = new JsonObject();
+        priority.addProperty("type", "integer");
+        operationProps.add("priority", priority);
+
+        JsonObject paletteDelta = new JsonObject();
+        paletteDelta.addProperty("type", "object");
+        JsonObject paletteDeltaValue = new JsonObject();
+        paletteDeltaValue.addProperty("type", "string");
+        paletteDelta.add("additionalProperties", paletteDeltaValue);
+        operationProps.add("palette_delta", paletteDelta);
+
+        JsonObject actionsAdd = new JsonObject();
+        actionsAdd.addProperty("type", "array");
+        actionsAdd.add("items", buildActionSchema());
+        operationProps.add("actions_add", actionsAdd);
+
+        JsonObject actionsRemoveMatch = new JsonObject();
+        actionsRemoveMatch.addProperty("type", "array");
+        actionsRemoveMatch.add("items", buildActionMatchSchema());
+        operationProps.add("actions_remove_match", actionsRemoveMatch);
+
+        operationItem.add("properties", operationProps);
+        JsonArray operationRequired = new JsonArray();
+        operationRequired.add("op");
+        operationItem.add("required", operationRequired);
+        operations.add("items", operationItem);
+        properties.add("operations", operations);
+
+        params.add("properties", properties);
+        JsonArray required = new JsonArray();
+        required.add("operations");
+        params.add("required", required);
+        patchFn.add("parameters", params);
+        patchTool.add("function", patchFn);
+        tools.add(patchTool);
+
+        JsonObject explainTool = new JsonObject();
+        explainTool.addProperty("type", "function");
+        JsonObject explainFn = new JsonObject();
+        explainFn.addProperty("name", "explain_plan");
+        explainFn.addProperty("description", "Optional: provide short plan rationale to show users before patch confirmation.");
+        JsonObject explainParams = new JsonObject();
+        explainParams.addProperty("type", "object");
+        JsonObject explainProps = new JsonObject();
+        JsonObject plan = new JsonObject();
+        plan.addProperty("type", "string");
+        explainProps.add("plan", plan);
+        explainParams.add("properties", explainProps);
+        explainFn.add("parameters", explainParams);
+        explainTool.add("function", explainFn);
+        tools.add(explainTool);
+
+        return tools;
+    }
+
+    private static JsonObject buildActionSchema() {
+        JsonObject schema = new JsonObject();
+        schema.addProperty("type", "object");
+        JsonObject props = new JsonObject();
+
+        JsonObject type = new JsonObject();
+        type.addProperty("type", "string");
+        JsonArray typeEnum = new JsonArray();
+        typeEnum.add("fill");
+        typeEnum.add("frame");
+        typeEnum.add("set");
+        type.add("enum", typeEnum);
+        props.add("type", type);
+
+        JsonObject block = new JsonObject();
+        block.addProperty("type", "string");
+        props.add("block", block);
+
+        JsonObject from = new JsonObject();
+        from.addProperty("type", "array");
+        JsonObject intItem = new JsonObject();
+        intItem.addProperty("type", "integer");
+        from.add("items", intItem);
+        from.addProperty("minItems", 3);
+        from.addProperty("maxItems", 3);
+        props.add("from", from);
+
+        JsonObject to = new JsonObject();
+        to.addProperty("type", "array");
+        to.add("items", intItem.deepCopy());
+        to.addProperty("minItems", 3);
+        to.addProperty("maxItems", 3);
+        props.add("to", to);
+
+        JsonObject at = new JsonObject();
+        at.addProperty("type", "array");
+        JsonObject vec3 = new JsonObject();
+        vec3.addProperty("type", "array");
+        vec3.add("items", intItem.deepCopy());
+        vec3.addProperty("minItems", 3);
+        vec3.addProperty("maxItems", 3);
+        at.add("items", vec3);
+        props.add("at", at);
+
+        JsonObject facing = new JsonObject();
+        facing.addProperty("type", "string");
+        JsonArray facingEnum = new JsonArray();
+        facingEnum.add("north");
+        facingEnum.add("south");
+        facingEnum.add("east");
+        facingEnum.add("west");
+        facingEnum.add("up");
+        facingEnum.add("down");
+        facing.add("enum", facingEnum);
+        props.add("facing", facing);
+
+        schema.add("properties", props);
+        JsonArray required = new JsonArray();
+        required.add("type");
+        required.add("block");
+        schema.add("required", required);
+        return schema;
+    }
+
+    private static JsonObject buildActionMatchSchema() {
+        JsonObject schema = buildActionSchema();
+        schema.remove("required");
+        return schema;
     }
 
     private static Result parseResponse(String responseBody) throws IOException {

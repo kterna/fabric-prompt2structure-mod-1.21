@@ -186,6 +186,18 @@ public final class StructureBuilder {
         return v1;
     }
 
+    public static Map<String, BlockState> resolvePaletteStates(Map<String, String> paletteDef) {
+        return resolvePalette(paletteDef);
+    }
+
+    public static BlockState resolvePaletteBlockState(String rawId, String paletteKey) {
+        return resolveBlockState(rawId, paletteKey);
+    }
+
+    public static BlockState applyFacingState(BlockState state, String facing) {
+        return applyFacing(state, facing);
+    }
+
     private static Map<String, BlockState> resolvePalette(Map<String, String> paletteDef) {
         Map<String, BlockState> palette = new HashMap<>();
         if (paletteDef != null) {

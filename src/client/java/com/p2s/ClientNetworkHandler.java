@@ -2,6 +2,7 @@ package com.p2s;
 
 import com.p2s.network.S2CBuildProgressPayload;
 import com.p2s.network.S2CChatResponsePayload;
+import com.p2s.network.S2CPatchPreviewPayload;
 import com.p2s.network.S2CSelectionSyncPayload;
 import com.p2s.network.S2CSessionSyncPayload;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
@@ -25,7 +26,13 @@ public final class ClientNetworkHandler {
                         payload.partCount(),
                         payload.totalBlocks(),
                         payload.partsSummary(),
-                        payload.structureSummary()
+                        payload.structureSummary(),
+                        payload.runtimeState(),
+                        payload.revision(),
+                        payload.hasPendingPatch(),
+                        payload.pendingSummary(),
+                        payload.pendingRisk(),
+                        payload.pendingChangedBlocks()
                 )));
 
         ClientPlayNetworking.registerGlobalReceiver(S2CBuildProgressPayload.TYPE, (payload, context) ->
@@ -34,6 +41,15 @@ public final class ClientNetworkHandler {
                         payload.currentPart(),
                         payload.progress(),
                         payload.blocksPlaced()
+                )));
+
+        ClientPlayNetworking.registerGlobalReceiver(S2CPatchPreviewPayload.TYPE, (payload, context) ->
+                context.client().execute(() -> ClientSessionState.onPatchPreview(
+                        payload.hasPreview(),
+                        payload.summary(),
+                        payload.detail(),
+                        payload.changedBlocks(),
+                        payload.riskLevel()
                 )));
     }
 }
