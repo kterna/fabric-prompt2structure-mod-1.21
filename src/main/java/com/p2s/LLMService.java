@@ -14,7 +14,10 @@ import okhttp3.Response;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -57,32 +60,46 @@ public final class LLMService {
     }
 
     public static CompletableFuture<SessionResult> requestWithHistory(java.util.List<JsonObject> messages) {
-        return requestWithHistoryInternal(messages, false, null);
+        return requestWithHistoryInternal(messages, false, null, null);
     }
 
     public static CompletableFuture<SessionResult> requestWithHistoryWithSkills(java.util.List<JsonObject> messages) {
-        return requestWithHistoryInternal(messages, true, null);
+        return requestWithHistoryInternal(messages, true, null, null);
     }
 
     public static CompletableFuture<SessionResult> requestWithHistoryWithSkills(
             java.util.List<JsonObject> messages,
             RequestConfig config
     ) {
-        return requestWithHistoryInternal(messages, true, config);
+        return requestWithHistoryInternal(messages, true, config, null);
+    }
+
+    public static CompletableFuture<SessionResult> requestWithHistoryWithSkills(
+            java.util.List<JsonObject> messages,
+            RequestConfig config,
+            Collection<String> allowedTools
+    ) {
+        return requestWithHistoryInternal(messages, true, config, allowedTools);
     }
 
     private static CompletableFuture<SessionResult> requestWithHistoryInternal(
             java.util.List<JsonObject> messages,
             boolean includeSkillTools,
-            RequestConfig overrideConfig
+            RequestConfig overrideConfig,
+            Collection<String> allowedTools
     ) {
         return CompletableFuture.supplyAsync(() -> {
             RequestConfig cfg = resolveConfig(overrideConfig);
-            String bodyJson = buildBodyForMessages(messages, cfg.model(), cfg.useToolCall(), includeSkillTools);
+            Set<String> normalizedAllowedTools = normalizeAllowedToolNames(allowedTools);
+            String bodyJson = buildBodyForMessages(messages, cfg.model(), cfg.useToolCall(), includeSkillTools, normalizedAllowedTools);
             int messageCount = messages == null ? 0 : messages.size();
             int payloadBytes = bodyJson == null ? 0 : bodyJson.length();
             P2SMod.LOGGER.info("LLM session request -> url={}, model={}, timeout={}s", cfg.apiUrl(), cfg.model(), cfg.httpTimeoutSeconds());
-            P2SMod.LOGGER.info("LLM session payload -> messages={}, bytes={}, toolCall={}", messageCount, payloadBytes, cfg.useToolCall());
+            P2SMod.LOGGER.info("LLM session payload -> messages={}, bytes={}, toolCall={}, toolWhitelist={}",
+                    messageCount,
+                    payloadBytes,
+                    cfg.useToolCall(),
+                    normalizedAllowedTools == null ? "all" : normalizedAllowedTools.size());
             Request request = new Request.Builder()
                     .url(cfg.apiUrl())
                     .post(RequestBody.create(bodyJson, JSON))
@@ -129,13 +146,14 @@ public final class LLMService {
             java.util.List<JsonObject> messages,
             String model,
             boolean useToolCall,
-            boolean includeSkillTools
+            boolean includeSkillTools,
+            Set<String> allowedTools
     ) {
         JsonObject body = new JsonObject();
         body.addProperty("model", model);
         body.add("messages", GSON.toJsonTree(messages));
         body.addProperty("temperature", 0.4);
-        applySessionToolOrResponseFormat(body, useToolCall, includeSkillTools);
+        applySessionToolOrResponseFormat(body, useToolCall, includeSkillTools, allowedTools);
         return GSON.toJson(body);
     }
 
@@ -159,9 +177,14 @@ public final class LLMService {
         }
     }
 
-    private static void applySessionToolOrResponseFormat(JsonObject body, boolean useToolCall, boolean includeSkillTools) {
+    private static void applySessionToolOrResponseFormat(
+            JsonObject body,
+            boolean useToolCall,
+            boolean includeSkillTools,
+            Set<String> allowedTools
+    ) {
         if (useToolCall) {
-            body.add("tools", buildSessionToolDefinitions(includeSkillTools));
+            body.add("tools", buildSessionToolDefinitions(includeSkillTools, allowedTools));
             body.addProperty("tool_choice", "auto");
             return;
         }
@@ -311,10 +334,10 @@ public final class LLMService {
         return tools;
     }
 
-    private static JsonArray buildSessionToolDefinitions(boolean includeSkillTools) {
+    private static JsonArray buildSessionToolDefinitions(boolean includeSkillTools, Set<String> allowedTools) {
         JsonArray tools = new JsonArray();
 
-        if (includeSkillTools) {
+        if (includeSkillTools && allowsTool(allowedTools, "list_skills")) {
             JsonObject listSkillTool = new JsonObject();
             listSkillTool.addProperty("type", "function");
             JsonObject listSkillFn = new JsonObject();
@@ -327,7 +350,9 @@ public final class LLMService {
             listSkillFn.add("parameters", listSkillParams);
             listSkillTool.add("function", listSkillFn);
             tools.add(listSkillTool);
+        }
 
+        if (includeSkillTools && allowsTool(allowedTools, "read_skill")) {
             JsonObject readSkillTool = new JsonObject();
             readSkillTool.addProperty("type", "function");
             JsonObject readSkillFn = new JsonObject();
@@ -345,7 +370,9 @@ public final class LLMService {
             readSkillFn.add("parameters", readSkillParams);
             readSkillTool.add("function", readSkillFn);
             tools.add(readSkillTool);
+        }
 
+        if (includeSkillTools && allowsTool(allowedTools, "search_skill")) {
             JsonObject searchSkillTool = new JsonObject();
             searchSkillTool.addProperty("type", "function");
             JsonObject searchSkillFn = new JsonObject();
@@ -376,146 +403,310 @@ public final class LLMService {
             tools.add(searchSkillTool);
         }
 
-        JsonObject readTool = new JsonObject();
-        readTool.addProperty("type", "function");
-        JsonObject readFn = new JsonObject();
-        readFn.addProperty("name", "read_workspace_state");
-        readFn.addProperty("description", "Read current (staged) workspace structure, revision, bounds and summary before proposing a patch.");
-        JsonObject readParams = new JsonObject();
-        readParams.addProperty("type", "object");
-        readParams.add("properties", new JsonObject());
-        readParams.addProperty("additionalProperties", false);
-        readFn.add("parameters", readParams);
-        readTool.add("function", readFn);
-        tools.add(readTool);
+        if (allowsTool(allowedTools, "read_workspace_state")) {
+            JsonObject readTool = new JsonObject();
+            readTool.addProperty("type", "function");
+            JsonObject readFn = new JsonObject();
+            readFn.addProperty("name", "read_workspace_state");
+            readFn.addProperty("description", "Read current (staged) workspace structure, revision, bounds and summary before proposing a patch.");
+            JsonObject readParams = new JsonObject();
+            readParams.addProperty("type", "object");
+            readParams.add("properties", new JsonObject());
+            readParams.addProperty("additionalProperties", false);
+            readFn.add("parameters", readParams);
+            readTool.add("function", readFn);
+            tools.add(readTool);
+        }
 
-        JsonObject searchTool = new JsonObject();
-        searchTool.addProperty("type", "function");
-        JsonObject searchFn = new JsonObject();
-        searchFn.addProperty("name", "search_block_ids");
-        searchFn.addProperty("description", "Search valid block IDs by keyword or partial id.");
-        JsonObject searchParams = new JsonObject();
-        searchParams.addProperty("type", "object");
-        JsonObject searchProps = new JsonObject();
+        if (allowsTool(allowedTools, "search_block_ids")) {
+            JsonObject searchTool = new JsonObject();
+            searchTool.addProperty("type", "function");
+            JsonObject searchFn = new JsonObject();
+            searchFn.addProperty("name", "search_block_ids");
+            searchFn.addProperty("description", "Search valid block IDs by keyword or partial id.");
+            JsonObject searchParams = new JsonObject();
+            searchParams.addProperty("type", "object");
+            JsonObject searchProps = new JsonObject();
 
-        JsonObject searchQuery = new JsonObject();
-        searchQuery.addProperty("type", "string");
-        searchQuery.addProperty("description", "Keyword or partial block id to search.");
-        searchProps.add("query", searchQuery);
+            JsonObject searchQuery = new JsonObject();
+            searchQuery.addProperty("type", "string");
+            searchQuery.addProperty("description", "Keyword or partial block id to search.");
+            searchProps.add("query", searchQuery);
 
-        JsonObject searchLimit = new JsonObject();
-        searchLimit.addProperty("type", "integer");
-        searchLimit.addProperty("description", "Max results (1-50).");
-        searchProps.add("limit", searchLimit);
+            JsonObject searchLimit = new JsonObject();
+            searchLimit.addProperty("type", "integer");
+            searchLimit.addProperty("description", "Max results (1-50).");
+            searchProps.add("limit", searchLimit);
 
-        searchParams.add("properties", searchProps);
-        JsonArray searchRequired = new JsonArray();
-        searchRequired.add("query");
-        searchParams.add("required", searchRequired);
-        searchParams.addProperty("additionalProperties", false);
-        searchFn.add("parameters", searchParams);
-        searchTool.add("function", searchFn);
-        tools.add(searchTool);
+            searchParams.add("properties", searchProps);
+            JsonArray searchRequired = new JsonArray();
+            searchRequired.add("query");
+            searchParams.add("required", searchRequired);
+            searchParams.addProperty("additionalProperties", false);
+            searchFn.add("parameters", searchParams);
+            searchTool.add("function", searchFn);
+            tools.add(searchTool);
+        }
 
-        JsonObject patchTool = new JsonObject();
-        patchTool.addProperty("type", "function");
-        JsonObject patchFn = new JsonObject();
-        patchFn.addProperty("name", "propose_patch");
-        patchFn.addProperty("description", "Propose an editable structure patch. Do not build directly.");
+        if (allowsTool(allowedTools, "propose_patch")) {
+            JsonObject patchTool = new JsonObject();
+            patchTool.addProperty("type", "function");
+            JsonObject patchFn = new JsonObject();
+            patchFn.addProperty("name", "propose_patch");
+            patchFn.addProperty("description", "Propose an editable structure patch. Do not build directly.");
 
-        JsonObject params = new JsonObject();
-        params.addProperty("type", "object");
-        JsonObject properties = new JsonObject();
+            JsonObject params = new JsonObject();
+            params.addProperty("type", "object");
+            JsonObject properties = new JsonObject();
 
-        JsonObject baseRevision = new JsonObject();
-        baseRevision.addProperty("type", "string");
-        baseRevision.addProperty("description", "Workspace revision this patch is based on.");
-        properties.add("base_revision", baseRevision);
+            JsonObject baseRevision = new JsonObject();
+            baseRevision.addProperty("type", "string");
+            baseRevision.addProperty("description", "Workspace revision this patch is based on.");
+            properties.add("base_revision", baseRevision);
 
-        JsonObject intent = new JsonObject();
-        intent.addProperty("type", "string");
-        intent.addProperty("description", "Short user intent summary.");
-        properties.add("intent", intent);
+            JsonObject intent = new JsonObject();
+            intent.addProperty("type", "string");
+            intent.addProperty("description", "Short user intent summary.");
+            properties.add("intent", intent);
 
-        JsonObject messageToUser = new JsonObject();
-        messageToUser.addProperty("type", "string");
-        messageToUser.addProperty("description", "One-line message shown to the user in preview.");
-        properties.add("message_to_user", messageToUser);
+            JsonObject messageToUser = new JsonObject();
+            messageToUser.addProperty("type", "string");
+            messageToUser.addProperty("description", "One-line message shown to the user in preview.");
+            properties.add("message_to_user", messageToUser);
 
-        JsonObject operations = new JsonObject();
-        operations.addProperty("type", "array");
-        operations.addProperty("description", "Patch operations to apply to the structure model.");
-        JsonObject operationItem = new JsonObject();
-        operationItem.addProperty("type", "object");
-        JsonObject operationProps = new JsonObject();
+            JsonObject operations = new JsonObject();
+            operations.addProperty("type", "array");
+            operations.addProperty("description", "Patch operations to apply to the structure model.");
+            JsonObject operationItem = new JsonObject();
+            operationItem.addProperty("type", "object");
+            JsonObject operationProps = new JsonObject();
 
-        JsonObject op = new JsonObject();
-        op.addProperty("type", "string");
-        JsonArray opEnum = new JsonArray();
-        opEnum.add("upsert_part");
-        opEnum.add("delete_part");
-        opEnum.add("patch_actions");
-        opEnum.add("set_palette");
-        op.add("enum", opEnum);
-        operationProps.add("op", op);
+            JsonObject op = new JsonObject();
+            op.addProperty("type", "string");
+            JsonArray opEnum = new JsonArray();
+            opEnum.add("upsert_part");
+            opEnum.add("delete_part");
+            opEnum.add("patch_actions");
+            opEnum.add("set_palette");
+            op.add("enum", opEnum);
+            operationProps.add("op", op);
 
-        JsonObject part = new JsonObject();
-        part.addProperty("type", "string");
-        operationProps.add("part", part);
+            JsonObject part = new JsonObject();
+            part.addProperty("type", "string");
+            operationProps.add("part", part);
 
-        JsonObject priority = new JsonObject();
-        priority.addProperty("type", "integer");
-        operationProps.add("priority", priority);
+            JsonObject priority = new JsonObject();
+            priority.addProperty("type", "integer");
+            operationProps.add("priority", priority);
 
-        JsonObject paletteDelta = new JsonObject();
-        paletteDelta.addProperty("type", "object");
-        JsonObject paletteDeltaValue = new JsonObject();
-        paletteDeltaValue.addProperty("type", "string");
-        paletteDelta.add("additionalProperties", paletteDeltaValue);
-        operationProps.add("palette_delta", paletteDelta);
+            JsonObject paletteDelta = new JsonObject();
+            paletteDelta.addProperty("type", "object");
+            JsonObject paletteDeltaValue = new JsonObject();
+            paletteDeltaValue.addProperty("type", "string");
+            paletteDelta.add("additionalProperties", paletteDeltaValue);
+            operationProps.add("palette_delta", paletteDelta);
 
-        JsonObject actionsAdd = new JsonObject();
-        actionsAdd.addProperty("type", "array");
-        actionsAdd.add("items", buildActionSchema());
-        operationProps.add("actions_add", actionsAdd);
+            JsonObject actionsAdd = new JsonObject();
+            actionsAdd.addProperty("type", "array");
+            actionsAdd.add("items", buildActionSchema());
+            operationProps.add("actions_add", actionsAdd);
 
-        JsonObject actionsRemoveMatch = new JsonObject();
-        actionsRemoveMatch.addProperty("type", "array");
-        actionsRemoveMatch.add("items", buildActionMatchSchema());
-        operationProps.add("actions_remove_match", actionsRemoveMatch);
+            JsonObject actionsRemoveMatch = new JsonObject();
+            actionsRemoveMatch.addProperty("type", "array");
+            actionsRemoveMatch.add("items", buildActionMatchSchema());
+            operationProps.add("actions_remove_match", actionsRemoveMatch);
 
-        operationItem.add("properties", operationProps);
-        JsonArray operationRequired = new JsonArray();
-        operationRequired.add("op");
-        operationItem.add("required", operationRequired);
-        operations.add("items", operationItem);
-        properties.add("operations", operations);
+            operationItem.add("properties", operationProps);
+            JsonArray operationRequired = new JsonArray();
+            operationRequired.add("op");
+            operationItem.add("required", operationRequired);
+            operations.add("items", operationItem);
+            properties.add("operations", operations);
 
-        params.add("properties", properties);
-        JsonArray required = new JsonArray();
-        required.add("operations");
-        params.add("required", required);
-        patchFn.add("parameters", params);
-        patchTool.add("function", patchFn);
-        tools.add(patchTool);
+            params.add("properties", properties);
+            JsonArray required = new JsonArray();
+            required.add("operations");
+            params.add("required", required);
+            patchFn.add("parameters", params);
+            patchTool.add("function", patchFn);
+            tools.add(patchTool);
+        }
 
-        JsonObject explainTool = new JsonObject();
-        explainTool.addProperty("type", "function");
-        JsonObject explainFn = new JsonObject();
-        explainFn.addProperty("name", "explain_plan");
-        explainFn.addProperty("description", "Optional: provide short plan rationale to show users before patch confirmation.");
-        JsonObject explainParams = new JsonObject();
-        explainParams.addProperty("type", "object");
-        JsonObject explainProps = new JsonObject();
-        JsonObject plan = new JsonObject();
-        plan.addProperty("type", "string");
-        explainProps.add("plan", plan);
-        explainParams.add("properties", explainProps);
-        explainFn.add("parameters", explainParams);
-        explainTool.add("function", explainFn);
-        tools.add(explainTool);
+        if (allowsTool(allowedTools, "explain_plan")) {
+            JsonObject explainTool = new JsonObject();
+            explainTool.addProperty("type", "function");
+            JsonObject explainFn = new JsonObject();
+            explainFn.addProperty("name", "explain_plan");
+            explainFn.addProperty("description", "Optional: provide short plan rationale to show users before patch confirmation.");
+            JsonObject explainParams = new JsonObject();
+            explainParams.addProperty("type", "object");
+            JsonObject explainProps = new JsonObject();
+            JsonObject plan = new JsonObject();
+            plan.addProperty("type", "string");
+            explainProps.add("plan", plan);
+            explainParams.add("properties", explainProps);
+            explainFn.add("parameters", explainParams);
+            explainTool.add("function", explainFn);
+            tools.add(explainTool);
+        }
+
+        if (includeSkillTools && allowsTool(allowedTools, "list_subagents")) {
+            JsonObject listSubagentsTool = new JsonObject();
+            listSubagentsTool.addProperty("type", "function");
+            JsonObject listSubagentsFn = new JsonObject();
+            listSubagentsFn.addProperty("name", "list_subagents");
+            listSubagentsFn.addProperty("description", "List all subagents created in this session.");
+            JsonObject listSubagentsParams = new JsonObject();
+            listSubagentsParams.addProperty("type", "object");
+            JsonObject listSubagentsProps = new JsonObject();
+            JsonObject includeDeleted = new JsonObject();
+            includeDeleted.addProperty("type", "boolean");
+            includeDeleted.addProperty("description", "Whether deleted subagents should be included.");
+            listSubagentsProps.add("include_deleted", includeDeleted);
+            listSubagentsParams.add("properties", listSubagentsProps);
+            listSubagentsParams.addProperty("additionalProperties", false);
+            listSubagentsFn.add("parameters", listSubagentsParams);
+            listSubagentsTool.add("function", listSubagentsFn);
+            tools.add(listSubagentsTool);
+        }
+
+        if (includeSkillTools && allowsTool(allowedTools, "create_subagent")) {
+            JsonObject createSubagentTool = new JsonObject();
+            createSubagentTool.addProperty("type", "function");
+            JsonObject createSubagentFn = new JsonObject();
+            createSubagentFn.addProperty("name", "create_subagent");
+            createSubagentFn.addProperty("description", "Create and run an asynchronous subagent task using a profile.");
+            JsonObject createSubagentParams = new JsonObject();
+            createSubagentParams.addProperty("type", "object");
+            JsonObject createSubagentProps = new JsonObject();
+            JsonObject task = new JsonObject();
+            task.addProperty("type", "string");
+            task.addProperty("description", "Task description passed to the subagent.");
+            createSubagentProps.add("task", task);
+            JsonObject profileId = new JsonObject();
+            profileId.addProperty("type", "string");
+            profileId.addProperty("description", "Optional profile id. Defaults to general-planner.");
+            createSubagentProps.add("profile_id", profileId);
+            JsonObject skillIds = new JsonObject();
+            skillIds.addProperty("type", "array");
+            JsonObject skillIdItem = new JsonObject();
+            skillIdItem.addProperty("type", "string");
+            skillIds.add("items", skillIdItem);
+            skillIds.addProperty("description", "Optional scoped skill ids.");
+            createSubagentProps.add("skill_ids", skillIds);
+            JsonObject metadata = new JsonObject();
+            metadata.addProperty("type", "object");
+            metadata.addProperty("description", "Optional metadata forwarded to subagent context.");
+            createSubagentProps.add("metadata", metadata);
+            createSubagentParams.add("properties", createSubagentProps);
+            JsonArray createSubagentRequired = new JsonArray();
+            createSubagentRequired.add("task");
+            createSubagentParams.add("required", createSubagentRequired);
+            createSubagentFn.add("parameters", createSubagentParams);
+            createSubagentTool.add("function", createSubagentFn);
+            tools.add(createSubagentTool);
+        }
+
+        if (includeSkillTools && allowsTool(allowedTools, "get_subagent")) {
+            JsonObject getSubagentTool = new JsonObject();
+            getSubagentTool.addProperty("type", "function");
+            JsonObject getSubagentFn = new JsonObject();
+            getSubagentFn.addProperty("name", "get_subagent");
+            getSubagentFn.addProperty("description", "Get full status and result of a subagent by id.");
+            JsonObject getSubagentParams = new JsonObject();
+            getSubagentParams.addProperty("type", "object");
+            JsonObject getSubagentProps = new JsonObject();
+            JsonObject subagentId = new JsonObject();
+            subagentId.addProperty("type", "string");
+            subagentId.addProperty("description", "Subagent id returned by create_subagent.");
+            getSubagentProps.add("id", subagentId);
+            getSubagentParams.add("properties", getSubagentProps);
+            JsonArray getSubagentRequired = new JsonArray();
+            getSubagentRequired.add("id");
+            getSubagentParams.add("required", getSubagentRequired);
+            getSubagentFn.add("parameters", getSubagentParams);
+            getSubagentTool.add("function", getSubagentFn);
+            tools.add(getSubagentTool);
+        }
+
+        if (includeSkillTools && allowsTool(allowedTools, "delete_subagent")) {
+            JsonObject deleteSubagentTool = new JsonObject();
+            deleteSubagentTool.addProperty("type", "function");
+            JsonObject deleteSubagentFn = new JsonObject();
+            deleteSubagentFn.addProperty("name", "delete_subagent");
+            deleteSubagentFn.addProperty("description", "Delete a subagent by id.");
+            JsonObject deleteSubagentParams = new JsonObject();
+            deleteSubagentParams.addProperty("type", "object");
+            JsonObject deleteSubagentProps = new JsonObject();
+            JsonObject subagentId = new JsonObject();
+            subagentId.addProperty("type", "string");
+            subagentId.addProperty("description", "Subagent id returned by create_subagent.");
+            deleteSubagentProps.add("id", subagentId);
+            deleteSubagentParams.add("properties", deleteSubagentProps);
+            JsonArray deleteSubagentRequired = new JsonArray();
+            deleteSubagentRequired.add("id");
+            deleteSubagentParams.add("required", deleteSubagentRequired);
+            deleteSubagentFn.add("parameters", deleteSubagentParams);
+            deleteSubagentTool.add("function", deleteSubagentFn);
+            tools.add(deleteSubagentTool);
+        }
+
+        if (includeSkillTools && allowsTool(allowedTools, "list_profiles")) {
+            JsonObject listProfilesTool = new JsonObject();
+            listProfilesTool.addProperty("type", "function");
+            JsonObject listProfilesFn = new JsonObject();
+            listProfilesFn.addProperty("name", "list_profiles");
+            listProfilesFn.addProperty("description", "List available subagent profiles.");
+            JsonObject listProfilesParams = new JsonObject();
+            listProfilesParams.addProperty("type", "object");
+            listProfilesParams.add("properties", new JsonObject());
+            listProfilesParams.addProperty("additionalProperties", false);
+            listProfilesFn.add("parameters", listProfilesParams);
+            listProfilesTool.add("function", listProfilesFn);
+            tools.add(listProfilesTool);
+        }
+
+        if (includeSkillTools && allowsTool(allowedTools, "get_profile")) {
+            JsonObject getProfileTool = new JsonObject();
+            getProfileTool.addProperty("type", "function");
+            JsonObject getProfileFn = new JsonObject();
+            getProfileFn.addProperty("name", "get_profile");
+            getProfileFn.addProperty("description", "Read one subagent profile by id.");
+            JsonObject getProfileParams = new JsonObject();
+            getProfileParams.addProperty("type", "object");
+            JsonObject getProfileProps = new JsonObject();
+            JsonObject profileId = new JsonObject();
+            profileId.addProperty("type", "string");
+            profileId.addProperty("description", "Subagent profile id.");
+            getProfileProps.add("id", profileId);
+            getProfileParams.add("properties", getProfileProps);
+            JsonArray getProfileRequired = new JsonArray();
+            getProfileRequired.add("id");
+            getProfileParams.add("required", getProfileRequired);
+            getProfileFn.add("parameters", getProfileParams);
+            getProfileTool.add("function", getProfileFn);
+            tools.add(getProfileTool);
+        }
 
         return tools;
+    }
+
+    private static Set<String> normalizeAllowedToolNames(Collection<String> allowedTools) {
+        if (allowedTools == null) {
+            return null;
+        }
+        LinkedHashSet<String> names = new LinkedHashSet<>();
+        for (String raw : allowedTools) {
+            if (raw == null || raw.isBlank()) {
+                continue;
+            }
+            names.add(raw.trim());
+        }
+        return names;
+    }
+
+    private static boolean allowsTool(Set<String> allowedTools, String toolName) {
+        return allowedTools == null || allowedTools.contains(toolName);
     }
 
     private static JsonObject buildActionSchema() {

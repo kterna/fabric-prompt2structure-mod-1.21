@@ -34,6 +34,10 @@ public final class ClientAgentManager {
             - Use read_workspace_state first when structure/revision context is required.
             - Propose edits with propose_patch and wait for user apply/discard decision.
             - Use search_block_ids when unsure about block id names.
+            - Use list_profiles/get_profile before creating subagents when profile choice matters.
+            - Use create_subagent for delegated tasks, then poll with get_subagent.
+            - Use list_subagents to inspect current subagent states, and delete_subagent to stop/remove one.
+            - Do not request recursive subagent creation from subagents.
             """;
 
     private static final Object LOCK = new Object();
@@ -139,7 +143,7 @@ public final class ClientAgentManager {
         List<LLMService.ToolCall> toolCalls = result.toolCalls() == null ? List.of() : result.toolCalls();
         if (!toolCalls.isEmpty()) {
             for (LLMService.ToolCall call : toolCalls) {
-                JsonObject payload = executeToolCall(call);
+                JsonObject payload = executeToolCall(session, call);
                 JsonObject toolMsg = buildToolMessage(call, payload);
                 synchronized (LOCK) {
                     session.history.add(toolMsg);
@@ -177,7 +181,7 @@ public final class ClientAgentManager {
         return false;
     }
 
-    private static JsonObject executeToolCall(LLMService.ToolCall call) {
+    private static JsonObject executeToolCall(LocalSession session, LLMService.ToolCall call) {
         if (call == null || call.name() == null) {
             return toolError("", "Invalid tool call");
         }
@@ -187,6 +191,12 @@ public final class ClientAgentManager {
             case "list_skills" -> listSkillsPayload();
             case "read_skill" -> readSkillPayload(call.arguments());
             case "search_skill" -> searchSkillPayload(call.arguments());
+            case "list_subagents" -> listSubagentsPayload(session, call.arguments());
+            case "create_subagent" -> createSubagentPayload(session, call.arguments());
+            case "get_subagent" -> getSubagentPayload(session, call.arguments());
+            case "delete_subagent" -> deleteSubagentPayload(session, call.arguments());
+            case "list_profiles" -> SubagentManager.listProfiles();
+            case "get_profile" -> getProfilePayload(call.arguments());
             case "explain_plan" -> {
                 JsonObject ok = toolOk(toolName);
                 ok.addProperty("accepted", true);
@@ -196,6 +206,44 @@ public final class ClientAgentManager {
                     callServerTool(toolName, normalizeArgsObject(call.arguments()));
             default -> toolError(toolName, "Unknown tool");
         };
+    }
+
+    private static JsonObject listSubagentsPayload(LocalSession session, JsonElement arguments) {
+        JsonObject args = normalizeArgsObject(arguments);
+        boolean includeDeleted = asBoolean(args, "include_deleted", false);
+        return SubagentManager.listSubagents(sessionId(session), includeDeleted);
+    }
+
+    private static JsonObject createSubagentPayload(LocalSession session, JsonElement arguments) {
+        JsonObject args = normalizeArgsObject(arguments);
+        return SubagentManager.createSubagent(sessionId(session), args);
+    }
+
+    private static JsonObject getSubagentPayload(LocalSession session, JsonElement arguments) {
+        JsonObject args = normalizeArgsObject(arguments);
+        String id = asString(args, "id");
+        if (id.isBlank()) {
+            return toolError("get_subagent", "Missing id");
+        }
+        return SubagentManager.getSubagent(sessionId(session), id);
+    }
+
+    private static JsonObject deleteSubagentPayload(LocalSession session, JsonElement arguments) {
+        JsonObject args = normalizeArgsObject(arguments);
+        String id = asString(args, "id");
+        if (id.isBlank()) {
+            return toolError("delete_subagent", "Missing id");
+        }
+        return SubagentManager.deleteSubagent(sessionId(session), id);
+    }
+
+    private static JsonObject getProfilePayload(JsonElement arguments) {
+        JsonObject args = normalizeArgsObject(arguments);
+        String id = asString(args, "id");
+        if (id.isBlank()) {
+            return toolError("get_profile", "Missing id");
+        }
+        return SubagentManager.getProfile(id);
     }
 
     private static JsonObject listSkillsPayload() {
@@ -316,6 +364,17 @@ public final class ClientAgentManager {
         }
     }
 
+    private static boolean asBoolean(JsonObject obj, String key, boolean fallback) {
+        if (obj == null || key == null || !obj.has(key)) {
+            return fallback;
+        }
+        try {
+            return obj.get(key).getAsBoolean();
+        } catch (Exception e) {
+            return fallback;
+        }
+    }
+
     private static String asString(JsonObject obj, String key) {
         if (obj == null || key == null || !obj.has(key)) {
             return "";
@@ -350,6 +409,13 @@ public final class ClientAgentManager {
         }
         toolMsg.addProperty("content", payload == null ? "{}" : GSON.toJson(payload));
         return toolMsg;
+    }
+
+    private static String sessionId(LocalSession session) {
+        if (session == null || session.id == null || session.id.isBlank()) {
+            return "default";
+        }
+        return session.id;
     }
 
     private static LocalSession ensureSessionLocked() {

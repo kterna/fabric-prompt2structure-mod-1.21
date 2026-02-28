@@ -17,17 +17,24 @@ P2S 是一个用于 Minecraft 结构生成与迭代编辑的 Fabric 模组，支
   - [PatchModels](src/main/java/com/p2s/PatchModels.java)
 - LLM 接口：[LLMService](src/main/java/com/p2s/LLMService.java)
 
-### 客户端 Agent + Skill（新增）
+### 客户端 Agent + Skill + Subagent（新增）
 
 - 客户端 agent： [ClientAgentManager](src/client/java/com/p2s/ClientAgentManager.java)
   - 客户端聊天面板发送消息时，本地调用 LLM（使用 `p2s_client.json` 的模型配置）。
   - 支持本地 skill 工具：`list_skills` / `read_skill` / `search_skill`。
+  - 支持 subagent 管理工具：`list_subagents` / `create_subagent` / `get_subagent` / `delete_subagent` / `list_profiles` / `get_profile`。
 - 服务端工具桥接： [ClientToolBridge](src/client/java/com/p2s/ClientToolBridge.java)
   - 客户端通过 `c2s_tool_bridge` 请求服务端工具（`read_workspace_state` / `propose_patch` / `search_block_ids`）。
   - 服务端返回 `s2c_tool_bridge`。
 - Skill 存储： [SkillStore](src/client/java/com/p2s/SkillStore.java)
   - 每玩家目录：`config/p2s_skills/<player-uuid>/<skill-id>/SKILL.md`
   - 活跃 skill：`config/p2s_skills/<player-uuid>/active.json`
+- Subagent 运行时： [SubagentManager](src/client/java/com/p2s/SubagentManager.java)
+  - 异步任务状态：`queued` / `running` / `completed` / `failed` / `cancelled` / `deleted`
+  - 主 agent 通过工具主动轮询 subagent 结果。
+- Subagent profile 存储： [SubagentProfileStore](src/client/java/com/p2s/SubagentProfileStore.java)
+  - 客户端全局共享目录：`config/p2s_skills/.agent/*.json`
+  - 默认 profile：`general-planner` / `block-id-searcher` / `workspace-analyzer` / `patch-planner`
 - Skill/LLM 配置 UI：
   - [P2SConfigScreen](src/client/java/com/p2s/P2SConfigScreen.java)
   - [P2SClientLLMConfigScreen](src/client/java/com/p2s/P2SClientLLMConfigScreen.java)
@@ -73,12 +80,13 @@ P2S 是一个用于 Minecraft 结构生成与迭代编辑的 Fabric 模组，支
 
 1. 用户在 `O` 键打开的面板中发送消息。
 2. 客户端 agent 调用 LLM，并可先读 skill（`list/read/search_skill`）。
-3. 需要世界上下文时，通过 tool bridge 调用服务端工具：
+3. 如需分派任务，主 agent 可先创建 subagent（异步）并轮询其状态/结果。
+4. 需要世界上下文时，通过 tool bridge 调用服务端工具：
    - `read_workspace_state`
    - `propose_patch`
    - `search_block_ids`
-4. 服务端对 patch 进行试算、diff、校验并生成 preview。
-5. 用户在 UI 点击 Apply/Discard；Apply 后写入 commit，可 Undo/Redo。
+5. 服务端对 patch 进行试算、diff、校验并生成 preview。
+6. 用户在 UI 点击 Apply/Discard；Apply 后写入 commit，可 Undo/Redo。
 
 ## 配置
 
@@ -124,10 +132,24 @@ P2S 是一个用于 Minecraft 结构生成与迭代编辑的 Fabric 模组，支
 - 客户端聊天面板使用 `p2s_client.json` 的 LLM 配置（包括 `apiKey`）。
 - 进入聊天面板后点 `Config`，可在 `LLM` / `Skills` 页面直接编辑。
 
+### Subagent Profile 配置
+
+- 目录：`config/p2s_skills/.agent/*.json`
+- 范围：客户端全局共享（不按玩家 UUID 隔离）。
+- 主要字段：
+  - `id` / `name` / `description`
+  - `system_prompt`
+  - `allowed_tools`
+  - `default_skill_ids`
+  - `max_loops`
+  - `timeout_seconds`
+  - `enabled`
+
 ## 存档
 
 - 结构存档：`config/p2s_storage/*.json`
 - skill 文档：`config/p2s_skills/<player-uuid>/<skill-id>/SKILL.md`
+- subagent profile：`config/p2s_skills/.agent/*.json`
 - 统一结构格式：V2（`palette + structures`）
 
 ## 构建
