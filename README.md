@@ -27,8 +27,8 @@ P2S 是一个用于 Minecraft 结构生成与迭代编辑的 Fabric 模组，支
   - 客户端通过 `c2s_tool_bridge` 请求服务端工具（`read_workspace_state` / `propose_patch` / `search_block_ids`）。
   - 服务端返回 `s2c_tool_bridge`。
 - Skill 存储： [SkillStore](src/client/java/com/p2s/SkillStore.java)
-  - 每玩家目录：`config/p2s_skills/<player-uuid>/<skill-id>/SKILL.md`
-  - 活跃 skill：`config/p2s_skills/<player-uuid>/active.json`
+  - 客户端全局目录：`config/p2s_skills/<skill-id>/SKILL.md`
+  - 活跃 skill：`config/p2s_skills/active.json`
 - Subagent 运行时： [SubagentManager](src/client/java/com/p2s/SubagentManager.java)
   - 异步任务状态：`queued` / `running` / `completed` / `failed` / `cancelled` / `deleted`
   - 主 agent 通过工具主动轮询 subagent 结果。
@@ -148,7 +148,7 @@ P2S 是一个用于 Minecraft 结构生成与迭代编辑的 Fabric 模组，支
 ## 存档
 
 - 结构存档：`config/p2s_storage/*.json`
-- skill 文档：`config/p2s_skills/<player-uuid>/<skill-id>/SKILL.md`
+- skill 文档：`config/p2s_skills/<skill-id>/SKILL.md`
 - subagent profile：`config/p2s_skills/.agent/*.json`
 - 统一结构格式：V2（`palette + structures`）
 

@@ -5,7 +5,6 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.client.Minecraft;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -24,17 +23,21 @@ public final class SkillStore {
     private static final Pattern FRONTMATTER_PATTERN = Pattern.compile("(?s)^---\\s*\\R(.*?)\\R---\\s*\\R?(.*)$");
     private static final String SKILL_FILE_NAME = "SKILL.md";
     private static final String ACTIVE_FILE_NAME = "active.json";
+    // Client-global skill root (shared by this client instance, not split per player UUID).
     private static final Path ROOT = FabricLoader.getInstance().getConfigDir().resolve("p2s_skills");
 
     private SkillStore() {
     }
 
     public static synchronized List<SkillMeta> listSkills() {
-        Path root = playerRoot();
+        Path root = skillsRoot();
         ensureDir(root);
         List<SkillMeta> result = new ArrayList<>();
         try (Stream<Path> stream = Files.list(root)) {
-            for (Path dir : stream.filter(Files::isDirectory).collect(Collectors.toList())) {
+            for (Path dir : stream
+                    .filter(Files::isDirectory)
+                    .filter(path -> !path.getFileName().toString().startsWith("."))
+                    .collect(Collectors.toList())) {
                 SkillDocument doc = readSkillInternal(dir.getFileName().toString(), false);
                 if (doc != null) {
                     result.add(doc.meta());
@@ -141,7 +144,7 @@ public final class SkillStore {
 
         Path from = skillDir(id);
         Path to = skillDir(targetSlug);
-        ensureDir(playerRoot());
+        ensureDir(skillsRoot());
         try {
             Files.move(from, to);
         } catch (Exception e) {
@@ -316,7 +319,7 @@ public final class SkillStore {
     }
 
     private static ActiveIndex readActiveIndex() {
-        Path file = playerRoot().resolve(ACTIVE_FILE_NAME);
+        Path file = skillsRoot().resolve(ACTIVE_FILE_NAME);
         if (!Files.exists(file)) {
             return new ActiveIndex();
         }
@@ -333,7 +336,7 @@ public final class SkillStore {
     }
 
     private static void writeActiveIndex(ActiveIndex idx) {
-        Path file = playerRoot().resolve(ACTIVE_FILE_NAME);
+        Path file = skillsRoot().resolve(ACTIVE_FILE_NAME);
         try {
             ensureDir(file.getParent());
             JsonObject root = new JsonObject();
@@ -401,19 +404,11 @@ public final class SkillStore {
     }
 
     private static Path skillDir(String id) {
-        return playerRoot().resolve(id);
+        return skillsRoot().resolve(id);
     }
 
-    private static Path playerRoot() {
-        return ROOT.resolve(currentPlayerId());
-    }
-
-    private static String currentPlayerId() {
-        Minecraft mc = Minecraft.getInstance();
-        if (mc != null && mc.player != null && mc.player.getUUID() != null) {
-            return mc.player.getUUID().toString();
-        }
-        return "offline";
+    private static Path skillsRoot() {
+        return ROOT;
     }
 
     private static void ensureDir(Path dir) {

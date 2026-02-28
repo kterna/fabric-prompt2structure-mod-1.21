@@ -93,7 +93,7 @@ public class P2SConfigScreen extends Screen {
         gfx.drawString(this.font, this.title, left, top, 0xFFFFFF, true);
         gfx.drawString(this.font, "Selection tool item id", left, top + 30, 0xCCCCCC, false);
         gfx.drawString(this.font, "Default: " + P2SClientConfig.defaultSelectionItemId(), left, top + 58, 0x888888, false);
-        gfx.drawString(this.font, "Skills are stored per-player under config/p2s_skills/<uuid>/", left, top + 92, 0x888888, false);
+        gfx.drawString(this.font, "Skills are stored under config/p2s_skills/ (client-global)", left, top + 92, 0x888888, false);
         gfx.drawString(this.font, "LLM apiUrl/apiKey/model are in p2s_client.json (LLM button)", left, top + 104, 0x888888, false);
         if (!statusText.isBlank()) {
             gfx.drawString(this.font, statusText, left, top + 118, statusColor, false);

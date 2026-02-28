@@ -273,7 +273,7 @@ public class P2SSkillConfigScreen extends Screen {
 
         gfx.drawString(this.font, this.title, panelLeft + 8, lineY, 0xFFFFFF, true);
         lineY += this.font.lineHeight + 2;
-        gfx.drawString(this.font, "Player-local skills: config/p2s_skills/<uuid>/", panelLeft + 8, lineY, 0xBBBBBB, false);
+        gfx.drawString(this.font, "Client-global skills: config/p2s_skills/", panelLeft + 8, lineY, 0xBBBBBB, false);
         lineY += this.font.lineHeight + 2;
         gfx.drawString(this.font, "Total skills: " + skills.size(), panelLeft + 8, lineY, 0xAAAAAA, false);
 
