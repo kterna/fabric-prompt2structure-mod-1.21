@@ -1,6 +1,5 @@
 package com.p2s;
 
-import com.p2s.network.C2SChatMessagePayload;
 import com.p2s.network.C2SSessionActionPayload;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.Minecraft;
@@ -432,10 +431,7 @@ public class P2SChatScreen extends Screen {
             return;
         }
 
-        ClientPlayNetworking.send(new C2SChatMessagePayload(text));
-
-        ClientSessionState.addUserMessage(text);
-        ClientSessionState.setStatus("thinking");
+        ClientAgentManager.submitUserMessage(text);
         input.setValue("");
         input.moveCursorToEnd(false);
         scrollOffset = 0;

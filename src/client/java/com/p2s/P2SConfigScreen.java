@@ -43,6 +43,22 @@ public class P2SConfigScreen extends Screen {
         addRenderableWidget(Button.builder(Component.literal("Back"), btn -> onClose())
                 .bounds(left, top + 132, 80, 20)
                 .build());
+
+        addRenderableWidget(Button.builder(Component.literal("LLM"), btn -> {
+                    if (this.minecraft != null) {
+                        this.minecraft.setScreen(new P2SClientLLMConfigScreen(this));
+                    }
+                })
+                .bounds(left + panelWidth / 2 - 28, top + 132, 56, 20)
+                .build());
+
+        addRenderableWidget(Button.builder(Component.literal("Skills"), btn -> {
+                    if (this.minecraft != null) {
+                        this.minecraft.setScreen(new P2SSkillConfigScreen(this));
+                    }
+                })
+                .bounds(left + panelWidth - 80, top + 132, 80, 20)
+                .build());
     }
 
     @Override
@@ -77,8 +93,10 @@ public class P2SConfigScreen extends Screen {
         gfx.drawString(this.font, this.title, left, top, 0xFFFFFF, true);
         gfx.drawString(this.font, "Selection tool item id", left, top + 30, 0xCCCCCC, false);
         gfx.drawString(this.font, "Default: " + P2SClientConfig.defaultSelectionItemId(), left, top + 58, 0x888888, false);
+        gfx.drawString(this.font, "Skills are stored per-player under config/p2s_skills/<uuid>/", left, top + 92, 0x888888, false);
+        gfx.drawString(this.font, "LLM apiUrl/apiKey/model are in p2s_client.json (LLM button)", left, top + 104, 0x888888, false);
         if (!statusText.isBlank()) {
-            gfx.drawString(this.font, statusText, left, top + 108, statusColor, false);
+            gfx.drawString(this.font, statusText, left, top + 118, statusColor, false);
         }
     }
 

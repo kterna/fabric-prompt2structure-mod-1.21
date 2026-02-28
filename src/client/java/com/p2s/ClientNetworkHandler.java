@@ -5,6 +5,7 @@ import com.p2s.network.S2CChatResponsePayload;
 import com.p2s.network.S2CPatchPreviewPayload;
 import com.p2s.network.S2CSelectionSyncPayload;
 import com.p2s.network.S2CSessionSyncPayload;
+import com.p2s.network.S2CToolBridgePayload;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 
 public final class ClientNetworkHandler {
@@ -50,6 +51,14 @@ public final class ClientNetworkHandler {
                         payload.detail(),
                         payload.changedBlocks(),
                         payload.riskLevel()
+                )));
+
+        ClientPlayNetworking.registerGlobalReceiver(S2CToolBridgePayload.TYPE, (payload, context) ->
+                context.client().execute(() -> ClientToolBridge.onToolResponse(
+                        payload.requestId(),
+                        payload.ok(),
+                        payload.responseJson(),
+                        payload.error()
                 )));
     }
 }

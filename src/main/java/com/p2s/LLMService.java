@@ -31,7 +31,7 @@ public final class LLMService {
 
     public static CompletableFuture<Result> requestStructure(String userPrompt) {
         return CompletableFuture.supplyAsync(() -> {
-            String bodyJson = buildBodyForPrompt(userPrompt, ModConfig.USE_TOOL_CALL, true);
+            String bodyJson = buildBodyForPrompt(userPrompt, ModConfig.MODEL, ModConfig.USE_TOOL_CALL, true);
             P2SMod.LOGGER.info("LLM request -> url={}, model={}, timeout={}s", ModConfig.API_URL, ModConfig.MODEL, ModConfig.HTTP_TIMEOUT_SECONDS);
             P2SMod.LOGGER.info("Active prompt preset: {}", ModConfig.activePromptName());
             P2SMod.LOGGER.info("LLM prompt: {}", userPrompt);
@@ -41,7 +41,7 @@ public final class LLMService {
                     .header("Authorization", "Bearer " + ModConfig.API_KEY)
                     .build();
 
-            try (Response response = getClient().newCall(request).execute()) {
+            try (Response response = getClient(ModConfig.HTTP_TIMEOUT_SECONDS).newCall(request).execute()) {
                 if (!response.isSuccessful()) {
                     String errBody = response.body() == null ? "" : response.body().string();
                     P2SMod.LOGGER.error("LLM failed status={}, body={}", response.code(), truncate(errBody));
@@ -57,19 +57,39 @@ public final class LLMService {
     }
 
     public static CompletableFuture<SessionResult> requestWithHistory(java.util.List<JsonObject> messages) {
+        return requestWithHistoryInternal(messages, false, null);
+    }
+
+    public static CompletableFuture<SessionResult> requestWithHistoryWithSkills(java.util.List<JsonObject> messages) {
+        return requestWithHistoryInternal(messages, true, null);
+    }
+
+    public static CompletableFuture<SessionResult> requestWithHistoryWithSkills(
+            java.util.List<JsonObject> messages,
+            RequestConfig config
+    ) {
+        return requestWithHistoryInternal(messages, true, config);
+    }
+
+    private static CompletableFuture<SessionResult> requestWithHistoryInternal(
+            java.util.List<JsonObject> messages,
+            boolean includeSkillTools,
+            RequestConfig overrideConfig
+    ) {
         return CompletableFuture.supplyAsync(() -> {
-            String bodyJson = buildBodyForMessages(messages, ModConfig.USE_TOOL_CALL, false);
+            RequestConfig cfg = resolveConfig(overrideConfig);
+            String bodyJson = buildBodyForMessages(messages, cfg.model(), cfg.useToolCall(), includeSkillTools);
             int messageCount = messages == null ? 0 : messages.size();
             int payloadBytes = bodyJson == null ? 0 : bodyJson.length();
-            P2SMod.LOGGER.info("LLM session request -> url={}, model={}, timeout={}s", ModConfig.API_URL, ModConfig.MODEL, ModConfig.HTTP_TIMEOUT_SECONDS);
-            P2SMod.LOGGER.info("LLM session payload -> messages={}, bytes={}, toolCall={}", messageCount, payloadBytes, ModConfig.USE_TOOL_CALL);
+            P2SMod.LOGGER.info("LLM session request -> url={}, model={}, timeout={}s", cfg.apiUrl(), cfg.model(), cfg.httpTimeoutSeconds());
+            P2SMod.LOGGER.info("LLM session payload -> messages={}, bytes={}, toolCall={}", messageCount, payloadBytes, cfg.useToolCall());
             Request request = new Request.Builder()
-                    .url(ModConfig.API_URL)
+                    .url(cfg.apiUrl())
                     .post(RequestBody.create(bodyJson, JSON))
-                    .header("Authorization", "Bearer " + ModConfig.API_KEY)
+                    .header("Authorization", "Bearer " + cfg.apiKey())
                     .build();
 
-            try (Response response = getClient().newCall(request).execute()) {
+            try (Response response = getClient(cfg.httpTimeoutSeconds()).newCall(request).execute()) {
                 if (!response.isSuccessful()) {
                     String errBody = response.body() == null ? "" : response.body().string();
                     P2SMod.LOGGER.error("LLM failed status={}, body={}", response.code(), truncate(errBody));
@@ -84,9 +104,9 @@ public final class LLMService {
         }, EXECUTOR);
     }
 
-    private static String buildBodyForPrompt(String userPrompt, boolean useToolCall, boolean forceTool) {
+    private static String buildBodyForPrompt(String userPrompt, String model, boolean useToolCall, boolean forceTool) {
         JsonObject body = new JsonObject();
-        body.addProperty("model", ModConfig.MODEL);
+        body.addProperty("model", model);
 
         JsonArray messages = new JsonArray();
         JsonObject systemMsg = new JsonObject();
@@ -105,12 +125,17 @@ public final class LLMService {
         return GSON.toJson(body);
     }
 
-    private static String buildBodyForMessages(java.util.List<JsonObject> messages, boolean useToolCall, boolean forceTool) {
+    private static String buildBodyForMessages(
+            java.util.List<JsonObject> messages,
+            String model,
+            boolean useToolCall,
+            boolean includeSkillTools
+    ) {
         JsonObject body = new JsonObject();
-        body.addProperty("model", ModConfig.MODEL);
+        body.addProperty("model", model);
         body.add("messages", GSON.toJsonTree(messages));
         body.addProperty("temperature", 0.4);
-        applySessionToolOrResponseFormat(body, useToolCall);
+        applySessionToolOrResponseFormat(body, useToolCall, includeSkillTools);
         return GSON.toJson(body);
     }
 
@@ -134,9 +159,9 @@ public final class LLMService {
         }
     }
 
-    private static void applySessionToolOrResponseFormat(JsonObject body, boolean useToolCall) {
+    private static void applySessionToolOrResponseFormat(JsonObject body, boolean useToolCall, boolean includeSkillTools) {
         if (useToolCall) {
-            body.add("tools", buildSessionToolDefinitions());
+            body.add("tools", buildSessionToolDefinitions(includeSkillTools));
             body.addProperty("tool_choice", "auto");
             return;
         }
@@ -286,8 +311,70 @@ public final class LLMService {
         return tools;
     }
 
-    private static JsonArray buildSessionToolDefinitions() {
+    private static JsonArray buildSessionToolDefinitions(boolean includeSkillTools) {
         JsonArray tools = new JsonArray();
+
+        if (includeSkillTools) {
+            JsonObject listSkillTool = new JsonObject();
+            listSkillTool.addProperty("type", "function");
+            JsonObject listSkillFn = new JsonObject();
+            listSkillFn.addProperty("name", "list_skills");
+            listSkillFn.addProperty("description", "List available player skills with short metadata only.");
+            JsonObject listSkillParams = new JsonObject();
+            listSkillParams.addProperty("type", "object");
+            listSkillParams.add("properties", new JsonObject());
+            listSkillParams.addProperty("additionalProperties", false);
+            listSkillFn.add("parameters", listSkillParams);
+            listSkillTool.add("function", listSkillFn);
+            tools.add(listSkillTool);
+
+            JsonObject readSkillTool = new JsonObject();
+            readSkillTool.addProperty("type", "function");
+            JsonObject readSkillFn = new JsonObject();
+            readSkillFn.addProperty("name", "read_skill");
+            readSkillFn.addProperty("description", "Read one skill document by id. If id omitted, the active skill may be used.");
+            JsonObject readSkillParams = new JsonObject();
+            readSkillParams.addProperty("type", "object");
+            JsonObject readSkillProps = new JsonObject();
+            JsonObject skillId = new JsonObject();
+            skillId.addProperty("type", "string");
+            skillId.addProperty("description", "Skill id from list_skills.");
+            readSkillProps.add("id", skillId);
+            readSkillParams.add("properties", readSkillProps);
+            readSkillParams.addProperty("additionalProperties", false);
+            readSkillFn.add("parameters", readSkillParams);
+            readSkillTool.add("function", readSkillFn);
+            tools.add(readSkillTool);
+
+            JsonObject searchSkillTool = new JsonObject();
+            searchSkillTool.addProperty("type", "function");
+            JsonObject searchSkillFn = new JsonObject();
+            searchSkillFn.addProperty("name", "search_skill");
+            searchSkillFn.addProperty("description", "Search text snippets in a skill by query.");
+            JsonObject searchSkillParams = new JsonObject();
+            searchSkillParams.addProperty("type", "object");
+            JsonObject searchSkillProps = new JsonObject();
+            JsonObject searchSkillId = new JsonObject();
+            searchSkillId.addProperty("type", "string");
+            searchSkillId.addProperty("description", "Optional skill id. Defaults to active skill.");
+            searchSkillProps.add("id", searchSkillId);
+            JsonObject searchSkillQuery = new JsonObject();
+            searchSkillQuery.addProperty("type", "string");
+            searchSkillQuery.addProperty("description", "Keyword to search.");
+            searchSkillProps.add("query", searchSkillQuery);
+            JsonObject searchSkillLimit = new JsonObject();
+            searchSkillLimit.addProperty("type", "integer");
+            searchSkillLimit.addProperty("description", "Max snippets to return (1-50).");
+            searchSkillProps.add("limit", searchSkillLimit);
+            searchSkillParams.add("properties", searchSkillProps);
+            JsonArray searchSkillRequired = new JsonArray();
+            searchSkillRequired.add("query");
+            searchSkillParams.add("required", searchSkillRequired);
+            searchSkillParams.addProperty("additionalProperties", false);
+            searchSkillFn.add("parameters", searchSkillParams);
+            searchSkillTool.add("function", searchSkillFn);
+            tools.add(searchSkillTool);
+        }
 
         JsonObject readTool = new JsonObject();
         readTool.addProperty("type", "function");
@@ -754,6 +841,24 @@ public final class LLMService {
         return text.substring(0, limit) + "...(truncated, len=" + text.length() + ")";
     }
 
+    private static RequestConfig resolveConfig(RequestConfig override) {
+        if (override == null) {
+            return new RequestConfig(
+                    ModConfig.API_URL,
+                    ModConfig.API_KEY,
+                    ModConfig.MODEL,
+                    ModConfig.HTTP_TIMEOUT_SECONDS,
+                    ModConfig.USE_TOOL_CALL
+            );
+        }
+        String apiUrl = override.apiUrl() == null || override.apiUrl().isBlank() ? ModConfig.API_URL : override.apiUrl().trim();
+        String apiKey = override.apiKey() == null || override.apiKey().isBlank() ? ModConfig.API_KEY : override.apiKey().trim();
+        String model = override.model() == null || override.model().isBlank() ? ModConfig.MODEL : override.model().trim();
+        int timeout = override.httpTimeoutSeconds() <= 0 ? ModConfig.HTTP_TIMEOUT_SECONDS : override.httpTimeoutSeconds();
+        boolean toolCall = override.useToolCall();
+        return new RequestConfig(apiUrl, apiKey, model, timeout, toolCall);
+    }
+
     private static OkHttpClient getClient() {
         int cfgTimeout = ModConfig.HTTP_TIMEOUT_SECONDS;
         if (cfgTimeout != CLIENT_TIMEOUT_SECONDS) {
@@ -762,6 +867,13 @@ public final class LLMService {
             P2SMod.LOGGER.info("LLM HTTP client rebuilt with timeout {}s", cfgTimeout);
         }
         return CLIENT;
+    }
+
+    private static OkHttpClient getClient(int timeoutSeconds) {
+        if (timeoutSeconds <= 0 || timeoutSeconds == ModConfig.HTTP_TIMEOUT_SECONDS) {
+            return getClient();
+        }
+        return buildClient(timeoutSeconds);
     }
 
     private static OkHttpClient buildClient(int timeoutSeconds) {
@@ -788,5 +900,14 @@ public final class LLMService {
     }
 
     public record ToolCall(String id, String name, JsonElement arguments) {
+    }
+
+    public record RequestConfig(
+            String apiUrl,
+            String apiKey,
+            String model,
+            int httpTimeoutSeconds,
+            boolean useToolCall
+    ) {
     }
 }

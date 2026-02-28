@@ -3,6 +3,7 @@ package com.p2s;
 import com.p2s.network.C2SChatMessagePayload;
 import com.p2s.network.C2SSetSelectionPayload;
 import com.p2s.network.C2SSessionActionPayload;
+import com.p2s.network.C2SToolBridgePayload;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.server.level.ServerPlayer;
@@ -25,6 +26,16 @@ public final class ServerNetworkHandler {
         ServerPlayNetworking.registerGlobalReceiver(C2SSessionActionPayload.TYPE, (payload, context) -> {
             ServerPlayer player = context.player();
             runOnPlayerServer(player, () -> SessionManager.handleSessionAction(player, payload.action(), payload.payload()));
+        });
+
+        ServerPlayNetworking.registerGlobalReceiver(C2SToolBridgePayload.TYPE, (payload, context) -> {
+            ServerPlayer player = context.player();
+            runOnPlayerServer(player, () -> SessionManager.handleToolBridgeRequest(
+                    player,
+                    payload.requestId(),
+                    payload.toolName(),
+                    payload.argumentsJson()
+            ));
         });
     }
 

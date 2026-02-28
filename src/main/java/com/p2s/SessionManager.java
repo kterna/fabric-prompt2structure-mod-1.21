@@ -8,6 +8,7 @@ import com.google.gson.JsonParser;
 import com.p2s.network.S2CChatResponsePayload;
 import com.p2s.network.S2CPatchPreviewPayload;
 import com.p2s.network.S2CSessionSyncPayload;
+import com.p2s.network.S2CToolBridgePayload;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
 import net.minecraft.network.chat.Component;
@@ -402,6 +403,53 @@ public final class SessionManager {
             case "apply" -> applyPendingPatch(player);
             case "discard" -> discardPendingPatch(player);
             default -> player.displayClientMessage(Component.literal("Unknown session action: " + action), false);
+        }
+    }
+
+    public static void handleToolBridgeRequest(ServerPlayer player, String requestId, String toolName, String argumentsJson) {
+        if (player == null) {
+            return;
+        }
+        String rid = requestId == null ? "" : requestId;
+        String normalizedTool = toolName == null ? "" : toolName.trim();
+        if (normalizedTool.isBlank()) {
+            sendToolBridgeResponse(player, rid, false, null, "Missing tool name");
+            return;
+        }
+
+        JsonElement arguments = null;
+        if (argumentsJson != null && !argumentsJson.isBlank()) {
+            try {
+                arguments = JsonParser.parseString(argumentsJson);
+            } catch (Exception e) {
+                sendToolBridgeResponse(player, rid, false, null, "Invalid arguments JSON: " + e.getMessage());
+                return;
+            }
+        }
+
+        Session session = ensureSession(player);
+        String playerName = player.getGameProfile().getName();
+        String sessionId = session == null ? "-" : session.id;
+        try {
+            LLMService.ToolCall call = new LLMService.ToolCall(rid, normalizedTool, arguments);
+            ToolCallProcessingResult toolResult = processToolCalls(session, List.of(call), playerName, sessionId);
+            if (toolResult.autoApplyRequested) {
+                toolResult.autoApplied = commitPendingPatch(player, session, true);
+            }
+
+            JsonObject payload = extractToolBridgePayload(toolResult, normalizedTool);
+            if (toolResult.autoApplied) {
+                payload.addProperty("auto_applied", true);
+            }
+
+            sendSessionSync(player, session);
+            if (toolResult.previewUpdated) {
+                sendPatchPreview(player, session.pendingPatch == null ? null : session.pendingPatch.preview);
+            }
+            sendToolBridgeResponse(player, rid, true, payload, null);
+        } catch (Exception e) {
+            P2SMod.LOGGER.error("Tool bridge failed -> player={}, session={}, tool={}", playerName, sessionId, normalizedTool, e);
+            sendToolBridgeResponse(player, rid, false, null, "Tool bridge failed: " + e.getMessage());
         }
     }
 
@@ -1104,6 +1152,44 @@ public final class SessionManager {
         }
         toolMsg.addProperty("content", payload == null ? "" : GSON.toJson(payload));
         return toolMsg;
+    }
+
+    private static JsonObject extractToolBridgePayload(ToolCallProcessingResult toolResult, String toolName) {
+        if (toolResult == null || toolResult.toolMessages == null || toolResult.toolMessages.isEmpty()) {
+            return buildToolError(toolName, "No tool response");
+        }
+        JsonObject toolMessage = toolResult.toolMessages.get(0);
+        if (toolMessage == null || !toolMessage.has("content")) {
+            return buildToolError(toolName, "Tool response missing content");
+        }
+        try {
+            String content = toolMessage.get("content").getAsString();
+            if (content == null || content.isBlank()) {
+                return buildToolError(toolName, "Tool response empty");
+            }
+            JsonElement parsed = JsonParser.parseString(content);
+            if (parsed.isJsonObject()) {
+                return parsed.getAsJsonObject();
+            }
+            JsonObject wrapped = buildToolError(toolName, "Tool response is not object");
+            wrapped.add("raw", parsed);
+            return wrapped;
+        } catch (Exception e) {
+            return buildToolError(toolName, "Tool response parse failed: " + e.getMessage());
+        }
+    }
+
+    private static void sendToolBridgeResponse(ServerPlayer player, String requestId, boolean ok, JsonObject payload, String error) {
+        if (player == null) {
+            return;
+        }
+        String json = payload == null ? "{}" : GSON.toJson(payload);
+        ServerNetworkHandler.sendToClient(player, new S2CToolBridgePayload(
+                requestId == null ? "" : requestId,
+                ok,
+                json,
+                error == null ? "" : error
+        ));
     }
 
     private static String formatAgentError(Throwable ex, long timeoutSeconds) {
