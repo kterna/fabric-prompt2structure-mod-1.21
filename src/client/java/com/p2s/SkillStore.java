@@ -6,6 +6,8 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import net.fabricmc.loader.api.FabricLoader;
 
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -23,15 +25,20 @@ public final class SkillStore {
     private static final Pattern FRONTMATTER_PATTERN = Pattern.compile("(?s)^---\\s*\\R(.*?)\\R---\\s*\\R?(.*)$");
     private static final String SKILL_FILE_NAME = "SKILL.md";
     private static final String ACTIVE_FILE_NAME = "active.json";
-    // Client-global skill root (shared by this client instance, not split per player UUID).
+    private static final List<DefaultSkillTemplate> DEFAULT_SKILL_TEMPLATES = List.of(
+            new DefaultSkillTemplate("default-builder", "/p2s_default_skills/default-builder/SKILL.md"),
+            new DefaultSkillTemplate("subagent-orchestrator", "/p2s_default_skills/subagent-orchestrator/SKILL.md")
+    );
+    // Client-global root, split into dedicated subfolders for easier local development.
     private static final Path ROOT = FabricLoader.getInstance().getConfigDir().resolve("p2s_skills");
+    private static final Path SKILLS_ROOT = ROOT.resolve("skills");
 
     private SkillStore() {
     }
 
     public static synchronized List<SkillMeta> listSkills() {
+        ensureBootstrap();
         Path root = skillsRoot();
-        ensureDir(root);
         List<SkillMeta> result = new ArrayList<>();
         try (Stream<Path> stream = Files.list(root)) {
             for (Path dir : stream
@@ -66,6 +73,7 @@ public final class SkillStore {
     }
 
     public static synchronized String activeSkillId() {
+        ensureBootstrap();
         ActiveIndex idx = readActiveIndex();
         if (idx.activeSkillId == null || idx.activeSkillId.isBlank()) {
             return "";
@@ -319,7 +327,7 @@ public final class SkillStore {
     }
 
     private static ActiveIndex readActiveIndex() {
-        Path file = skillsRoot().resolve(ACTIVE_FILE_NAME);
+        Path file = activeIndexFile();
         if (!Files.exists(file)) {
             return new ActiveIndex();
         }
@@ -336,7 +344,7 @@ public final class SkillStore {
     }
 
     private static void writeActiveIndex(ActiveIndex idx) {
-        Path file = skillsRoot().resolve(ACTIVE_FILE_NAME);
+        Path file = activeIndexFile();
         try {
             ensureDir(file.getParent());
             JsonObject root = new JsonObject();
@@ -408,7 +416,47 @@ public final class SkillStore {
     }
 
     private static Path skillsRoot() {
-        return ROOT;
+        return SKILLS_ROOT;
+    }
+
+    private static Path activeIndexFile() {
+        return ROOT.resolve(ACTIVE_FILE_NAME);
+    }
+
+    private static void ensureBootstrap() {
+        ensureDir(ROOT);
+        ensureDir(skillsRoot());
+        ensureDefaultSkillDocuments();
+    }
+
+    private static void ensureDefaultSkillDocuments() {
+        for (DefaultSkillTemplate template : DEFAULT_SKILL_TEMPLATES) {
+            Path defaultFile = skillDir(template.id()).resolve(SKILL_FILE_NAME);
+            if (Files.exists(defaultFile)) {
+                continue;
+            }
+            try {
+                ensureDir(defaultFile.getParent());
+                String content = loadTemplate(template.resourcePath());
+                if (!content.endsWith("\n")) {
+                    content = content + "\n";
+                }
+                Files.writeString(defaultFile, content);
+            } catch (Exception e) {
+                throw new IllegalStateException("Failed writing default skill template (" + template.id() + "): " + e.getMessage(), e);
+            }
+        }
+    }
+
+    private static String loadTemplate(String resourcePath) {
+        try (InputStream in = SkillStore.class.getResourceAsStream(resourcePath)) {
+            if (in != null) {
+                return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+            }
+            throw new IllegalStateException("Missing default skill template resource: " + resourcePath);
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed reading default skill template resource: " + resourcePath, e);
+        }
     }
 
     private static void ensureDir(Path dir) {
@@ -427,6 +475,9 @@ public final class SkillStore {
     private static final class ActiveIndex {
         String activeSkillId = "";
         long updatedAt = 0L;
+    }
+
+    private record DefaultSkillTemplate(String id, String resourcePath) {
     }
 
     public record SkillMeta(String id, String name, String description, long updatedAt) {

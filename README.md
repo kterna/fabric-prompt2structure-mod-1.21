@@ -27,14 +27,28 @@ P2S 是一个用于 Minecraft 结构生成与迭代编辑的 Fabric 模组，支
   - 客户端通过 `c2s_tool_bridge` 请求服务端工具（`read_workspace_state` / `propose_patch` / `search_block_ids`）。
   - 服务端返回 `s2c_tool_bridge`。
 - Skill 存储： [SkillStore](src/client/java/com/p2s/SkillStore.java)
-  - 客户端全局目录：`config/p2s_skills/<skill-id>/SKILL.md`
+  - 客户端全局目录：`config/p2s_skills/skills/<skill-id>/SKILL.md`
   - 活跃 skill：`config/p2s_skills/active.json`
+  - 内置默认 skill 模板（自动创建）：
+    - `default-builder`
+    - `subagent-orchestrator`（主 agent 调用 subagent 的流程与参数说明）
+  - `default-builder`：
+    - 中文规则，提供基础建筑比例建议（占地长宽比、总高/层高、屋顶比例、边距等）
+    - 开发模板文件：`src/client/resources/p2s_default_skills/default-builder/SKILL.md`
+  - `subagent-orchestrator`：
+    - 中文规则，说明 `create_subagent` / `get_subagent` / `list_profiles` 等工具的调用流程
+    - 开发模板文件：`src/client/resources/p2s_default_skills/subagent-orchestrator/SKILL.md`
 - Subagent 运行时： [SubagentManager](src/client/java/com/p2s/SubagentManager.java)
   - 异步任务状态：`queued` / `running` / `completed` / `failed` / `cancelled` / `deleted`
   - 主 agent 通过工具主动轮询 subagent 结果。
 - Subagent profile 存储： [SubagentProfileStore](src/client/java/com/p2s/SubagentProfileStore.java)
   - 客户端全局共享目录：`config/p2s_skills/.agent/*.json`
-  - 默认 profile：`general-planner` / `block-id-searcher` / `workspace-analyzer` / `patch-planner`
+  - 内置默认 profile 模板（中文）：
+    - `src/client/resources/p2s_default_profiles/general-planner.json`
+    - `src/client/resources/p2s_default_profiles/block-id-searcher.json`
+    - `src/client/resources/p2s_default_profiles/patch-planner.json`
+  - 默认 profile：`general-planner` / `block-id-searcher` / `patch-planner`
+    - `patch-planner` 已合并 `workspace-analyzer` 的工作区分析能力
 - Skill/LLM 配置 UI：
   - [P2SConfigScreen](src/client/java/com/p2s/P2SConfigScreen.java)
   - [P2SClientLLMConfigScreen](src/client/java/com/p2s/P2SClientLLMConfigScreen.java)
@@ -136,19 +150,23 @@ P2S 是一个用于 Minecraft 结构生成与迭代编辑的 Fabric 模组，支
 
 - 目录：`config/p2s_skills/.agent/*.json`
 - 范围：客户端全局共享（不按玩家 UUID 隔离）。
+- 默认模板来源：`src/client/resources/p2s_default_profiles/*.json`（中文，首次启动自动写入）。
 - 主要字段：
   - `id` / `name` / `description`
   - `system_prompt`
   - `allowed_tools`
-  - `default_skill_ids`
   - `max_loops`
   - `timeout_seconds`
   - `enabled`
+- 说明：
+  - `create_subagent` 仅使用显式 `skill_ids`。
+  - `skill` 不是必须项：当未配置到任何有效 skill 时，subagent 仍可创建并以空 skill 运行。
+  - 仅当显式传入了非空 `skill_ids` 且全部无效时，接口会直接返回 `error`（不会回退到其他 skill）。
 
 ## 存档
 
 - 结构存档：`config/p2s_storage/*.json`
-- skill 文档：`config/p2s_skills/<skill-id>/SKILL.md`
+- skill 文档：`config/p2s_skills/skills/<skill-id>/SKILL.md`
 - subagent profile：`config/p2s_skills/.agent/*.json`
 - 统一结构格式：V2（`palette + structures`）
 

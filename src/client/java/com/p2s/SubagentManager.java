@@ -66,7 +66,15 @@ public final class SubagentManager {
             return error("create_subagent", "Profile has no allowed tools: " + profile.id());
         }
 
-        ResolveSkillResult resolveSkills = resolveSkillIds(parseStringArray(args.get("skill_ids")), profile.defaultSkillIds());
+        boolean hasExplicitSkillIds = args.has("skill_ids");
+        List<String> requestedSkillIds = parseStringArray(args.get("skill_ids"));
+        ResolveSkillResult resolveSkills = resolveSkillIds(requestedSkillIds, hasExplicitSkillIds);
+        if (hasExplicitSkillIds && !requestedSkillIds.isEmpty() && resolveSkills.skillIds().isEmpty()) {
+            if (resolveSkills.warnings().isEmpty()) {
+                return error("create_subagent", "No valid requested skills resolved");
+            }
+            return error("create_subagent", "No valid requested skills resolved: " + String.join("; ", resolveSkills.warnings()));
+        }
         String id = Long.toString(NEXT_ID.incrementAndGet(), 36);
         String sid = sessionKey(sessionId);
         long now = System.currentTimeMillis();
@@ -237,7 +245,6 @@ public final class SubagentManager {
         payload.addProperty("description", profile.description());
         payload.addProperty("system_prompt", profile.systemPrompt());
         payload.add("allowed_tools", toJsonArray(profile.allowedTools()));
-        payload.add("default_skill_ids", toJsonArray(profile.defaultSkillIds()));
         payload.addProperty("max_loops", profile.maxLoops());
         payload.addProperty("timeout_seconds", profile.timeoutSeconds());
         payload.addProperty("enabled", profile.enabled());
@@ -490,33 +497,25 @@ public final class SubagentManager {
         return sb.toString();
     }
 
-    private static ResolveSkillResult resolveSkillIds(List<String> requested, List<String> profileDefaults) {
+    private static ResolveSkillResult resolveSkillIds(List<String> requested, boolean hasExplicitSkillIds) {
         LinkedHashSet<String> available = new LinkedHashSet<>();
         for (SkillStore.SkillMeta meta : SkillStore.listSkills()) {
             available.add(meta.id());
         }
 
+        if (!hasExplicitSkillIds || requested.isEmpty()) {
+            return new ResolveSkillResult(List.of(), List.of());
+        }
+
         LinkedHashSet<String> chosen = new LinkedHashSet<>();
         List<String> warnings = new ArrayList<>();
+        String unknownPrefix = "Unknown requested skill id: ";
 
         for (String id : requested) {
             if (available.contains(id)) {
                 chosen.add(id);
             } else {
-                warnings.add("Unknown skill id: " + id);
-            }
-        }
-        if (chosen.isEmpty()) {
-            for (String id : profileDefaults) {
-                if (available.contains(id)) {
-                    chosen.add(id);
-                }
-            }
-        }
-        if (chosen.isEmpty()) {
-            String active = SkillStore.activeSkillId();
-            if (active != null && !active.isBlank() && available.contains(active)) {
-                chosen.add(active);
+                warnings.add(unknownPrefix + id);
             }
         }
         return new ResolveSkillResult(new ArrayList<>(chosen), warnings);

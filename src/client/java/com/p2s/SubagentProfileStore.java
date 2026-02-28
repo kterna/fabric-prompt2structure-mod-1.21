@@ -1,13 +1,12 @@
 package com.p2s;
 
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
-import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import net.fabricmc.loader.api.FabricLoader;
 
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -19,11 +18,15 @@ import java.util.Set;
 
 public final class SubagentProfileStore {
     public static final String DEFAULT_PROFILE_ID = "general-planner";
-
-    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final Path PROFILE_ROOT = FabricLoader.getInstance().getConfigDir()
             .resolve("p2s_skills")
             .resolve(".agent");
+    private static final String DEFAULT_PROFILE_TEMPLATE_ROOT = "/p2s_default_profiles";
+    private static final List<String> DEFAULT_PROFILE_TEMPLATE_FILES = List.of(
+            "general-planner.json",
+            "block-id-searcher.json",
+            "patch-planner.json"
+    );
     private static final int DEFAULT_MAX_LOOPS = 4;
     private static final int DEFAULT_TIMEOUT_SECONDS = 45;
     private static final Set<String> SUPPORTED_TOOLS = Set.of(
@@ -139,15 +142,12 @@ public final class SubagentProfileStore {
                 filteredAllowedTools = defaultAllowedTools(id);
             }
 
-            List<String> defaultSkillIds = readStringArray(root.get("default_skill_ids"));
-
             return new SubagentProfile(
                     id,
                     name.isBlank() ? id : name,
                     description,
                     systemPrompt,
                     List.copyOf(filteredAllowedTools),
-                    List.copyOf(defaultSkillIds),
                     maxLoops,
                     timeoutSeconds,
                     enabled
@@ -160,93 +160,44 @@ public final class SubagentProfileStore {
 
     private static void ensureDefaults() {
         ensureDir(PROFILE_ROOT);
-        for (SubagentProfile profile : defaultProfiles()) {
-            Path path = PROFILE_ROOT.resolve(profile.id() + ".json");
+        for (String fileName : DEFAULT_PROFILE_TEMPLATE_FILES) {
+            Path path = PROFILE_ROOT.resolve(fileName);
             if (Files.exists(path)) {
                 continue;
             }
             try {
-                JsonObject root = new JsonObject();
-                root.addProperty("id", profile.id());
-                root.addProperty("name", profile.name());
-                root.addProperty("description", profile.description());
-                root.addProperty("system_prompt", profile.systemPrompt());
-                root.addProperty("max_loops", profile.maxLoops());
-                root.addProperty("timeout_seconds", profile.timeoutSeconds());
-                root.addProperty("enabled", profile.enabled());
-                JsonArray allowedTools = new JsonArray();
-                for (String tool : profile.allowedTools()) {
-                    allowedTools.add(tool);
+                String content = loadDefaultProfileTemplate(fileName);
+                if (!content.endsWith("\n")) {
+                    content = content + "\n";
                 }
-                root.add("allowed_tools", allowedTools);
-                JsonArray defaultSkills = new JsonArray();
-                for (String id : profile.defaultSkillIds()) {
-                    defaultSkills.add(id);
-                }
-                root.add("default_skill_ids", defaultSkills);
-                Files.writeString(path, GSON.toJson(root));
+                Files.writeString(path, content);
             } catch (Exception e) {
                 P2SMod.LOGGER.warn("Failed writing default subagent profile {}: {}", path, e.getMessage());
             }
         }
     }
 
-    private static List<SubagentProfile> defaultProfiles() {
-        List<SubagentProfile> defaults = new ArrayList<>();
-        defaults.add(new SubagentProfile(
-                "general-planner",
-                "General Planner",
-                "General decomposition and planning helper with workspace read access.",
-                "You are a subagent focused on decomposing tasks, gathering context, and producing concise outputs.",
-                List.of("list_skills", "read_skill", "search_skill", "read_workspace_state", "search_block_ids"),
-                List.of(),
-                DEFAULT_MAX_LOOPS,
-                DEFAULT_TIMEOUT_SECONDS,
-                true
-        ));
-        defaults.add(new SubagentProfile(
-                "block-id-searcher",
-                "Block ID Searcher",
-                "Find accurate block ids and provide ranked candidates.",
-                "You specialize in identifying exact Minecraft block IDs and short compatibility notes.",
-                List.of("search_block_ids", "list_skills", "read_skill", "search_skill"),
-                List.of(),
-                DEFAULT_MAX_LOOPS,
-                DEFAULT_TIMEOUT_SECONDS,
-                true
-        ));
-        defaults.add(new SubagentProfile(
-                "workspace-analyzer",
-                "Workspace Analyzer",
-                "Analyze staged workspace state and summarize constraints/risks.",
-                "You analyze workspace state and produce practical summaries for the parent agent.",
-                List.of("read_workspace_state", "list_skills", "read_skill", "search_skill"),
-                List.of(),
-                DEFAULT_MAX_LOOPS,
-                DEFAULT_TIMEOUT_SECONDS,
-                true
-        ));
-        defaults.add(new SubagentProfile(
-                "patch-planner",
-                "Patch Planner",
-                "Design patch proposals with staged validation awareness.",
-                "You plan safe, minimal patch operations and report expected impact clearly.",
-                List.of("read_workspace_state", "search_block_ids", "propose_patch", "list_skills", "read_skill", "search_skill"),
-                List.of(),
-                DEFAULT_MAX_LOOPS,
-                DEFAULT_TIMEOUT_SECONDS,
-                true
-        ));
-        return defaults;
+    private static String loadDefaultProfileTemplate(String fileName) {
+        String resourcePath = DEFAULT_PROFILE_TEMPLATE_ROOT + "/" + fileName;
+        try (InputStream in = SubagentProfileStore.class.getResourceAsStream(resourcePath)) {
+            if (in != null) {
+                return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+            }
+            throw new IllegalStateException("Missing default subagent profile template: " + resourcePath);
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed reading default subagent profile template: " + resourcePath, e);
+        }
     }
 
     private static List<String> defaultAllowedTools(String profileId) {
-        for (SubagentProfile profile : defaultProfiles()) {
-            if (profile.id().equals(profileId)) {
-                return new ArrayList<>(profile.allowedTools());
-            }
+        String id = normalizeId(profileId);
+        if ("block-id-searcher".equals(id)) {
+            return new ArrayList<>(List.of("search_block_ids", "list_skills", "read_skill", "search_skill"));
         }
-        return new ArrayList<>(defaultProfiles().get(0).allowedTools());
+        if ("patch-planner".equals(id)) {
+            return new ArrayList<>(List.of("read_workspace_state", "search_block_ids", "propose_patch", "list_skills", "read_skill", "search_skill"));
+        }
+        return new ArrayList<>(List.of("list_skills", "read_skill", "search_skill", "read_workspace_state", "search_block_ids"));
     }
 
     private static List<String> readStringArray(JsonElement element) {
@@ -351,7 +302,6 @@ public final class SubagentProfileStore {
             String description,
             String systemPrompt,
             List<String> allowedTools,
-            List<String> defaultSkillIds,
             int maxLoops,
             int timeoutSeconds,
             boolean enabled
