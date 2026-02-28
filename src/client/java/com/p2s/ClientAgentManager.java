@@ -26,11 +26,16 @@ public final class ClientAgentManager {
     });
     private static final int MAX_HISTORY = 40;
     private static final int MAX_AGENT_LOOPS = 6;
+    private static final int MAX_TODO_ITEMS = 40;
+    private static final int MAX_CHOICE_OPTIONS = 3;
     private static final String CLIENT_TOOL_CONTRACT = """
             ## Client Agent Contract
             - Use list_skills to inspect available player skills by name/description.
             - Read full skill text only when needed via read_skill.
             - Use search_skill to locate relevant snippets quickly before reading full body.
+            - Keep an explicit todo list with set_todo/edit_todo_item/delete_todo_item/clear_todo.
+            - Before asking the user to choose among alternatives, call request_user_choice.
+            - After request_user_choice, wait for user selection before continuing execution.
             - Use read_workspace_state first when structure/revision context is required.
             - Propose edits with propose_patch and wait for user apply/discard decision.
             - Use search_block_ids when unsure about block id names.
@@ -59,6 +64,14 @@ public final class ClientAgentManager {
             ));
             return;
         }
+        if (ClientSessionState.hasPendingChoice()) {
+            postToClient(() -> ClientSessionState.onChatResponse(
+                    "Pending choice awaiting selection. Pick one option first.",
+                    false,
+                    "awaiting_choice"
+            ));
+            return;
+        }
 
         LocalSession session;
         synchronized (LOCK) {
@@ -77,6 +90,57 @@ public final class ClientAgentManager {
 
         postToClient(() -> {
             ClientSessionState.addUserMessage(msg);
+            ClientSessionState.setStatus("planning");
+        });
+
+        AGENT_EXECUTOR.execute(() -> runAgentLoop(session));
+    }
+
+    public static void submitChoiceSelection(String optionId) {
+        String selectedId = optionId == null ? "" : optionId.trim();
+        if (selectedId.isBlank()) {
+            return;
+        }
+
+        ClientSessionState.ChoiceRequest choice = ClientSessionState.getPendingChoice();
+        if (choice == null || choice.options() == null || choice.options().isEmpty()) {
+            postToClient(() -> ClientSessionState.setStatus("No pending choice"));
+            return;
+        }
+
+        ClientSessionState.ChoiceOption selected = null;
+        for (ClientSessionState.ChoiceOption option : choice.options()) {
+            if (option != null && selectedId.equals(option.id())) {
+                selected = option;
+                break;
+            }
+        }
+        if (selected == null) {
+            postToClient(() -> ClientSessionState.setStatus("Invalid choice option"));
+            return;
+        }
+        ClientSessionState.clearPendingChoice();
+
+        String userMessageText = "Choice selected [" + selected.id() + "]: " + selected.label();
+        LocalSession session;
+        synchronized (LOCK) {
+            session = ensureSessionLocked();
+            if (session.inFlight) {
+                postToClient(() -> ClientSessionState.setStatus("busy"));
+                return;
+            }
+            session.inFlight = true;
+
+            JsonObject user = new JsonObject();
+            user.addProperty("role", "user");
+            user.addProperty("content", "User selected option " + selected.id()
+                    + " (" + selected.label() + ") for request: " + choice.prompt());
+            session.history.add(user);
+            trimHistoryLocked(session);
+        }
+
+        postToClient(() -> {
+            ClientSessionState.addUserMessage(userMessageText);
             ClientSessionState.setStatus("planning");
         });
 
@@ -156,12 +220,14 @@ public final class ClientAgentManager {
                 postToClient(() -> ClientSessionState.onChatResponse(
                         text,
                         false,
-                        ClientSessionState.hasPendingPatch() ? "awaiting_confirm" : "thinking"
+                        statusAfterToolCalls()
                 ));
             } else {
-                postToClient(() -> ClientSessionState.setStatus(
-                        ClientSessionState.hasPendingPatch() ? "awaiting_confirm" : "thinking"
-                ));
+                postToClient(() -> ClientSessionState.setStatus(statusAfterToolCalls()));
+            }
+
+            if (ClientSessionState.hasPendingChoice()) {
+                return false;
             }
             return remaining > 1;
         }
@@ -191,6 +257,13 @@ public final class ClientAgentManager {
             case "list_skills" -> listSkillsPayload();
             case "read_skill" -> readSkillPayload(call.arguments());
             case "search_skill" -> searchSkillPayload(call.arguments());
+            case "get_todo" -> getTodoPayload();
+            case "set_todo" -> setTodoPayload(call.arguments());
+            case "edit_todo_item" -> editTodoItemPayload(call.arguments());
+            case "delete_todo_item" -> deleteTodoItemPayload(call.arguments());
+            case "clear_todo" -> clearTodoPayload();
+            case "request_user_choice" -> requestUserChoicePayload(call.arguments());
+            case "clear_user_choice" -> clearUserChoicePayload();
             case "list_subagents" -> listSubagentsPayload(session, call.arguments());
             case "create_subagent" -> createSubagentPayload(session, call.arguments());
             case "get_subagent" -> getSubagentPayload(session, call.arguments());
@@ -312,6 +385,178 @@ public final class ClientAgentManager {
         return payload;
     }
 
+    private static JsonObject getTodoPayload() {
+        JsonObject payload = toolOk("get_todo");
+        payload.addProperty("title", ClientSessionState.getTodoTitle());
+        JsonArray arr = new JsonArray();
+        for (ClientSessionState.TodoItem item : ClientSessionState.getTodoItems()) {
+            JsonObject entry = new JsonObject();
+            entry.addProperty("id", item.id());
+            entry.addProperty("content", item.content());
+            entry.addProperty("status", item.status());
+            arr.add(entry);
+        }
+        payload.add("items", arr);
+        payload.addProperty("count", arr.size());
+        return payload;
+    }
+
+    private static JsonObject setTodoPayload(JsonElement arguments) {
+        JsonObject args = normalizeArgsObject(arguments);
+        if (!args.has("items") || !args.get("items").isJsonArray()) {
+            return toolError("set_todo", "Missing items array");
+        }
+        String title = asString(args, "title");
+        JsonArray itemsArg = args.getAsJsonArray("items");
+        List<ClientSessionState.TodoItem> items = new ArrayList<>();
+        int index = 1;
+        for (JsonElement element : itemsArg) {
+            if (items.size() >= MAX_TODO_ITEMS) {
+                break;
+            }
+            if (element == null || !element.isJsonObject()) {
+                continue;
+            }
+            JsonObject obj = element.getAsJsonObject();
+            String id = normalizeTodoId(asString(obj, "id"));
+            if (id.isBlank()) {
+                id = "todo-" + index;
+            }
+            String content = asString(obj, "content");
+            if (content.isBlank()) {
+                content = asString(obj, "text");
+            }
+            if (content.isBlank()) {
+                index += 1;
+                continue;
+            }
+            String status = normalizeTodoStatus(asString(obj, "status"));
+            items.add(new ClientSessionState.TodoItem(id, content.trim(), status));
+            index += 1;
+        }
+
+        ClientSessionState.setTodo(title, items);
+        JsonObject payload = toolOk("set_todo");
+        payload.addProperty("title", title == null ? "" : title.trim());
+        payload.addProperty("count", items.size());
+        return payload;
+    }
+
+    private static JsonObject editTodoItemPayload(JsonElement arguments) {
+        JsonObject args = normalizeArgsObject(arguments);
+        String id = normalizeTodoId(asString(args, "id"));
+        if (id.isBlank()) {
+            return toolError("edit_todo_item", "Missing id");
+        }
+        String content = asString(args, "content");
+        if (content.isBlank()) {
+            content = asString(args, "text");
+        }
+        String status = asString(args, "status");
+        boolean exists = ClientSessionState.getTodoItems().stream().anyMatch(item -> id.equals(item.id()));
+
+        boolean ok = ClientSessionState.upsertTodoItem(id, content, status);
+        if (!ok) {
+            return toolError("edit_todo_item", "Cannot create item without content");
+        }
+
+        JsonObject payload = toolOk("edit_todo_item");
+        payload.addProperty("id", id);
+        payload.addProperty("action", exists ? "updated" : "created");
+        return payload;
+    }
+
+    private static JsonObject deleteTodoItemPayload(JsonElement arguments) {
+        JsonObject args = normalizeArgsObject(arguments);
+        String id = normalizeTodoId(asString(args, "id"));
+        if (id.isBlank()) {
+            return toolError("delete_todo_item", "Missing id");
+        }
+        boolean removed = ClientSessionState.removeTodoItem(id);
+        if (!removed) {
+            return toolError("delete_todo_item", "Todo item not found: " + id);
+        }
+        JsonObject payload = toolOk("delete_todo_item");
+        payload.addProperty("id", id);
+        return payload;
+    }
+
+    private static JsonObject clearTodoPayload() {
+        ClientSessionState.clearTodo();
+        JsonObject payload = toolOk("clear_todo");
+        payload.addProperty("cleared", true);
+        return payload;
+    }
+
+    private static JsonObject requestUserChoicePayload(JsonElement arguments) {
+        JsonObject args = normalizeArgsObject(arguments);
+        String prompt = asString(args, "prompt");
+        if (prompt.isBlank()) {
+            prompt = asString(args, "question");
+        }
+        if (prompt.isBlank()) {
+            return toolError("request_user_choice", "Missing prompt");
+        }
+        if (!args.has("options") || !args.get("options").isJsonArray()) {
+            return toolError("request_user_choice", "Missing options array");
+        }
+
+        JsonArray optionsArg = args.getAsJsonArray("options");
+        List<ClientSessionState.ChoiceOption> options = new ArrayList<>();
+        int index = 1;
+        for (JsonElement element : optionsArg) {
+            if (options.size() >= MAX_CHOICE_OPTIONS) {
+                break;
+            }
+            String id = "";
+            String label = "";
+            String description = "";
+            if (element != null && element.isJsonObject()) {
+                JsonObject obj = element.getAsJsonObject();
+                id = normalizeTodoId(asString(obj, "id"));
+                label = asString(obj, "label");
+                description = asString(obj, "description");
+            } else if (element != null && element.isJsonPrimitive()) {
+                label = element.getAsString();
+            }
+            if (label == null || label.isBlank()) {
+                index += 1;
+                continue;
+            }
+            if (id.isBlank()) {
+                id = "opt-" + index;
+            }
+            options.add(new ClientSessionState.ChoiceOption(id, label.trim(), description == null ? "" : description.trim()));
+            index += 1;
+        }
+        if (options.size() < 2) {
+            return toolError("request_user_choice", "Need at least 2 valid options");
+        }
+
+        String requestId = asString(args, "request_id");
+        if (requestId == null || requestId.isBlank()) {
+            requestId = "choice-" + Long.toString(System.currentTimeMillis(), 36);
+        }
+        String finalRequestId = requestId.trim();
+        String finalPrompt = prompt.trim();
+        List<ClientSessionState.ChoiceOption> finalOptions = List.copyOf(options);
+        ClientSessionState.setPendingChoice(finalRequestId, finalPrompt, finalOptions);
+        postToClient(() -> ClientSessionState.setStatus("awaiting_choice"));
+
+        JsonObject payload = toolOk("request_user_choice");
+        payload.addProperty("request_id", finalRequestId);
+        payload.addProperty("prompt", finalPrompt);
+        payload.addProperty("count", finalOptions.size());
+        return payload;
+    }
+
+    private static JsonObject clearUserChoicePayload() {
+        ClientSessionState.clearPendingChoice();
+        JsonObject payload = toolOk("clear_user_choice");
+        payload.addProperty("cleared", true);
+        return payload;
+    }
+
     private static JsonObject callServerTool(String toolName, JsonObject args) {
         try {
             JsonObject payload = ClientToolBridge.call(toolName, args).join();
@@ -322,6 +567,39 @@ public final class ClientAgentManager {
         } catch (Exception e) {
             return toolError(toolName, "Server tool failed: " + formatAgentError(e));
         }
+    }
+
+    private static String statusAfterToolCalls() {
+        if (ClientSessionState.hasPendingChoice()) {
+            return "awaiting_choice";
+        }
+        if (ClientSessionState.hasPendingPatch()) {
+            return "awaiting_confirm";
+        }
+        return "thinking";
+    }
+
+    private static String normalizeTodoId(String raw) {
+        if (raw == null) {
+            return "";
+        }
+        String value = raw.trim().toLowerCase();
+        value = value.replaceAll("[^a-z0-9_-]+", "-");
+        value = value.replaceAll("-{2,}", "-");
+        value = value.replaceAll("^-+", "");
+        value = value.replaceAll("-+$", "");
+        return value;
+    }
+
+    private static String normalizeTodoStatus(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return "pending";
+        }
+        String value = raw.trim().toLowerCase();
+        return switch (value) {
+            case "pending", "in_progress", "done", "blocked" -> value;
+            default -> "pending";
+        };
     }
 
     private static JsonObject normalizeArgsObject(JsonElement argsElem) {

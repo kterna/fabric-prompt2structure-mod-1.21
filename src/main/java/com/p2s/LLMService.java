@@ -403,6 +403,212 @@ public final class LLMService {
             tools.add(searchSkillTool);
         }
 
+        if (includeSkillTools && allowsTool(allowedTools, "get_todo")) {
+            JsonObject getTodoTool = new JsonObject();
+            getTodoTool.addProperty("type", "function");
+            JsonObject getTodoFn = new JsonObject();
+            getTodoFn.addProperty("name", "get_todo");
+            getTodoFn.addProperty("description", "Read current explicit todo list maintained by the client agent.");
+            JsonObject getTodoParams = new JsonObject();
+            getTodoParams.addProperty("type", "object");
+            getTodoParams.add("properties", new JsonObject());
+            getTodoParams.addProperty("additionalProperties", false);
+            getTodoFn.add("parameters", getTodoParams);
+            getTodoTool.add("function", getTodoFn);
+            tools.add(getTodoTool);
+        }
+
+        if (includeSkillTools && allowsTool(allowedTools, "set_todo")) {
+            JsonObject setTodoTool = new JsonObject();
+            setTodoTool.addProperty("type", "function");
+            JsonObject setTodoFn = new JsonObject();
+            setTodoFn.addProperty("name", "set_todo");
+            setTodoFn.addProperty("description", "Replace current todo list with an explicit plan.");
+            JsonObject setTodoParams = new JsonObject();
+            setTodoParams.addProperty("type", "object");
+            JsonObject setTodoProps = new JsonObject();
+            JsonObject todoTitle = new JsonObject();
+            todoTitle.addProperty("type", "string");
+            todoTitle.addProperty("description", "Optional todo title.");
+            setTodoProps.add("title", todoTitle);
+            JsonObject todoItems = new JsonObject();
+            todoItems.addProperty("type", "array");
+            JsonObject todoItem = new JsonObject();
+            todoItem.addProperty("type", "object");
+            JsonObject todoItemProps = new JsonObject();
+            JsonObject todoId = new JsonObject();
+            todoId.addProperty("type", "string");
+            todoId.addProperty("description", "Stable todo item id.");
+            todoItemProps.add("id", todoId);
+            JsonObject todoContent = new JsonObject();
+            todoContent.addProperty("type", "string");
+            todoContent.addProperty("description", "Todo text.");
+            todoItemProps.add("content", todoContent);
+            JsonObject todoStatus = new JsonObject();
+            todoStatus.addProperty("type", "string");
+            JsonArray todoStatusEnum = new JsonArray();
+            todoStatusEnum.add("pending");
+            todoStatusEnum.add("in_progress");
+            todoStatusEnum.add("done");
+            todoStatusEnum.add("blocked");
+            todoStatus.add("enum", todoStatusEnum);
+            todoItemProps.add("status", todoStatus);
+            todoItem.add("properties", todoItemProps);
+            JsonArray todoItemRequired = new JsonArray();
+            todoItemRequired.add("content");
+            todoItem.add("required", todoItemRequired);
+            todoItems.add("items", todoItem);
+            setTodoProps.add("items", todoItems);
+            setTodoParams.add("properties", setTodoProps);
+            JsonArray setTodoRequired = new JsonArray();
+            setTodoRequired.add("items");
+            setTodoParams.add("required", setTodoRequired);
+            setTodoParams.addProperty("additionalProperties", false);
+            setTodoFn.add("parameters", setTodoParams);
+            setTodoTool.add("function", setTodoFn);
+            tools.add(setTodoTool);
+        }
+
+        if (includeSkillTools && allowsTool(allowedTools, "edit_todo_item")) {
+            JsonObject editTodoTool = new JsonObject();
+            editTodoTool.addProperty("type", "function");
+            JsonObject editTodoFn = new JsonObject();
+            editTodoFn.addProperty("name", "edit_todo_item");
+            editTodoFn.addProperty("description", "Create or update one todo item.");
+            JsonObject editTodoParams = new JsonObject();
+            editTodoParams.addProperty("type", "object");
+            JsonObject editTodoProps = new JsonObject();
+            JsonObject editTodoId = new JsonObject();
+            editTodoId.addProperty("type", "string");
+            editTodoId.addProperty("description", "Todo item id.");
+            editTodoProps.add("id", editTodoId);
+            JsonObject editTodoContent = new JsonObject();
+            editTodoContent.addProperty("type", "string");
+            editTodoContent.addProperty("description", "Todo text.");
+            editTodoProps.add("content", editTodoContent);
+            JsonObject editTodoStatus = new JsonObject();
+            editTodoStatus.addProperty("type", "string");
+            JsonArray editTodoStatusEnum = new JsonArray();
+            editTodoStatusEnum.add("pending");
+            editTodoStatusEnum.add("in_progress");
+            editTodoStatusEnum.add("done");
+            editTodoStatusEnum.add("blocked");
+            editTodoStatus.add("enum", editTodoStatusEnum);
+            editTodoProps.add("status", editTodoStatus);
+            editTodoParams.add("properties", editTodoProps);
+            JsonArray editTodoRequired = new JsonArray();
+            editTodoRequired.add("id");
+            editTodoParams.add("required", editTodoRequired);
+            editTodoParams.addProperty("additionalProperties", false);
+            editTodoFn.add("parameters", editTodoParams);
+            editTodoTool.add("function", editTodoFn);
+            tools.add(editTodoTool);
+        }
+
+        if (includeSkillTools && allowsTool(allowedTools, "delete_todo_item")) {
+            JsonObject deleteTodoTool = new JsonObject();
+            deleteTodoTool.addProperty("type", "function");
+            JsonObject deleteTodoFn = new JsonObject();
+            deleteTodoFn.addProperty("name", "delete_todo_item");
+            deleteTodoFn.addProperty("description", "Delete one todo item by id.");
+            JsonObject deleteTodoParams = new JsonObject();
+            deleteTodoParams.addProperty("type", "object");
+            JsonObject deleteTodoProps = new JsonObject();
+            JsonObject deleteTodoId = new JsonObject();
+            deleteTodoId.addProperty("type", "string");
+            deleteTodoId.addProperty("description", "Todo item id.");
+            deleteTodoProps.add("id", deleteTodoId);
+            deleteTodoParams.add("properties", deleteTodoProps);
+            JsonArray deleteTodoRequired = new JsonArray();
+            deleteTodoRequired.add("id");
+            deleteTodoParams.add("required", deleteTodoRequired);
+            deleteTodoParams.addProperty("additionalProperties", false);
+            deleteTodoFn.add("parameters", deleteTodoParams);
+            deleteTodoTool.add("function", deleteTodoFn);
+            tools.add(deleteTodoTool);
+        }
+
+        if (includeSkillTools && allowsTool(allowedTools, "clear_todo")) {
+            JsonObject clearTodoTool = new JsonObject();
+            clearTodoTool.addProperty("type", "function");
+            JsonObject clearTodoFn = new JsonObject();
+            clearTodoFn.addProperty("name", "clear_todo");
+            clearTodoFn.addProperty("description", "Clear all todo items.");
+            JsonObject clearTodoParams = new JsonObject();
+            clearTodoParams.addProperty("type", "object");
+            clearTodoParams.add("properties", new JsonObject());
+            clearTodoParams.addProperty("additionalProperties", false);
+            clearTodoFn.add("parameters", clearTodoParams);
+            clearTodoTool.add("function", clearTodoFn);
+            tools.add(clearTodoTool);
+        }
+
+        if (includeSkillTools && allowsTool(allowedTools, "request_user_choice")) {
+            JsonObject requestChoiceTool = new JsonObject();
+            requestChoiceTool.addProperty("type", "function");
+            JsonObject requestChoiceFn = new JsonObject();
+            requestChoiceFn.addProperty("name", "request_user_choice");
+            requestChoiceFn.addProperty("description", "Request explicit user approval/selection from 2-3 options, then wait for user choice.");
+            JsonObject requestChoiceParams = new JsonObject();
+            requestChoiceParams.addProperty("type", "object");
+            JsonObject requestChoiceProps = new JsonObject();
+            JsonObject choicePrompt = new JsonObject();
+            choicePrompt.addProperty("type", "string");
+            choicePrompt.addProperty("description", "Question shown to user.");
+            requestChoiceProps.add("prompt", choicePrompt);
+            JsonObject choiceRequestId = new JsonObject();
+            choiceRequestId.addProperty("type", "string");
+            choiceRequestId.addProperty("description", "Optional stable choice request id.");
+            requestChoiceProps.add("request_id", choiceRequestId);
+            JsonObject choiceOptions = new JsonObject();
+            choiceOptions.addProperty("type", "array");
+            JsonObject choiceOptionItem = new JsonObject();
+            choiceOptionItem.addProperty("type", "object");
+            JsonObject choiceOptionProps = new JsonObject();
+            JsonObject choiceOptionId = new JsonObject();
+            choiceOptionId.addProperty("type", "string");
+            choiceOptionId.addProperty("description", "Option id.");
+            choiceOptionProps.add("id", choiceOptionId);
+            JsonObject choiceLabel = new JsonObject();
+            choiceLabel.addProperty("type", "string");
+            choiceLabel.addProperty("description", "Short label shown on button.");
+            choiceOptionProps.add("label", choiceLabel);
+            JsonObject choiceDescription = new JsonObject();
+            choiceDescription.addProperty("type", "string");
+            choiceDescription.addProperty("description", "Optional option detail.");
+            choiceOptionProps.add("description", choiceDescription);
+            choiceOptionItem.add("properties", choiceOptionProps);
+            JsonArray choiceOptionRequired = new JsonArray();
+            choiceOptionRequired.add("label");
+            choiceOptionItem.add("required", choiceOptionRequired);
+            choiceOptions.add("items", choiceOptionItem);
+            requestChoiceProps.add("options", choiceOptions);
+            requestChoiceParams.add("properties", requestChoiceProps);
+            JsonArray requestChoiceRequired = new JsonArray();
+            requestChoiceRequired.add("prompt");
+            requestChoiceRequired.add("options");
+            requestChoiceParams.add("required", requestChoiceRequired);
+            requestChoiceParams.addProperty("additionalProperties", false);
+            requestChoiceFn.add("parameters", requestChoiceParams);
+            requestChoiceTool.add("function", requestChoiceFn);
+            tools.add(requestChoiceTool);
+        }
+
+        if (includeSkillTools && allowsTool(allowedTools, "clear_user_choice")) {
+            JsonObject clearChoiceTool = new JsonObject();
+            clearChoiceTool.addProperty("type", "function");
+            JsonObject clearChoiceFn = new JsonObject();
+            clearChoiceFn.addProperty("name", "clear_user_choice");
+            clearChoiceFn.addProperty("description", "Clear pending user choice request.");
+            JsonObject clearChoiceParams = new JsonObject();
+            clearChoiceParams.addProperty("type", "object");
+            clearChoiceParams.add("properties", new JsonObject());
+            clearChoiceParams.addProperty("additionalProperties", false);
+            clearChoiceFn.add("parameters", clearChoiceParams);
+            clearChoiceTool.add("function", clearChoiceFn);
+            tools.add(clearChoiceTool);
+        }
+
         if (allowsTool(allowedTools, "read_workspace_state")) {
             JsonObject readTool = new JsonObject();
             readTool.addProperty("type", "function");

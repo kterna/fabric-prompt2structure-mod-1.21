@@ -3,6 +3,7 @@ package com.p2s;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 
 public final class ClientSessionState {
     private static boolean active = false;
@@ -23,6 +24,9 @@ public final class ClientSessionState {
     private static String previewDetail = "";
     private static String previewRisk = "";
     private static int previewChangedBlocks = 0;
+    private static String todoTitle = "";
+    private static final List<TodoItem> todoItems = new ArrayList<>();
+    private static ChoiceRequest pendingChoice = null;
     private static final List<ChatMessage> messages = new ArrayList<>();
 
     private ClientSessionState() {
@@ -63,6 +67,8 @@ public final class ClientSessionState {
             status = "";
             messages.clear();
             clearPreview();
+            clearTodo();
+            clearPendingChoice();
         }
     }
 
@@ -110,6 +116,122 @@ public final class ClientSessionState {
         if (text != null && !text.isBlank()) {
             addMessage("You", text.trim());
         }
+    }
+
+    public static synchronized void setTodo(String title, List<TodoItem> items) {
+        todoTitle = title == null ? "" : title.trim();
+        todoItems.clear();
+        if (items != null) {
+            for (TodoItem item : items) {
+                if (item == null || item.id() == null || item.id().isBlank()) {
+                    continue;
+                }
+                String content = item.content() == null ? "" : item.content().trim();
+                if (content.isBlank()) {
+                    continue;
+                }
+                todoItems.add(new TodoItem(
+                        item.id().trim(),
+                        content,
+                        normalizeTodoStatus(item.status())
+                ));
+            }
+        }
+    }
+
+    public static synchronized String getTodoTitle() {
+        return todoTitle;
+    }
+
+    public static synchronized List<TodoItem> getTodoItems() {
+        return List.copyOf(todoItems);
+    }
+
+    public static synchronized boolean upsertTodoItem(String id, String content, String status) {
+        if (id == null || id.isBlank()) {
+            return false;
+        }
+        String itemId = id.trim();
+        String normalizedStatus = (status == null || status.isBlank()) ? "" : normalizeTodoStatus(status);
+
+        for (int i = 0; i < todoItems.size(); i++) {
+            TodoItem existing = todoItems.get(i);
+            if (!itemId.equals(existing.id())) {
+                continue;
+            }
+            String nextContent = (content == null || content.isBlank()) ? existing.content() : content.trim();
+            String nextStatus = normalizedStatus.isBlank() ? existing.status() : normalizedStatus;
+            todoItems.set(i, new TodoItem(itemId, nextContent, nextStatus));
+            return true;
+        }
+
+        if (content == null || content.isBlank()) {
+            return false;
+        }
+        todoItems.add(new TodoItem(itemId, content.trim(), normalizedStatus.isBlank() ? "pending" : normalizedStatus));
+        return true;
+    }
+
+    public static synchronized boolean removeTodoItem(String id) {
+        if (id == null || id.isBlank()) {
+            return false;
+        }
+        String itemId = id.trim();
+        for (int i = 0; i < todoItems.size(); i++) {
+            if (itemId.equals(todoItems.get(i).id())) {
+                todoItems.remove(i);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static synchronized void clearTodo() {
+        todoTitle = "";
+        todoItems.clear();
+    }
+
+    public static synchronized void setPendingChoice(String requestId, String prompt, List<ChoiceOption> options) {
+        if (prompt == null || prompt.isBlank() || options == null || options.isEmpty()) {
+            pendingChoice = null;
+            return;
+        }
+        List<ChoiceOption> normalized = new ArrayList<>();
+        for (ChoiceOption option : options) {
+            if (option == null || option.id() == null || option.id().isBlank()) {
+                continue;
+            }
+            String label = option.label() == null ? "" : option.label().trim();
+            if (label.isBlank()) {
+                continue;
+            }
+            normalized.add(new ChoiceOption(
+                    option.id().trim(),
+                    label,
+                    option.description() == null ? "" : option.description().trim()
+            ));
+        }
+        if (normalized.isEmpty()) {
+            pendingChoice = null;
+            return;
+        }
+        pendingChoice = new ChoiceRequest(
+                requestId == null ? "" : requestId.trim(),
+                prompt.trim(),
+                List.copyOf(normalized)
+        );
+    }
+
+    public static synchronized ChoiceRequest getPendingChoice() {
+        return pendingChoice;
+    }
+
+    public static synchronized boolean hasPendingChoice() {
+        return pendingChoice != null && pendingChoice.options() != null && !pendingChoice.options().isEmpty();
+    }
+
+    public static synchronized void clearPendingChoice() {
+        pendingChoice = null;
     }
 
     private static void addMessage(String role, String text) {
@@ -206,6 +328,23 @@ public final class ClientSessionState {
         previewChangedBlocks = 0;
     }
 
+    private static String normalizeTodoStatus(String raw) {
+        String value = raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT);
+        return switch (value) {
+            case "pending", "in_progress", "done", "blocked" -> value;
+            default -> "pending";
+        };
+    }
+
     public record ChatMessage(String role, String text) {
+    }
+
+    public record TodoItem(String id, String content, String status) {
+    }
+
+    public record ChoiceOption(String id, String label, String description) {
+    }
+
+    public record ChoiceRequest(String requestId, String prompt, List<ChoiceOption> options) {
     }
 }

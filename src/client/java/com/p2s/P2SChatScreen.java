@@ -11,6 +11,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.util.FormattedCharSequence;
 import org.lwjgl.glfw.GLFW;
 
+import java.util.ArrayList;
 import java.util.List;
 
 public class P2SChatScreen extends Screen {
@@ -21,6 +22,7 @@ public class P2SChatScreen extends Screen {
     private static final int PANEL_MIN_WIDTH = 240;
     private static final int TOP_BUTTON_HEIGHT = 20;
     private static final int SMALL_BUTTON_WIDTH = 52;
+    private static final int CHOICE_BUTTON_COUNT = 3;
 
     private EditBox input;
     private Button sendButton;
@@ -29,6 +31,7 @@ public class P2SChatScreen extends Screen {
     private Button discardButton;
     private Button undoButton;
     private Button redoButton;
+    private final List<Button> choiceButtons = new ArrayList<>();
     private double scrollOffset;
 
     public P2SChatScreen() {
@@ -93,6 +96,22 @@ public class P2SChatScreen extends Screen {
                 .bounds(rowStart + (SMALL_BUTTON_WIDTH + 2) * 3, rowY, SMALL_BUTTON_WIDTH, TOP_BUTTON_HEIGHT)
                 .build();
         addRenderableWidget(redoButton);
+
+        choiceButtons.clear();
+        int actionWidth = SMALL_BUTTON_WIDTH * 4 + 6;
+        int choiceY = rowY + TOP_BUTTON_HEIGHT + 2;
+        int choiceGap = 2;
+        int choiceWidth = (actionWidth - choiceGap * (CHOICE_BUTTON_COUNT - 1)) / CHOICE_BUTTON_COUNT;
+        for (int i = 0; i < CHOICE_BUTTON_COUNT; i++) {
+            final int index = i;
+            Button choiceBtn = Button.builder(Component.literal(""), btn -> submitChoice(index))
+                    .bounds(rowStart + i * (choiceWidth + choiceGap), choiceY, choiceWidth, TOP_BUTTON_HEIGHT)
+                    .build();
+            choiceBtn.visible = false;
+            choiceBtn.active = false;
+            choiceButtons.add(choiceBtn);
+            addRenderableWidget(choiceBtn);
+        }
     }
 
     @Override
@@ -140,6 +159,7 @@ public class P2SChatScreen extends Screen {
 
     @Override
     public void render(GuiGraphics gfx, int mouseX, int mouseY, float delta) {
+        refreshChoiceButtons();
         if (applyButton != null) {
             boolean pending = ClientSessionState.hasPendingPatch();
             applyButton.active = pending;
@@ -190,6 +210,17 @@ public class P2SChatScreen extends Screen {
             gfx.drawString(this.font, "No active session (send a message to start)", panelX + PADDING, y, 0xAAAAAA, true);
         }
 
+        List<FormattedCharSequence> choicePromptLines = getChoicePromptLines(panelWidth - PADDING * 2);
+        if (!choicePromptLines.isEmpty()) {
+            y += this.font.lineHeight + 4;
+            gfx.drawString(this.font, "Action Required", panelX + PADDING, y, 0xFFCC66, true);
+            y += this.font.lineHeight + 2;
+            for (FormattedCharSequence line : choicePromptLines) {
+                gfx.drawString(this.font, line, panelX + PADDING, y, 0xFFE6AA, true);
+                y += this.font.lineHeight + LINE_SPACING;
+            }
+        }
+
         List<FormattedCharSequence> previewLines = getPreviewLines(panelWidth - PADDING * 2);
         if (!previewLines.isEmpty()) {
             y += this.font.lineHeight + 4;
@@ -226,6 +257,17 @@ public class P2SChatScreen extends Screen {
             y += this.font.lineHeight + 2;
             for (FormattedCharSequence line : summaryLines) {
                 gfx.drawString(this.font, line, panelX + PADDING, y, 0xCCCCCC, true);
+                y += this.font.lineHeight + LINE_SPACING;
+            }
+        }
+
+        List<FormattedCharSequence> todoLines = getTodoLines(panelWidth - PADDING * 2);
+        if (!todoLines.isEmpty()) {
+            y += this.font.lineHeight + 4;
+            gfx.drawString(this.font, "Todo", panelX + PADDING, y, 0x99CCFF, true);
+            y += this.font.lineHeight + 2;
+            for (FormattedCharSequence line : todoLines) {
+                gfx.drawString(this.font, line, panelX + PADDING, y, 0xCCDDEE, true);
                 y += this.font.lineHeight + LINE_SPACING;
             }
         }
@@ -305,6 +347,14 @@ public class P2SChatScreen extends Screen {
     private int getHeaderHeight(int panelWidth) {
         int base = this.font.lineHeight * 4 + 10;
         base += TOP_BUTTON_HEIGHT + 6;
+        base += TOP_BUTTON_HEIGHT + 2;
+
+        List<FormattedCharSequence> choiceLines = getChoicePromptLines(panelWidth - PADDING * 2);
+        if (!choiceLines.isEmpty()) {
+            base += this.font.lineHeight + 4;
+            base += choiceLines.size() * (this.font.lineHeight + LINE_SPACING);
+            base += LINE_SPACING;
+        }
 
         List<FormattedCharSequence> previewLines = getPreviewLines(panelWidth - PADDING * 2);
         if (!previewLines.isEmpty()) {
@@ -313,13 +363,19 @@ public class P2SChatScreen extends Screen {
             base += LINE_SPACING;
         }
 
+        int extra = 0;
         List<FormattedCharSequence> summaryLines = getSummaryLines(panelWidth - PADDING * 2);
-        if (summaryLines.isEmpty()) {
-            return base;
+        if (!summaryLines.isEmpty()) {
+            extra += this.font.lineHeight + 4;
+            extra += summaryLines.size() * (this.font.lineHeight + LINE_SPACING);
+            extra += LINE_SPACING;
         }
-        int extra = this.font.lineHeight + 4;
-        extra += summaryLines.size() * (this.font.lineHeight + LINE_SPACING);
-        extra += LINE_SPACING;
+        List<FormattedCharSequence> todoLines = getTodoLines(panelWidth - PADDING * 2);
+        if (!todoLines.isEmpty()) {
+            extra += this.font.lineHeight + 4;
+            extra += todoLines.size() * (this.font.lineHeight + LINE_SPACING);
+            extra += LINE_SPACING;
+        }
         return base + extra;
     }
 
@@ -384,6 +440,76 @@ public class P2SChatScreen extends Screen {
         return result;
     }
 
+    private List<FormattedCharSequence> getChoicePromptLines(int contentWidth) {
+        ClientSessionState.ChoiceRequest choice = ClientSessionState.getPendingChoice();
+        if (choice == null || choice.prompt() == null || choice.prompt().isBlank()) {
+            return List.of();
+        }
+        return this.font.split(Component.literal(choice.prompt().trim()), contentWidth);
+    }
+
+    private List<FormattedCharSequence> getTodoLines(int contentWidth) {
+        List<ClientSessionState.TodoItem> items = ClientSessionState.getTodoItems();
+        if (items.isEmpty()) {
+            return List.of();
+        }
+        List<FormattedCharSequence> lines = new ArrayList<>();
+        String title = ClientSessionState.getTodoTitle();
+        if (title != null && !title.isBlank()) {
+            lines.addAll(this.font.split(Component.literal(title.trim()), contentWidth));
+        }
+        int limit = Math.min(8, items.size());
+        for (int i = 0; i < limit; i++) {
+            ClientSessionState.TodoItem item = items.get(i);
+            String mark = switch (item.status()) {
+                case "done" -> "[x]";
+                case "in_progress" -> "[~]";
+                case "blocked" -> "[!]";
+                default -> "[ ]";
+            };
+            String text = mark + " " + item.id() + " " + item.content();
+            lines.addAll(this.font.split(Component.literal(text), contentWidth));
+        }
+        int more = items.size() - limit;
+        if (more > 0) {
+            lines.add(Component.literal("... +" + more + " more").getVisualOrderText());
+        }
+        return lines;
+    }
+
+    private void refreshChoiceButtons() {
+        if (choiceButtons.isEmpty()) {
+            return;
+        }
+        ClientSessionState.ChoiceRequest choice = ClientSessionState.getPendingChoice();
+        List<ClientSessionState.ChoiceOption> options = choice == null ? List.of() : choice.options();
+        for (int i = 0; i < choiceButtons.size(); i++) {
+            Button button = choiceButtons.get(i);
+            if (i < options.size()) {
+                ClientSessionState.ChoiceOption option = options.get(i);
+                button.visible = true;
+                button.active = true;
+                button.setMessage(Component.literal(shortChoiceLabel(option.label())));
+            } else {
+                button.visible = false;
+                button.active = false;
+                button.setMessage(Component.literal(""));
+            }
+        }
+    }
+
+    private String shortChoiceLabel(String label) {
+        if (label == null) {
+            return "";
+        }
+        String text = label.trim();
+        int max = 12;
+        if (text.length() <= max) {
+            return text;
+        }
+        return text.substring(0, max - 3) + "...";
+    }
+
     private static int roleColor(String role) {
         if (role == null) {
             return 0xFFFFFF;
@@ -435,6 +561,21 @@ public class P2SChatScreen extends Screen {
         input.setValue("");
         input.moveCursorToEnd(false);
         scrollOffset = 0;
+    }
+
+    private void submitChoice(int index) {
+        ClientSessionState.ChoiceRequest choice = ClientSessionState.getPendingChoice();
+        if (choice == null || choice.options() == null) {
+            return;
+        }
+        if (index < 0 || index >= choice.options().size()) {
+            return;
+        }
+        ClientSessionState.ChoiceOption option = choice.options().get(index);
+        if (option == null || option.id() == null || option.id().isBlank()) {
+            return;
+        }
+        ClientAgentManager.submitChoiceSelection(option.id());
     }
 
     private void sendSessionAction(String action, String payload) {
