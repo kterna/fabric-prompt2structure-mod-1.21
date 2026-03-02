@@ -21,6 +21,7 @@ public final class P2SClientConfig {
     private static final String DEFAULT_MODEL = "gpt-4o-mini";
     private static final int DEFAULT_TIMEOUT_SECONDS = 30;
     private static final boolean DEFAULT_USE_TOOL_CALL = true;
+    private static final boolean DEFAULT_USE_STREAMING = true;
     private static final String DEFAULT_SYSTEM_PROMPT = ModConfig.DEFAULT_SYSTEM_PROMPT;
 
     private static String selectionItemId = DEFAULT_SELECTION_ITEM_ID;
@@ -29,6 +30,7 @@ public final class P2SClientConfig {
     private static String model = DEFAULT_MODEL;
     private static int httpTimeoutSeconds = DEFAULT_TIMEOUT_SECONDS;
     private static boolean useToolCall = DEFAULT_USE_TOOL_CALL;
+    private static boolean useStreaming = DEFAULT_USE_STREAMING;
     private static String systemPrompt = DEFAULT_SYSTEM_PROMPT;
 
     private P2SClientConfig() {
@@ -82,6 +84,17 @@ public final class P2SClientConfig {
         return systemPrompt;
     }
 
+    public static synchronized boolean getUseStreaming() {
+        return useStreaming;
+    }
+
+    public static synchronized void setUseStreaming(boolean value, boolean persist) {
+        useStreaming = value;
+        if (persist) {
+            save();
+        }
+    }
+
     public static synchronized boolean setLlmConfig(
             String rawApiUrl,
             String rawApiKey,
@@ -123,6 +136,7 @@ public final class P2SClientConfig {
         model = DEFAULT_MODEL;
         httpTimeoutSeconds = DEFAULT_TIMEOUT_SECONDS;
         useToolCall = DEFAULT_USE_TOOL_CALL;
+        useStreaming = DEFAULT_USE_STREAMING;
         systemPrompt = DEFAULT_SYSTEM_PROMPT;
         if (persist) {
             save();
@@ -162,6 +176,7 @@ public final class P2SClientConfig {
         String loadedModel = null;
         Integer loadedTimeout = null;
         Boolean loadedUseToolCall = null;
+        Boolean loadedUseStreaming = null;
         String loadedSystemPrompt = null;
         try {
             if (Files.exists(CONFIG_PATH)) {
@@ -172,6 +187,7 @@ public final class P2SClientConfig {
                 loadedModel = root.has("model") ? root.get("model").getAsString() : null;
                 loadedTimeout = root.has("httpTimeoutSeconds") ? root.get("httpTimeoutSeconds").getAsInt() : null;
                 loadedUseToolCall = root.has("useToolCall") ? root.get("useToolCall").getAsBoolean() : null;
+                loadedUseStreaming = root.has("useStreaming") ? root.get("useStreaming").getAsBoolean() : null;
                 loadedSystemPrompt = root.has("systemPrompt") ? root.get("systemPrompt").getAsString() : null;
             }
         } catch (Exception e) {
@@ -198,6 +214,7 @@ public final class P2SClientConfig {
         Integer timeout = normalizePositiveInt(loadedTimeout);
         httpTimeoutSeconds = timeout == null ? DEFAULT_TIMEOUT_SECONDS : timeout;
         useToolCall = loadedUseToolCall == null ? DEFAULT_USE_TOOL_CALL : loadedUseToolCall;
+        useStreaming = loadedUseStreaming == null ? DEFAULT_USE_STREAMING : loadedUseStreaming;
         String prompt = loadedSystemPrompt == null ? "" : loadedSystemPrompt.trim();
         systemPrompt = prompt.isBlank() ? DEFAULT_SYSTEM_PROMPT : prompt;
         save();
@@ -216,6 +233,7 @@ public final class P2SClientConfig {
             root.addProperty("model", model);
             root.addProperty("httpTimeoutSeconds", httpTimeoutSeconds);
             root.addProperty("useToolCall", useToolCall);
+            root.addProperty("useStreaming", useStreaming);
             root.addProperty("systemPrompt", systemPrompt);
             Files.writeString(CONFIG_PATH, GSON.toJson(root));
         } catch (Exception e) {

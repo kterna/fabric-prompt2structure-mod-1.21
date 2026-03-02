@@ -7,12 +7,17 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -27,7 +32,7 @@ public final class SubagentManager {
     private static final int MAX_RESPONSE_CHARS = 8192;
     private static final int MAX_SUMMARY_CHARS = 512;
     private static final int MAX_TRACE_ITEMS = 40;
-    private static final int MAX_TOOL_LOOPS = 12;
+    private static final int MAX_TOOL_LOOPS = 30;
     private static final ThreadPoolExecutor EXECUTOR = new ThreadPoolExecutor(
             MAX_ACTIVE_SUBAGENTS,
             MAX_ACTIVE_SUBAGENTS,
@@ -43,6 +48,15 @@ public final class SubagentManager {
 
     private static final ConcurrentHashMap<String, SubagentTask> TASKS = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<String, CopyOnWriteArrayList<String>> SESSION_INDEX = new ConcurrentHashMap<>();
+    private static final ExecutorService TOOL_EXECUTOR = Executors.newFixedThreadPool(4, r -> {
+        Thread t = new Thread(r, "p2s-subagent-tool");
+        t.setDaemon(true);
+        return t;
+    });
+    private static final Set<String> PARALLEL_SAFE_TOOLS = Set.of(
+            "list_skills", "read_skill", "search_skill",
+            "read_workspace_state", "search_block_ids"
+    );
 
     private SubagentManager() {
     }
@@ -313,10 +327,10 @@ public final class SubagentManager {
 
                 List<LLMService.ToolCall> toolCalls = result.toolCalls() == null ? List.of() : result.toolCalls();
                 if (!toolCalls.isEmpty()) {
-                    for (LLMService.ToolCall call : toolCalls) {
-                        JsonObject payload = executeToolCall(task, call, allowedTools);
-                        history.add(buildToolMessage(call, payload));
-                        appendTrace(task, call == null ? "" : call.name(), payload);
+                    List<ToolCallResult> batchResults = executeToolCallsBatch(task, toolCalls, allowedTools);
+                    for (ToolCallResult tcr : batchResults) {
+                        history.add(buildToolMessage(tcr.call(), tcr.payload()));
+                        appendTrace(task, tcr.call() == null ? "" : tcr.call().name(), tcr.payload());
                     }
                     continue;
                 }
@@ -328,13 +342,70 @@ public final class SubagentManager {
                 complete(task, text);
                 return;
             }
-            fail(task, "Reached max subagent loops");
+            fail(task, "Reached max subagent loops (" + maxLoops + ")");
+            P2SMod.LOGGER.warn("Subagent {} reached max loops ({})", task.id, maxLoops);
         } catch (Exception e) {
             if (shouldStop(task)) {
                 return;
             }
             fail(task, formatError(e));
         }
+    }
+
+    private record ToolCallResult(LLMService.ToolCall call, JsonObject payload) {
+    }
+
+    private static List<ToolCallResult> executeToolCallsBatch(SubagentTask task, List<LLMService.ToolCall> toolCalls, Set<String> allowedTools) {
+        if (toolCalls.size() == 1) {
+            LLMService.ToolCall call = toolCalls.get(0);
+            JsonObject payload = executeToolCall(task, call, allowedTools);
+            return List.of(new ToolCallResult(call, payload));
+        }
+
+        List<LLMService.ToolCall> parallelCalls = new ArrayList<>();
+        List<LLMService.ToolCall> serialCalls = new ArrayList<>();
+        for (LLMService.ToolCall call : toolCalls) {
+            if (call != null && call.name() != null && PARALLEL_SAFE_TOOLS.contains(call.name())) {
+                parallelCalls.add(call);
+            } else {
+                serialCalls.add(call);
+            }
+        }
+
+        Map<LLMService.ToolCall, JsonObject> resultMap = new LinkedHashMap<>();
+
+        if (!parallelCalls.isEmpty()) {
+            List<CompletableFuture<ToolCallResult>> futures = new ArrayList<>();
+            for (LLMService.ToolCall call : parallelCalls) {
+                futures.add(CompletableFuture.supplyAsync(
+                        () -> new ToolCallResult(call, executeToolCall(task, call, allowedTools)),
+                        TOOL_EXECUTOR
+                ));
+            }
+            for (CompletableFuture<ToolCallResult> future : futures) {
+                try {
+                    ToolCallResult tcr = future.join();
+                    resultMap.put(tcr.call(), tcr.payload());
+                } catch (Exception e) {
+                    P2SMod.LOGGER.warn("Subagent parallel tool call failed: {}", e.getMessage());
+                }
+            }
+        }
+
+        for (LLMService.ToolCall call : serialCalls) {
+            JsonObject payload = executeToolCall(task, call, allowedTools);
+            resultMap.put(call, payload);
+        }
+
+        List<ToolCallResult> ordered = new ArrayList<>();
+        for (LLMService.ToolCall call : toolCalls) {
+            JsonObject payload = resultMap.get(call);
+            if (payload == null) {
+                payload = toolError(call == null ? "" : call.name(), "Execution failed");
+            }
+            ordered.add(new ToolCallResult(call, payload));
+        }
+        return ordered;
     }
 
     private static JsonObject executeToolCall(SubagentTask task, LLMService.ToolCall call, Set<String> allowedTools) {

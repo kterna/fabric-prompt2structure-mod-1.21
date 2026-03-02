@@ -30,7 +30,9 @@ public class P2SConfigScreen extends Screen {
     private EditBox timeoutInput;
     private EditBox systemPromptInput;
     private Button toolCallButton;
+    private Button streamingButton;
     private boolean useToolCall;
+    private boolean useStreaming;
 
     // Skills tab
     private final List<Button> skillRowButtons = new ArrayList<>();
@@ -180,6 +182,12 @@ public class P2SConfigScreen extends Screen {
             useToolCall = !useToolCall;
             btn.setMessage(toolCallLabel());
         }).bounds(left + 140, y + 14, 160, 20).build());
+
+        useStreaming = P2SClientConfig.getUseStreaming();
+        streamingButton = addRenderableWidget(Button.builder(streamingLabel(), btn -> {
+            useStreaming = !useStreaming;
+            btn.setMessage(streamingLabel());
+        }).bounds(left + 310, y + 14, 160, 20).build());
         y += 50;
 
         systemPromptInput = new EditBox(this.font, left + 10, y + 14, inputWidth, 20, Component.literal("system prompt"));
@@ -200,6 +208,10 @@ public class P2SConfigScreen extends Screen {
         return Component.literal("useToolCall: " + (useToolCall ? "ON" : "OFF"));
     }
 
+    private Component streamingLabel() {
+        return Component.literal("useStreaming: " + (useStreaming ? "ON" : "OFF"));
+    }
+
     private void saveLlmConfig() {
         Integer timeout = parseTimeout(timeoutInput == null ? "" : timeoutInput.getValue());
         boolean ok = P2SClientConfig.setLlmConfig(
@@ -211,6 +223,7 @@ public class P2SConfigScreen extends Screen {
                 systemPromptInput == null ? "" : systemPromptInput.getValue(),
                 true
         );
+        P2SClientConfig.setUseStreaming(useStreaming, true);
         if (ok) {
             statusText = "Saved";
             statusColor = 0x55FF55;
@@ -229,6 +242,8 @@ public class P2SConfigScreen extends Screen {
         if (systemPromptInput != null) systemPromptInput.setValue(P2SClientConfig.getSystemPrompt());
         useToolCall = P2SClientConfig.isUseToolCall();
         if (toolCallButton != null) toolCallButton.setMessage(toolCallLabel());
+        useStreaming = P2SClientConfig.getUseStreaming();
+        if (streamingButton != null) streamingButton.setMessage(streamingLabel());
         statusText = "Reset to defaults";
         statusColor = 0x55FF55;
     }

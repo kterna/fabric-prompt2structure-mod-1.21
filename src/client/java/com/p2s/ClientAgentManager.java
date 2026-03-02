@@ -10,8 +10,12 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.Minecraft;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -25,7 +29,7 @@ public final class ClientAgentManager {
         return t;
     });
     private static final int MAX_HISTORY = 40;
-    private static final int MAX_AGENT_LOOPS = 6;
+    private static final int SAFETY_LOOP_LIMIT = 50;
     private static final int MAX_TODO_ITEMS = 40;
     private static final int MAX_CHOICE_OPTIONS = 3;
     private static final String CLIENT_TOOL_CONTRACT = """
@@ -44,6 +48,17 @@ public final class ClientAgentManager {
             - Use list_subagents to inspect current subagent states, and delete_subagent to stop/remove one.
             - Do not request recursive subagent creation from subagents.
             """;
+
+    private static final ExecutorService TOOL_EXECUTOR = Executors.newFixedThreadPool(4, r -> {
+        Thread t = new Thread(r, "p2s-tool-exec");
+        t.setDaemon(true);
+        return t;
+    });
+    private static final Set<String> PARALLEL_SAFE_TOOLS = Set.of(
+            "list_skills", "read_skill", "search_skill", "get_todo",
+            "read_workspace_state", "search_block_ids", "explain_plan",
+            "list_subagents", "get_subagent", "list_profiles", "get_profile"
+    );
 
     private static final Object LOCK = new Object();
     private static LocalSession currentSession;
@@ -148,9 +163,9 @@ public final class ClientAgentManager {
     }
 
     private static void runAgentLoop(LocalSession session) {
-        int remaining = MAX_AGENT_LOOPS;
+        int iterations = 0;
         try {
-            while (remaining > 0) {
+            while (iterations < SAFETY_LOOP_LIMIT) {
                 List<JsonObject> snapshot;
                 synchronized (LOCK) {
                     if (session != currentSession) {
@@ -163,21 +178,43 @@ public final class ClientAgentManager {
                         ModConfig.SESSION_JOB_TIMEOUT_SECONDS,
                         P2SClientConfig.getHttpTimeoutSeconds() + 5
                 ));
-                LLMService.SessionResult result = LLMService.requestWithHistoryWithSkills(
-                                snapshot,
-                                P2SClientConfig.llmRequestConfig()
-                        )
-                        .orTimeout(timeoutSeconds, TimeUnit.SECONDS)
-                        .join();
 
-                boolean continueLoop = handleResult(session, result, remaining);
+                LLMService.SessionResult result;
+                if (P2SClientConfig.getUseStreaming()) {
+                    postToClient(ClientSessionState::beginStreaming);
+                    try {
+                        result = LLMService.requestWithHistoryStreaming(
+                                        snapshot,
+                                        P2SClientConfig.llmRequestConfig(),
+                                        token -> postToClient(() -> ClientSessionState.appendStreamingToken(token))
+                                )
+                                .orTimeout(timeoutSeconds, TimeUnit.SECONDS)
+                                .join();
+                    } finally {
+                        postToClient(ClientSessionState::endStreaming);
+                    }
+                } else {
+                    result = LLMService.requestWithHistoryWithSkills(
+                                    snapshot,
+                                    P2SClientConfig.llmRequestConfig()
+                            )
+                            .orTimeout(timeoutSeconds, TimeUnit.SECONDS)
+                            .join();
+                }
+
+                boolean continueLoop = handleResult(session, result);
                 if (!continueLoop) {
                     break;
                 }
-                remaining -= 1;
+                iterations++;
             }
-            if (remaining <= 0) {
-                postToClient(() -> ClientSessionState.setStatus("error"));
+            if (iterations >= SAFETY_LOOP_LIMIT) {
+                P2SMod.LOGGER.warn("Agent loop reached safety limit of {} iterations", SAFETY_LOOP_LIMIT);
+                postToClient(() -> ClientSessionState.onChatResponse(
+                        "Agent loop reached safety limit (" + SAFETY_LOOP_LIMIT + " iterations). Stopping.",
+                        false,
+                        "error"
+                ));
             }
         } catch (Exception ex) {
             String error = formatAgentError(ex);
@@ -188,10 +225,11 @@ public final class ClientAgentManager {
                     session.inFlight = false;
                 }
             }
+            autoSaveSession(session);
         }
     }
 
-    private static boolean handleResult(LocalSession session, LLMService.SessionResult result, int remaining) {
+    private static boolean handleResult(LocalSession session, LLMService.SessionResult result) {
         if (result == null) {
             postToClient(() -> ClientSessionState.onChatResponse("Request failed: empty response", false, "error"));
             return false;
@@ -206,9 +244,9 @@ public final class ClientAgentManager {
 
         List<LLMService.ToolCall> toolCalls = result.toolCalls() == null ? List.of() : result.toolCalls();
         if (!toolCalls.isEmpty()) {
-            for (LLMService.ToolCall call : toolCalls) {
-                JsonObject payload = executeToolCall(session, call);
-                JsonObject toolMsg = buildToolMessage(call, payload);
+            List<ToolCallResult> results = executeToolCallsBatch(session, toolCalls);
+            for (ToolCallResult tcr : results) {
+                JsonObject toolMsg = buildToolMessage(tcr.call(), tcr.payload());
                 synchronized (LOCK) {
                     session.history.add(toolMsg);
                     trimHistoryLocked(session);
@@ -229,7 +267,10 @@ public final class ClientAgentManager {
             if (ClientSessionState.hasPendingChoice()) {
                 return false;
             }
-            return remaining > 1;
+            if (ClientSessionState.hasPendingPatch()) {
+                return false;
+            }
+            return true;
         }
 
         String text = result.textContent();
@@ -245,6 +286,62 @@ public final class ClientAgentManager {
             ));
         }
         return false;
+    }
+
+    private record ToolCallResult(LLMService.ToolCall call, JsonObject payload) {
+    }
+
+    private static List<ToolCallResult> executeToolCallsBatch(LocalSession session, List<LLMService.ToolCall> toolCalls) {
+        if (toolCalls.size() == 1) {
+            LLMService.ToolCall call = toolCalls.get(0);
+            JsonObject payload = executeToolCall(session, call);
+            return List.of(new ToolCallResult(call, payload));
+        }
+
+        List<LLMService.ToolCall> parallelCalls = new ArrayList<>();
+        List<LLMService.ToolCall> serialCalls = new ArrayList<>();
+        for (LLMService.ToolCall call : toolCalls) {
+            if (call != null && call.name() != null && PARALLEL_SAFE_TOOLS.contains(call.name())) {
+                parallelCalls.add(call);
+            } else {
+                serialCalls.add(call);
+            }
+        }
+
+        Map<LLMService.ToolCall, JsonObject> resultMap = new LinkedHashMap<>();
+
+        if (!parallelCalls.isEmpty()) {
+            List<CompletableFuture<ToolCallResult>> futures = new ArrayList<>();
+            for (LLMService.ToolCall call : parallelCalls) {
+                futures.add(CompletableFuture.supplyAsync(
+                        () -> new ToolCallResult(call, executeToolCall(session, call)),
+                        TOOL_EXECUTOR
+                ));
+            }
+            for (CompletableFuture<ToolCallResult> future : futures) {
+                try {
+                    ToolCallResult tcr = future.join();
+                    resultMap.put(tcr.call(), tcr.payload());
+                } catch (Exception e) {
+                    P2SMod.LOGGER.warn("Parallel tool call failed: {}", e.getMessage());
+                }
+            }
+        }
+
+        for (LLMService.ToolCall call : serialCalls) {
+            JsonObject payload = executeToolCall(session, call);
+            resultMap.put(call, payload);
+        }
+
+        List<ToolCallResult> ordered = new ArrayList<>();
+        for (LLMService.ToolCall call : toolCalls) {
+            JsonObject payload = resultMap.get(call);
+            if (payload == null) {
+                payload = toolError(call == null ? "" : call.name(), "Execution failed");
+            }
+            ordered.add(new ToolCallResult(call, payload));
+        }
+        return ordered;
     }
 
     private static JsonObject executeToolCall(LocalSession session, LLMService.ToolCall call) {
@@ -704,6 +801,7 @@ public final class ClientAgentManager {
         session.id = UUID.randomUUID().toString();
         session.history = new ArrayList<>();
         session.inFlight = false;
+        session.createdAt = System.currentTimeMillis();
 
         JsonObject system = new JsonObject();
         system.addProperty("role", "system");
@@ -753,6 +851,145 @@ public final class ClientAgentManager {
         return message == null || message.isBlank() ? "Unknown error" : message;
     }
 
+    private static void autoSaveSession(LocalSession session) {
+        if (session == null || session.id == null || session.id.isBlank()) {
+            return;
+        }
+        try {
+            List<JsonObject> historyCopy;
+            synchronized (LOCK) {
+                historyCopy = deepCopyMessages(session.history);
+            }
+
+            List<ClientSessionState.ChatMessage> chatMessages = ClientSessionState.getMessages();
+            List<SessionPersistence.ChatMessageEntry> chatLog = new ArrayList<>();
+            for (ClientSessionState.ChatMessage msg : chatMessages) {
+                chatLog.add(new SessionPersistence.ChatMessageEntry(msg.role(), msg.text()));
+            }
+
+            List<ClientSessionState.TodoItem> todoItems = ClientSessionState.getTodoItems();
+            List<SessionPersistence.TodoItemEntry> todoEntries = new ArrayList<>();
+            for (ClientSessionState.TodoItem item : todoItems) {
+                todoEntries.add(new SessionPersistence.TodoItemEntry(item.id(), item.content(), item.status()));
+            }
+
+            String title = "";
+            for (ClientSessionState.ChatMessage msg : chatMessages) {
+                if ("You".equals(msg.role()) && msg.text() != null && !msg.text().isBlank()) {
+                    title = msg.text().trim();
+                    if (title.length() > 60) {
+                        title = title.substring(0, 57) + "...";
+                    }
+                    break;
+                }
+            }
+            if (title.isBlank()) {
+                title = "Session " + session.id.substring(0, 8);
+            }
+
+            SessionPersistence.SavedSession saved = new SessionPersistence.SavedSession(
+                    session.id,
+                    title,
+                    session.createdAt,
+                    System.currentTimeMillis(),
+                    chatLog.size(),
+                    historyCopy,
+                    chatLog,
+                    todoEntries,
+                    ClientSessionState.getTodoTitle()
+            );
+
+            CompletableFuture.runAsync(() -> SessionPersistence.saveSession(saved));
+        } catch (Exception e) {
+            P2SMod.LOGGER.warn("Auto-save session failed: {}", e.getMessage());
+        }
+    }
+
+    public static void restoreSession(String sessionId) {
+        if (sessionId == null || sessionId.isBlank()) {
+            return;
+        }
+
+        synchronized (LOCK) {
+            if (currentSession != null && currentSession.inFlight) {
+                postToClient(() -> ClientSessionState.onChatResponse(
+                        "Cannot restore session while agent is running.",
+                        false,
+                        "busy"
+                ));
+                return;
+            }
+        }
+
+        SessionPersistence.SavedSession saved = SessionPersistence.loadSession(sessionId);
+        if (saved == null) {
+            postToClient(() -> ClientSessionState.onChatResponse(
+                    "Failed to load session.",
+                    false,
+                    "error"
+            ));
+            return;
+        }
+
+        synchronized (LOCK) {
+            LocalSession session = new LocalSession();
+            session.id = saved.id();
+            session.history = new ArrayList<>(saved.llmHistory());
+            session.inFlight = false;
+            session.createdAt = saved.createdAt();
+            session.serverSessionStarted = false;
+            currentSession = session;
+        }
+
+        postToClient(() -> {
+            ClientSessionState.clearMessages();
+            ClientSessionState.clearTodo();
+            ClientSessionState.clearPendingChoice();
+            ClientSessionState.endStreaming();
+
+            if (saved.chatLog() != null) {
+                for (SessionPersistence.ChatMessageEntry entry : saved.chatLog()) {
+                    ClientSessionState.addMessage(entry.role(), entry.text());
+                }
+            }
+
+            if (saved.todoItems() != null && !saved.todoItems().isEmpty()) {
+                List<ClientSessionState.TodoItem> items = new ArrayList<>();
+                for (SessionPersistence.TodoItemEntry entry : saved.todoItems()) {
+                    items.add(new ClientSessionState.TodoItem(entry.id(), entry.content(), entry.status()));
+                }
+                ClientSessionState.setTodo(saved.todoTitle(), items);
+            }
+
+            ClientSessionState.setStatus("restored");
+        });
+    }
+
+    public static void newSession() {
+        synchronized (LOCK) {
+            if (currentSession != null && currentSession.inFlight) {
+                postToClient(() -> ClientSessionState.onChatResponse(
+                        "Cannot start new session while agent is running.",
+                        false,
+                        "busy"
+                ));
+                return;
+            }
+            if (currentSession != null) {
+                autoSaveSession(currentSession);
+            }
+            currentSession = null;
+        }
+
+        postToClient(() -> {
+            ClientSessionState.clearMessages();
+            ClientSessionState.clearTodo();
+            ClientSessionState.clearPendingChoice();
+            ClientSessionState.endStreaming();
+            ClientSessionState.setStatus("");
+        });
+    }
+
     private static void postToClient(Runnable action) {
         Minecraft mc = Minecraft.getInstance();
         if (mc == null || action == null) {
@@ -765,6 +1002,7 @@ public final class ClientAgentManager {
         String id;
         boolean inFlight;
         boolean serverSessionStarted;
+        long createdAt;
         List<JsonObject> history;
     }
 }

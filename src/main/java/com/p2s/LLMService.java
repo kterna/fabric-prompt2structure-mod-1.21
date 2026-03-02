@@ -11,12 +11,17 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -80,6 +85,198 @@ public final class LLMService {
             Collection<String> allowedTools
     ) {
         return requestWithHistoryInternal(messages, true, config, allowedTools);
+    }
+
+    public interface StreamCallback {
+        void onToken(String token);
+        default void onComplete(SessionResult result) {}
+        default void onError(String message) {}
+    }
+
+    public static CompletableFuture<SessionResult> requestWithHistoryStreaming(
+            java.util.List<JsonObject> messages,
+            RequestConfig overrideConfig,
+            StreamCallback callback
+    ) {
+        return CompletableFuture.supplyAsync(() -> {
+            RequestConfig cfg = resolveConfig(overrideConfig);
+            Set<String> normalizedAllowedTools = null;
+            String bodyJsonBase = buildBodyForMessages(messages, cfg.model(), cfg.useToolCall(), true, normalizedAllowedTools);
+
+            JsonObject bodyObj = JsonParser.parseString(bodyJsonBase).getAsJsonObject();
+            bodyObj.addProperty("stream", true);
+            String bodyJson = GSON.toJson(bodyObj);
+
+            int messageCount = messages == null ? 0 : messages.size();
+            P2SMod.LOGGER.info("LLM streaming request -> url={}, model={}, timeout={}s, messages={}",
+                    cfg.apiUrl(), cfg.model(), cfg.httpTimeoutSeconds(), messageCount);
+
+            Request request = new Request.Builder()
+                    .url(cfg.apiUrl())
+                    .post(RequestBody.create(bodyJson, JSON))
+                    .header("Authorization", "Bearer " + cfg.apiKey())
+                    .build();
+
+            try {
+                Response response = getClient(cfg.httpTimeoutSeconds()).newCall(request).execute();
+                try {
+                    if (!response.isSuccessful()) {
+                        String errBody = response.body() == null ? "" : response.body().string();
+                        P2SMod.LOGGER.error("LLM streaming failed status={}, body={}", response.code(), truncate(errBody));
+                        throw new IOException("请求失败，状态码: " + response.code());
+                    }
+
+                    String contentType = response.header("Content-Type", "");
+                    if (!contentType.contains("text/event-stream") && !contentType.contains("text/plain")) {
+                        P2SMod.LOGGER.info("LLM streaming fallback to non-stream (Content-Type: {})", contentType);
+                        String respBody = response.body() == null ? "" : response.body().string();
+                        SessionResult result = parseSessionResponse(respBody);
+                        if (callback != null) {
+                            callback.onComplete(result);
+                        }
+                        return result;
+                    }
+
+                    return readSSEStream(response, callback);
+                } finally {
+                    response.close();
+                }
+            } catch (Exception e) {
+                String msg = e.getMessage() == null ? "Unknown streaming error" : e.getMessage();
+                if (callback != null) {
+                    callback.onError(msg);
+                }
+                throw new RuntimeException("LLM 流式请求异常: " + msg, e);
+            }
+        }, EXECUTOR);
+    }
+
+    private static final class ToolCallAccumulator {
+        String id = "";
+        String name = "";
+        final StringBuilder arguments = new StringBuilder();
+    }
+
+    private static SessionResult readSSEStream(Response response, StreamCallback callback) throws IOException {
+        StringBuilder contentBuilder = new StringBuilder();
+        Map<Integer, ToolCallAccumulator> toolAccumulators = new HashMap<>();
+
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(response.body().byteStream(), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (line.isBlank() || line.startsWith(":")) {
+                    continue;
+                }
+                if (!line.startsWith("data: ")) {
+                    continue;
+                }
+                String data = line.substring(6).trim();
+                if ("[DONE]".equals(data)) {
+                    break;
+                }
+
+                try {
+                    JsonObject chunk = JsonParser.parseString(data).getAsJsonObject();
+                    JsonArray choices = chunk.getAsJsonArray("choices");
+                    if (choices == null || choices.isEmpty()) {
+                        continue;
+                    }
+                    JsonObject firstChoice = choices.get(0).getAsJsonObject();
+                    JsonObject delta = firstChoice.has("delta") ? firstChoice.getAsJsonObject("delta") : null;
+                    if (delta == null) {
+                        continue;
+                    }
+
+                    if (delta.has("content") && !delta.get("content").isJsonNull()) {
+                        String token = delta.get("content").getAsString();
+                        if (token != null && !token.isEmpty()) {
+                            contentBuilder.append(token);
+                            if (callback != null) {
+                                callback.onToken(token);
+                            }
+                        }
+                    }
+
+                    if (delta.has("tool_calls") && delta.get("tool_calls").isJsonArray()) {
+                        JsonArray toolCallDeltas = delta.getAsJsonArray("tool_calls");
+                        for (JsonElement tcElem : toolCallDeltas) {
+                            if (!tcElem.isJsonObject()) {
+                                continue;
+                            }
+                            JsonObject tcDelta = tcElem.getAsJsonObject();
+                            int index = tcDelta.has("index") ? tcDelta.get("index").getAsInt() : 0;
+                            ToolCallAccumulator acc = toolAccumulators.computeIfAbsent(index, k -> new ToolCallAccumulator());
+                            if (tcDelta.has("id") && !tcDelta.get("id").isJsonNull()) {
+                                acc.id = tcDelta.get("id").getAsString();
+                            }
+                            if (tcDelta.has("function") && tcDelta.get("function").isJsonObject()) {
+                                JsonObject fnDelta = tcDelta.getAsJsonObject("function");
+                                if (fnDelta.has("name") && !fnDelta.get("name").isJsonNull()) {
+                                    acc.name = fnDelta.get("name").getAsString();
+                                }
+                                if (fnDelta.has("arguments") && !fnDelta.get("arguments").isJsonNull()) {
+                                    acc.arguments.append(fnDelta.get("arguments").getAsString());
+                                }
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    P2SMod.LOGGER.debug("SSE chunk parse error: {}", e.getMessage());
+                }
+            }
+        }
+
+        String textContent = contentBuilder.toString();
+        List<ToolCall> toolCalls = new ArrayList<>();
+        JsonObject assembledMessage = new JsonObject();
+        assembledMessage.addProperty("role", "assistant");
+
+        if (!textContent.isEmpty()) {
+            assembledMessage.addProperty("content", textContent);
+        } else {
+            assembledMessage.add("content", com.google.gson.JsonNull.INSTANCE);
+        }
+
+        if (!toolAccumulators.isEmpty()) {
+            JsonArray toolCallsArray = new JsonArray();
+            List<Integer> indices = new ArrayList<>(toolAccumulators.keySet());
+            indices.sort(Integer::compareTo);
+            for (int idx : indices) {
+                ToolCallAccumulator acc = toolAccumulators.get(idx);
+                JsonElement argsElem;
+                try {
+                    argsElem = JsonParser.parseString(acc.arguments.toString());
+                } catch (Exception e) {
+                    argsElem = new com.google.gson.JsonPrimitive(acc.arguments.toString());
+                }
+                toolCalls.add(new ToolCall(acc.id, acc.name, argsElem));
+
+                JsonObject tcObj = new JsonObject();
+                tcObj.addProperty("id", acc.id);
+                tcObj.addProperty("type", "function");
+                JsonObject fnObj = new JsonObject();
+                fnObj.addProperty("name", acc.name);
+                fnObj.addProperty("arguments", acc.arguments.toString());
+                tcObj.add("function", fnObj);
+                toolCallsArray.add(tcObj);
+            }
+            assembledMessage.add("tool_calls", toolCallsArray);
+        }
+
+        int textLen = textContent.length();
+        P2SMod.LOGGER.info("LLM streaming complete -> toolCalls={}, textLen={}", toolCalls.size(), textLen);
+
+        SessionResult result = new SessionResult(
+                textContent.isEmpty() ? null : textContent,
+                null,
+                assembledMessage,
+                toolCalls
+        );
+        if (callback != null) {
+            callback.onComplete(result);
+        }
+        return result;
     }
 
     private static CompletableFuture<SessionResult> requestWithHistoryInternal(

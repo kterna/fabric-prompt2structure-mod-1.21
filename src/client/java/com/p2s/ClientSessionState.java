@@ -28,6 +28,8 @@ public final class ClientSessionState {
     private static final List<TodoItem> todoItems = new ArrayList<>();
     private static ChoiceRequest pendingChoice = null;
     private static final List<ChatMessage> messages = new ArrayList<>();
+    private static final StringBuilder streamingBuffer = new StringBuilder();
+    private static volatile boolean streaming = false;
 
     private ClientSessionState() {
     }
@@ -234,11 +236,48 @@ public final class ClientSessionState {
         pendingChoice = null;
     }
 
-    private static void addMessage(String role, String text) {
+    public static void beginStreaming() {
+        synchronized (streamingBuffer) {
+            streamingBuffer.setLength(0);
+            streaming = true;
+        }
+    }
+
+    public static void appendStreamingToken(String token) {
+        if (token == null || token.isEmpty()) {
+            return;
+        }
+        synchronized (streamingBuffer) {
+            streamingBuffer.append(token);
+        }
+    }
+
+    public static String getStreamingText() {
+        synchronized (streamingBuffer) {
+            return streamingBuffer.toString();
+        }
+    }
+
+    public static boolean isStreaming() {
+        return streaming;
+    }
+
+    public static void endStreaming() {
+        synchronized (streamingBuffer) {
+            streaming = false;
+            streamingBuffer.setLength(0);
+        }
+    }
+
+    static void addMessage(String role, String text) {
         messages.add(new ChatMessage(role, text));
         if (messages.size() > 200) {
             messages.remove(0);
         }
+    }
+
+    public static void clearMessages() {
+        messages.clear();
     }
 
     public static List<ChatMessage> getMessages() {

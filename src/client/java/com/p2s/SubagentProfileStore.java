@@ -27,7 +27,7 @@ public final class SubagentProfileStore {
             "block-id-searcher.json",
             "patch-planner.json"
     );
-    private static final int DEFAULT_MAX_LOOPS = 4;
+    private static final int DEFAULT_MAX_LOOPS = 30;
     private static final int DEFAULT_TIMEOUT_SECONDS = 45;
     private static final Set<String> SUPPORTED_TOOLS = Set.of(
             "list_skills",
@@ -128,7 +128,7 @@ public final class SubagentProfileStore {
             String description = getString(root, "description", "");
             String systemPrompt = getString(root, "system_prompt", "");
             boolean enabled = getBoolean(root, "enabled", true);
-            int maxLoops = clamp(getInt(root, "max_loops", DEFAULT_MAX_LOOPS), 1, 12);
+            int maxLoops = clamp(getInt(root, "max_loops", DEFAULT_MAX_LOOPS), 1, 30);
             int timeoutSeconds = clamp(getInt(root, "timeout_seconds", DEFAULT_TIMEOUT_SECONDS), 5, 300);
 
             List<String> allowedTools = readStringArray(root.get("allowed_tools"));

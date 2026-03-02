@@ -74,6 +74,16 @@ public class P2SChatScreen extends Screen {
                 .build();
         addRenderableWidget(configButton);
 
+        Button sessionsButton = Button.builder(Component.literal("Sessions"), btn -> this.minecraft.setScreen(new P2SSessionListScreen(this)))
+                .bounds(panelX + PADDING, PADDING, 60, INPUT_HEIGHT)
+                .build();
+        addRenderableWidget(sessionsButton);
+
+        Button newButton = Button.builder(Component.literal("New"), btn -> ClientAgentManager.newSession())
+                .bounds(panelX + PADDING + 64, PADDING, 40, INPUT_HEIGHT)
+                .build();
+        addRenderableWidget(newButton);
+
         int rowY = PADDING + TOP_BUTTON_HEIGHT + 4;
         int rowStart = panelX + panelWidth - PADDING - (SMALL_BUTTON_WIDTH * 4 + 6);
 
@@ -294,6 +304,21 @@ public class P2SChatScreen extends Screen {
         int y = messageBottom + (int) scrollOffset;
         List<ClientSessionState.ChatMessage> messages = ClientSessionState.getMessages();
 
+        boolean isStreaming = ClientSessionState.isStreaming();
+        String streamingText = isStreaming ? ClientSessionState.getStreamingText() : null;
+        if (isStreaming && streamingText != null && !streamingText.isBlank()) {
+            String streamPrefix = "AI: ";
+            List<FormattedCharSequence> streamLines = this.font.split(Component.literal(streamPrefix + streamingText), contentWidth);
+            for (int li = streamLines.size() - 1; li >= 0; li--) {
+                y -= this.font.lineHeight + LINE_SPACING;
+                if (y < messageTop) {
+                    return;
+                }
+                gfx.drawString(this.font, streamLines.get(li), panelX + PADDING, y, 0x55FF55, true);
+            }
+            y -= LINE_SPACING;
+        }
+
         for (int i = messages.size() - 1; i >= 0 && y > messageTop; i--) {
             ClientSessionState.ChatMessage msg = messages.get(i);
             String role = msg.role();
@@ -321,6 +346,16 @@ public class P2SChatScreen extends Screen {
             total += lines * (this.font.lineHeight + LINE_SPACING);
             total += LINE_SPACING;
         }
+
+        if (ClientSessionState.isStreaming()) {
+            String streamingText = ClientSessionState.getStreamingText();
+            if (streamingText != null && !streamingText.isBlank()) {
+                int lines = this.font.split(Component.literal("AI: " + streamingText), contentWidth).size();
+                total += lines * (this.font.lineHeight + LINE_SPACING);
+                total += LINE_SPACING;
+            }
+        }
+
         return total;
     }
 
