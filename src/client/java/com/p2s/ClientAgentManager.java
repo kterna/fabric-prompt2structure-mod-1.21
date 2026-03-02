@@ -917,10 +917,26 @@ public final class ClientAgentManager {
 
         currentSession = session;
         if (!session.serverSessionStarted) {
-            ClientPlayNetworking.send(new C2SSessionActionPayload("start", ""));
+            String payload = buildStartPayload(session);
+            ClientPlayNetworking.send(new C2SSessionActionPayload("start", payload));
             session.serverSessionStarted = true;
         }
         return session;
+    }
+
+    private static String buildStartPayload(LocalSession session) {
+        if (session.originX == 0 && session.originY == 0 && session.originZ == 0 && !session.hasSize) {
+            return "";
+        }
+        JsonObject json = new JsonObject();
+        json.addProperty("originX", session.originX);
+        json.addProperty("originY", session.originY);
+        json.addProperty("originZ", session.originZ);
+        json.addProperty("hasSize", session.hasSize);
+        json.addProperty("sizeX", session.sizeX);
+        json.addProperty("sizeY", session.sizeY);
+        json.addProperty("sizeZ", session.sizeZ);
+        return GSON.toJson(json);
     }
 
     private static void trimHistoryLocked(LocalSession session) {
@@ -1007,10 +1023,26 @@ public final class ClientAgentManager {
         return message == null || message.isBlank() ? "Unknown error" : message;
     }
 
+    private static void syncSpatialFromClientState(LocalSession session) {
+        if (session == null) {
+            return;
+        }
+        if (ClientSessionState.isActive()) {
+            session.originX = ClientSessionState.getOriginX();
+            session.originY = ClientSessionState.getOriginY();
+            session.originZ = ClientSessionState.getOriginZ();
+            session.hasSize = ClientSessionState.hasSize();
+            session.sizeX = ClientSessionState.getSizeX();
+            session.sizeY = ClientSessionState.getSizeY();
+            session.sizeZ = ClientSessionState.getSizeZ();
+        }
+    }
+
     private static void autoSaveSession(LocalSession session) {
         if (session == null || session.id == null || session.id.isBlank()) {
             return;
         }
+        syncSpatialFromClientState(session);
         try {
             List<JsonObject> historyCopy;
             synchronized (LOCK) {
@@ -1052,7 +1084,14 @@ public final class ClientAgentManager {
                     historyCopy,
                     chatLog,
                     todoEntries,
-                    ClientSessionState.getTodoTitle()
+                    ClientSessionState.getTodoTitle(),
+                    session.originX,
+                    session.originY,
+                    session.originZ,
+                    session.hasSize,
+                    session.sizeX,
+                    session.sizeY,
+                    session.sizeZ
             );
 
             CompletableFuture.runAsync(() -> SessionPersistence.saveSession(saved));
@@ -1094,6 +1133,13 @@ public final class ClientAgentManager {
             session.inFlight = false;
             session.createdAt = saved.createdAt();
             session.serverSessionStarted = false;
+            session.originX = saved.originX();
+            session.originY = saved.originY();
+            session.originZ = saved.originZ();
+            session.hasSize = saved.hasSize();
+            session.sizeX = saved.sizeX();
+            session.sizeY = saved.sizeY();
+            session.sizeZ = saved.sizeZ();
             currentSession = session;
         }
 
@@ -1160,5 +1206,8 @@ public final class ClientAgentManager {
         boolean serverSessionStarted;
         long createdAt;
         List<JsonObject> history;
+        int originX, originY, originZ;
+        boolean hasSize;
+        int sizeX, sizeY, sizeZ;
     }
 }

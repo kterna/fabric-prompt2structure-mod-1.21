@@ -24,6 +24,13 @@ public final class ClientSessionState {
     private static String previewDetail = "";
     private static String previewRisk = "";
     private static int previewChangedBlocks = 0;
+    private static int originX = 0;
+    private static int originY = 0;
+    private static int originZ = 0;
+    private static boolean hasSize = false;
+    private static int sizeX = 0;
+    private static int sizeY = 0;
+    private static int sizeZ = 0;
     private static String todoTitle = "";
     private static final List<TodoItem> todoItems = new ArrayList<>();
     private static ChoiceRequest pendingChoice = null;
@@ -47,7 +54,10 @@ public final class ClientSessionState {
             boolean pending,
             String pendingPatchSummary,
             String risk,
-            int changed
+            int changed,
+            int ox, int oy, int oz,
+            boolean hasSz,
+            int sx, int sy, int sz
     ) {
         active = activeFlag;
         sessionId = id == null ? "" : id;
@@ -62,6 +72,13 @@ public final class ClientSessionState {
         pendingSummary = pendingPatchSummary == null ? "" : pendingPatchSummary;
         pendingRisk = risk == null ? "" : risk;
         pendingChangedBlocks = Math.max(0, changed);
+        originX = ox;
+        originY = oy;
+        originZ = oz;
+        hasSize = hasSz;
+        sizeX = sx;
+        sizeY = sy;
+        sizeZ = sz;
         if (!pending) {
             clearPreview();
         }
@@ -71,6 +88,13 @@ public final class ClientSessionState {
             clearPreview();
             clearTodo();
             clearPendingChoice();
+            originX = 0;
+            originY = 0;
+            originZ = 0;
+            hasSize = false;
+            sizeX = 0;
+            sizeY = 0;
+            sizeZ = 0;
         }
     }
 
@@ -366,6 +390,34 @@ public final class ClientSessionState {
 
     public static int getPreviewChangedBlocks() {
         return previewChangedBlocks;
+    }
+
+    public static int getOriginX() {
+        return originX;
+    }
+
+    public static int getOriginY() {
+        return originY;
+    }
+
+    public static int getOriginZ() {
+        return originZ;
+    }
+
+    public static boolean hasSize() {
+        return hasSize;
+    }
+
+    public static int getSizeX() {
+        return sizeX;
+    }
+
+    public static int getSizeY() {
+        return sizeY;
+    }
+
+    public static int getSizeZ() {
+        return sizeZ;
     }
 
     private static void clearPreview() {

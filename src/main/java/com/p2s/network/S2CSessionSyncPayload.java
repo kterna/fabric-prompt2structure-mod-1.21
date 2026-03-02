@@ -18,7 +18,10 @@ public record S2CSessionSyncPayload(
         boolean hasPendingPatch,
         String pendingSummary,
         String pendingRisk,
-        int pendingChangedBlocks
+        int pendingChangedBlocks,
+        int originX, int originY, int originZ,
+        boolean hasSize,
+        int sizeX, int sizeY, int sizeZ
 ) implements CustomPacketPayload {
     public static final Type<S2CSessionSyncPayload> TYPE = new Type<>(P2SNetworkConstants.S2C_SESSION_SYNC_ID);
     public static final StreamCodec<FriendlyByteBuf, S2CSessionSyncPayload> CODEC = StreamCodec.of(
@@ -36,6 +39,13 @@ public record S2CSessionSyncPayload(
                 buf.writeUtf(payload.pendingSummary == null ? "" : payload.pendingSummary, 2048);
                 buf.writeUtf(payload.pendingRisk == null ? "" : payload.pendingRisk, 32);
                 buf.writeVarInt(payload.pendingChangedBlocks);
+                buf.writeInt(payload.originX);
+                buf.writeInt(payload.originY);
+                buf.writeInt(payload.originZ);
+                buf.writeBoolean(payload.hasSize);
+                buf.writeInt(payload.sizeX);
+                buf.writeInt(payload.sizeY);
+                buf.writeInt(payload.sizeZ);
             },
             buf -> new S2CSessionSyncPayload(
                     buf.readBoolean(),
@@ -50,7 +60,14 @@ public record S2CSessionSyncPayload(
                     buf.readBoolean(),
                     buf.readUtf(2048),
                     buf.readUtf(32),
-                    buf.readVarInt()
+                    buf.readVarInt(),
+                    buf.readInt(),
+                    buf.readInt(),
+                    buf.readInt(),
+                    buf.readBoolean(),
+                    buf.readInt(),
+                    buf.readInt(),
+                    buf.readInt()
             )
     );
 

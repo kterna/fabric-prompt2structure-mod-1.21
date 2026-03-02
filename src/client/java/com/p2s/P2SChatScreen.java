@@ -260,6 +260,16 @@ public class P2SChatScreen extends Screen {
             String info = "Session " + ClientSessionState.getSessionId() + " | Turns " + ClientSessionState.getTurnCount();
             gfx.drawString(this.font, info, panelX + PADDING, y, 0xAAAAAA, true);
             y += this.font.lineHeight + 2;
+
+            String regionInfo;
+            if (ClientSessionState.hasSize()) {
+                regionInfo = "Origin: (" + ClientSessionState.getOriginX() + ", " + ClientSessionState.getOriginY() + ", " + ClientSessionState.getOriginZ() + ") | Size: " + ClientSessionState.getSizeX() + "x" + ClientSessionState.getSizeY() + "x" + ClientSessionState.getSizeZ() + " [Locked]";
+            } else {
+                regionInfo = "Origin: (" + ClientSessionState.getOriginX() + ", " + ClientSessionState.getOriginY() + ", " + ClientSessionState.getOriginZ() + ") | No bounds [Locked]";
+            }
+            gfx.drawString(this.font, regionInfo, panelX + PADDING, y, 0xFFCC66, true);
+            y += this.font.lineHeight + 2;
+
             String runtime = ClientSessionState.getRuntimeState();
             String revision = ClientSessionState.getRevision();
             if (runtime != null && !runtime.isBlank()) {
@@ -429,7 +439,7 @@ public class P2SChatScreen extends Screen {
     }
 
     private int getHeaderHeight(int panelWidth) {
-        int base = this.font.lineHeight * 4 + 10;
+        int base = this.font.lineHeight * 5 + 12;
         base += TOP_BUTTON_HEIGHT + 6;
         base += TOP_BUTTON_HEIGHT + 2;
 

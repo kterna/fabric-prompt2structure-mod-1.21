@@ -44,7 +44,14 @@ public final class ClientNetworkHandler {
                     payload.hasPendingPatch(),
                     payload.pendingSummary(),
                     payload.pendingRisk(),
-                    payload.pendingChangedBlocks()
+                    payload.pendingChangedBlocks(),
+                    payload.originX(),
+                    payload.originY(),
+                    payload.originZ(),
+                    payload.hasSize(),
+                    payload.sizeX(),
+                    payload.sizeY(),
+                    payload.sizeZ()
             ));
         });
 

@@ -418,12 +418,17 @@ public final class SessionManager {
         return result;
     }
 
+    static boolean hasActiveSession(UUID playerId) {
+        return playerId != null && sessions.containsKey(playerId);
+    }
+
     public static void handleSessionAction(ServerPlayer player, String action, String payload) {
         if (player == null || action == null) {
             return;
         }
+
         switch (action) {
-            case "start" -> startSession(player);
+            case "start" -> startSession(player, payload);
             case "end" -> endSession(player);
             case "undo" -> undo(player);
             case "redo" -> redo(player);
@@ -484,11 +489,42 @@ public final class SessionManager {
         }
     }
 
-    public static Session startSession(ServerPlayer player) {
+    public static Session startSession(ServerPlayer player, String payload) {
         if (player == null) {
             return null;
         }
-        Session session = createSession(player);
+
+        BlockPos restoredOrigin = null;
+        Vec3i restoredSize = null;
+        if (payload != null && !payload.isBlank()) {
+            try {
+                JsonObject json = JsonParser.parseString(payload).getAsJsonObject();
+                if (json.has("originX") && json.has("originY") && json.has("originZ")) {
+                    restoredOrigin = new BlockPos(
+                            json.get("originX").getAsInt(),
+                            json.get("originY").getAsInt(),
+                            json.get("originZ").getAsInt()
+                    );
+                }
+                if (json.has("hasSize") && json.get("hasSize").getAsBoolean()
+                        && json.has("sizeX") && json.has("sizeY") && json.has("sizeZ")) {
+                    restoredSize = new Vec3i(
+                            json.get("sizeX").getAsInt(),
+                            json.get("sizeY").getAsInt(),
+                            json.get("sizeZ").getAsInt()
+                    );
+                }
+            } catch (Exception e) {
+                P2SMod.LOGGER.debug("Could not parse start payload as origin/size: {}", e.getMessage());
+            }
+        }
+
+        Session session;
+        if (restoredOrigin != null) {
+            session = createSession(player, restoredOrigin, restoredSize);
+        } else {
+            session = createSession(player);
+        }
         sessions.put(player.getUUID(), session);
         sendSessionSync(player, session);
         sendPatchPreview(player, null);
@@ -692,7 +728,7 @@ public final class SessionManager {
         if (existing != null) {
             return existing;
         }
-        return startSession(player);
+        return startSession(player, "");
     }
 
     private static Session createSession(ServerPlayer player) {
@@ -703,6 +739,10 @@ public final class SessionManager {
             origin = sel.min();
             size = sel.size();
         }
+        return createSession(player, origin, size);
+    }
+
+    private static Session createSession(ServerPlayer player, BlockPos origin, Vec3i size) {
 
         StringBuilder prompt = new StringBuilder(ModConfig.currentSystemPrompt());
         prompt.append("\n\n").append(SESSION_TOOL_CONTRACT);
@@ -1396,6 +1436,14 @@ public final class SessionManager {
         String pendingRisk = hasPending && session.pendingPatch.preview != null ? session.pendingPatch.preview.riskLevel : "";
         int pendingChanged = hasPending && session.pendingPatch.preview != null ? session.pendingPatch.preview.changedBlocks : 0;
 
+        int ox = active && session.origin != null ? session.origin.getX() : 0;
+        int oy = active && session.origin != null ? session.origin.getY() : 0;
+        int oz = active && session.origin != null ? session.origin.getZ() : 0;
+        boolean hasSz = active && session.size != null;
+        int sx = hasSz ? session.size.getX() : 0;
+        int sy = hasSz ? session.size.getY() : 0;
+        int sz = hasSz ? session.size.getZ() : 0;
+
         ServerNetworkHandler.sendToClient(player, new S2CSessionSyncPayload(
                 active,
                 sessionId,
@@ -1409,7 +1457,10 @@ public final class SessionManager {
                 hasPending,
                 pendingSummary,
                 pendingRisk,
-                pendingChanged
+                pendingChanged,
+                ox, oy, oz,
+                hasSz,
+                sx, sy, sz
         ));
     }
 

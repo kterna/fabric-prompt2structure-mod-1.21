@@ -48,7 +48,7 @@ public final class ModCommandRegistry {
 
             p2sCommand.then(Commands.literal("session")
                     .then(Commands.literal("start").executes(ctx -> {
-                        SessionManager.startSession(ctx.getSource().getPlayerOrException());
+                        SessionManager.startSession(ctx.getSource().getPlayerOrException(), "");
                         return 1;
                     }))
                     .then(Commands.literal("end").executes(ctx -> {

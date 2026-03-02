@@ -36,7 +36,10 @@ public final class SessionPersistence {
             List<JsonObject> llmHistory,
             List<ChatMessageEntry> chatLog,
             List<TodoItemEntry> todoItems,
-            String todoTitle
+            String todoTitle,
+            int originX, int originY, int originZ,
+            boolean hasSize,
+            int sizeX, int sizeY, int sizeZ
     ) {
     }
 
@@ -91,6 +94,14 @@ public final class SessionPersistence {
                 }
             }
             sessionJson.add("todoItems", todoArray);
+
+            sessionJson.addProperty("originX", session.originX());
+            sessionJson.addProperty("originY", session.originY());
+            sessionJson.addProperty("originZ", session.originZ());
+            sessionJson.addProperty("hasSize", session.hasSize());
+            sessionJson.addProperty("sizeX", session.sizeX());
+            sessionJson.addProperty("sizeY", session.sizeY());
+            sessionJson.addProperty("sizeZ", session.sizeZ());
 
             Path sessionFile = SESSIONS_DIR.resolve(session.id() + ".json");
             Files.writeString(sessionFile, GSON.toJson(sessionJson));
@@ -188,7 +199,14 @@ public final class SessionPersistence {
                     llmHistory,
                     chatLog,
                     todoItems,
-                    getStr(root, "todoTitle")
+                    getStr(root, "todoTitle"),
+                    getInt(root, "originX"),
+                    getInt(root, "originY"),
+                    getInt(root, "originZ"),
+                    getBool(root, "hasSize"),
+                    getInt(root, "sizeX"),
+                    getInt(root, "sizeY"),
+                    getInt(root, "sizeZ")
             );
         } catch (Exception e) {
             P2SMod.LOGGER.warn("Failed loading session {}: {}", id, e.getMessage());
@@ -293,6 +311,17 @@ public final class SessionPersistence {
             return obj.get(key).getAsInt();
         } catch (Exception e) {
             return 0;
+        }
+    }
+
+    private static boolean getBool(JsonObject obj, String key) {
+        if (obj == null || key == null || !obj.has(key)) {
+            return false;
+        }
+        try {
+            return obj.get(key).getAsBoolean();
+        } catch (Exception e) {
+            return false;
         }
     }
 }
