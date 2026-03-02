@@ -111,6 +111,87 @@ public final class ClientAgentManager {
         AGENT_EXECUTOR.execute(() -> runAgentLoop(session));
     }
 
+    public static void submitPatchApply() {
+        if (!ClientSessionState.hasPendingPatch()) {
+            return;
+        }
+        String summary = ClientSessionState.getPendingSummary();
+        ClientSessionState.clearPendingPatch();
+
+        ClientPlayNetworking.send(new C2SSessionActionPayload("apply", ""));
+
+        String historyContent = "User APPLIED the proposed patch. Summary: " + summary + " Continue with the next step.";
+        String userMessageText = "Applied patch: " + summary;
+
+        LocalSession session;
+        synchronized (LOCK) {
+            session = ensureSessionLocked();
+            if (session.inFlight) {
+                postToClient(() -> ClientSessionState.setStatus("busy"));
+                return;
+            }
+            session.inFlight = true;
+
+            JsonObject user = new JsonObject();
+            user.addProperty("role", "user");
+            user.addProperty("content", historyContent);
+            session.history.add(user);
+            trimHistoryLocked(session);
+        }
+
+        postToClient(() -> {
+            ClientSessionState.addUserMessage(userMessageText);
+            ClientSessionState.setStatus("planning");
+        });
+
+        AGENT_EXECUTOR.execute(() -> runAgentLoop(session));
+    }
+
+    public static void submitPatchDiscard(String reason) {
+        if (!ClientSessionState.hasPendingPatch()) {
+            return;
+        }
+        String summary = ClientSessionState.getPendingSummary();
+        ClientSessionState.clearPendingPatch();
+
+        String safeReason = reason == null ? "" : reason.trim();
+        ClientPlayNetworking.send(new C2SSessionActionPayload("discard", safeReason));
+
+        String historyContent = "User DISCARDED the proposed patch. Summary: " + summary;
+        if (!safeReason.isEmpty()) {
+            historyContent += " Reason: " + safeReason;
+        }
+        historyContent += " Please revise your approach.";
+
+        String userMessageText = safeReason.isEmpty()
+                ? "Discarded patch: " + summary
+                : "Discarded patch: " + summary + " (Reason: " + safeReason + ")";
+
+        String finalHistoryContent = historyContent;
+        LocalSession session;
+        synchronized (LOCK) {
+            session = ensureSessionLocked();
+            if (session.inFlight) {
+                postToClient(() -> ClientSessionState.setStatus("busy"));
+                return;
+            }
+            session.inFlight = true;
+
+            JsonObject user = new JsonObject();
+            user.addProperty("role", "user");
+            user.addProperty("content", finalHistoryContent);
+            session.history.add(user);
+            trimHistoryLocked(session);
+        }
+
+        postToClient(() -> {
+            ClientSessionState.addUserMessage(userMessageText);
+            ClientSessionState.setStatus("planning");
+        });
+
+        AGENT_EXECUTOR.execute(() -> runAgentLoop(session));
+    }
+
     public static void submitChoiceSelection(String optionId) {
         String selectedId = optionId == null ? "" : optionId.trim();
         if (selectedId.isBlank()) {
@@ -166,6 +247,13 @@ public final class ClientAgentManager {
         int iterations = 0;
         try {
             while (iterations < SAFETY_LOOP_LIMIT) {
+                if (P2SMod.DEBUG) {
+                    int historySize;
+                    synchronized (LOCK) {
+                        historySize = session.history == null ? 0 : session.history.size();
+                    }
+                    P2SMod.LOGGER.info("[DEBUG] ClientAgent loop start -> iteration={}, sessionId={}, historySize={}, inFlight={}", iterations, session.id, historySize, session.inFlight);
+                }
                 List<JsonObject> snapshot;
                 synchronized (LOCK) {
                     if (session != currentSession) {
@@ -181,6 +269,9 @@ public final class ClientAgentManager {
 
                 LLMService.SessionResult result;
                 if (P2SClientConfig.getUseStreaming()) {
+                    if (P2SMod.DEBUG) {
+                        P2SMod.LOGGER.info("[DEBUG] ClientAgent using streaming path");
+                    }
                     postToClient(ClientSessionState::beginStreaming);
                     try {
                         result = LLMService.requestWithHistoryStreaming(
@@ -194,6 +285,9 @@ public final class ClientAgentManager {
                         postToClient(ClientSessionState::endStreaming);
                     }
                 } else {
+                    if (P2SMod.DEBUG) {
+                        P2SMod.LOGGER.info("[DEBUG] ClientAgent using non-streaming path");
+                    }
                     result = LLMService.requestWithHistoryWithSkills(
                                     snapshot,
                                     P2SClientConfig.llmRequestConfig()
@@ -235,6 +329,13 @@ public final class ClientAgentManager {
             return false;
         }
 
+        if (P2SMod.DEBUG) {
+            P2SMod.LOGGER.info("[DEBUG] ClientAgent handleResult -> text={}, toolCalls={}, rawAssistant={}",
+                    result.textContent() == null ? "null" : result.textContent().length() + " chars",
+                    result.toolCalls() == null ? 0 : result.toolCalls().size(),
+                    result.rawAssistantMessage());
+        }
+
         synchronized (LOCK) {
             if (result.rawAssistantMessage() != null) {
                 session.history.add(result.rawAssistantMessage().deepCopy());
@@ -246,10 +347,16 @@ public final class ClientAgentManager {
         if (!toolCalls.isEmpty()) {
             List<ToolCallResult> results = executeToolCallsBatch(session, toolCalls);
             for (ToolCallResult tcr : results) {
+                if (P2SMod.DEBUG) {
+                    P2SMod.LOGGER.info("[DEBUG] ClientAgent tool call -> name={}, args={}, result={}", tcr.call().name(), tcr.call().arguments(), GSON.toJson(tcr.payload()));
+                }
                 JsonObject toolMsg = buildToolMessage(tcr.call(), tcr.payload());
                 synchronized (LOCK) {
                     session.history.add(toolMsg);
                     trimHistoryLocked(session);
+                    if (P2SMod.DEBUG) {
+                        P2SMod.LOGGER.info("[DEBUG] ClientAgent history size after tool msg: {}", session.history.size());
+                    }
                 }
             }
 
@@ -817,12 +924,61 @@ public final class ClientAgentManager {
     }
 
     private static void trimHistoryLocked(LocalSession session) {
-        while (session.history.size() > MAX_HISTORY) {
-            if (session.history.size() <= 1) {
-                break;
-            }
-            session.history.remove(1);
+        while (session.history.size() > MAX_HISTORY && session.history.size() > 1) {
+            int end = findTurnGroupEnd(session.history);
+            if (end <= 0) break;
+            session.history.subList(1, end + 1).clear();
         }
+    }
+
+    /**
+     * Find the end index (inclusive) of the first complete turn group starting at index 1.
+     * Returns -1 if no complete group can be safely removed.
+     */
+    private static int findTurnGroupEnd(List<JsonObject> history) {
+        int size = history.size();
+        if (size <= 2) return -1;
+
+        int i = 1;
+
+        // 1) Skip orphan tool messages (compat with corrupted old history)
+        if ("tool".equals(role(history, i))) {
+            while (i < size && "tool".equals(role(history, i))) i++;
+            return (i < size) ? i - 1 : -1;
+        }
+
+        // 2) Consume user messages
+        while (i < size && "user".equals(role(history, i))) i++;
+
+        // 3) Expect assistant message
+        if (i >= size || !"assistant".equals(role(history, i))) {
+            return (i > 1 && i < size) ? i - 1 : -1;
+        }
+
+        // 4) Check if assistant has tool_calls
+        JsonObject asst = history.get(i);
+        boolean hasTools = asst.has("tool_calls")
+                && asst.get("tool_calls").isJsonArray()
+                && asst.getAsJsonArray("tool_calls").size() > 0;
+        i++;
+
+        // 5) Consume tool messages
+        if (hasTools) {
+            int before = i;
+            while (i < size && "tool".equals(role(history, i))) i++;
+            if (i == before) {
+                // assistant has tool_calls but no following tool messages → incomplete, skip
+                return -1;
+            }
+        }
+
+        // 6) Ensure we don't remove everything (keep system + at least 1 message)
+        return (i < size) ? i - 1 : -1;
+    }
+
+    private static String role(List<JsonObject> history, int index) {
+        JsonObject msg = history.get(index);
+        return msg != null && msg.has("role") ? msg.get("role").getAsString() : "";
     }
 
     private static List<JsonObject> deepCopyMessages(List<JsonObject> source) {

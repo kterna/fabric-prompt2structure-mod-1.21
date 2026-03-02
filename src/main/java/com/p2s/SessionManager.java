@@ -108,6 +108,9 @@ public final class SessionManager {
         int snapshotSize = historySnapshot.size();
         session.runtimeState = RuntimeState.PLANNING;
         P2SMod.LOGGER.info("AgentLoop llm request -> player={}, session={}, snapshotSize={}, remaining={}", playerName, sessionId, snapshotSize, remaining);
+        if (P2SMod.DEBUG) {
+            P2SMod.LOGGER.info("[DEBUG] AgentLoop history snapshot: {}", GSON.toJson(historySnapshot));
+        }
         long llmStartMs = System.currentTimeMillis();
         long timeoutSeconds = Math.max(
                 1,
@@ -160,6 +163,15 @@ public final class SessionManager {
         boolean hasScript = result.script() != null;
         P2SMod.LOGGER.info("AgentLoop llm response -> player={}, session={}, ms={}, textLen={}, toolCalls={}, hasScript={}",
                 playerName, sessionId, llmMs, textLen, toolCallCount, hasScript);
+        if (P2SMod.DEBUG) {
+            P2SMod.LOGGER.info("[DEBUG] AgentLoop full text content: {}", result.textContent());
+            if (result.toolCalls() != null) {
+                for (LLMService.ToolCall tc : result.toolCalls()) {
+                    P2SMod.LOGGER.info("[DEBUG] AgentLoop tool call: name={}, id={}, args={}", tc.name(), tc.id(), tc.arguments());
+                }
+            }
+            P2SMod.LOGGER.info("[DEBUG] AgentLoop rawAssistant: {}", result.rawAssistantMessage());
+        }
 
         JsonObject assistant = result.rawAssistantMessage() == null ? null : result.rawAssistantMessage().deepCopy();
         if (assistant != null) {
@@ -192,6 +204,9 @@ public final class SessionManager {
 
             if (remaining <= 0) {
                 session.inFlight = false;
+                if (P2SMod.DEBUG) {
+                    P2SMod.LOGGER.info("[DEBUG] AgentLoop exhausted remaining iterations -> player={}, session={}, pendingPatch={}", playerName, sessionId, session.pendingPatch != null);
+                }
                 if (session.pendingPatch != null) {
                     session.runtimeState = RuntimeState.AWAITING_CONFIRM;
                     sendChatResponse(player, "Patch prepared. Please review and confirm.", false, "awaiting_confirm");
@@ -207,6 +222,9 @@ public final class SessionManager {
 
             session.runtimeState = session.pendingPatch == null ? RuntimeState.PLANNING : RuntimeState.AWAITING_CONFIRM;
             sendChatResponse(player, "", false, session.pendingPatch == null ? "thinking" : "awaiting_confirm");
+            if (P2SMod.DEBUG) {
+                P2SMod.LOGGER.info("[DEBUG] AgentLoop continuing -> player={}, session={}, remaining={}, runtimeState={}", playerName, sessionId, remaining - 1, session.runtimeState);
+            }
             runAgentLoop(player, session, remaining - 1);
             return;
         }
@@ -247,16 +265,26 @@ public final class SessionManager {
             }
 
             String toolName = call.name();
+            if (P2SMod.DEBUG) {
+                P2SMod.LOGGER.info("[DEBUG] processToolCalls -> tool={}, id={}, args={}", toolName, call.id(), call.arguments());
+            }
             switch (toolName) {
                 case "read_workspace_state" -> {
                     JsonObject payload = buildToolSuccess(toolName);
                     payload.add("state", buildWorkspaceStatePayload(session));
                     result.toolMessages.add(buildToolMessage(call, payload));
                     P2SMod.LOGGER.info("AgentLoop tool read_workspace_state -> player={}, session={}", playerName, sessionId);
+                    if (P2SMod.DEBUG) {
+                        P2SMod.LOGGER.info("[DEBUG] read_workspace_state result: {}", GSON.toJson(payload));
+                    }
                 }
                 case "propose_patch" -> {
                     session.runtimeState = RuntimeState.VALIDATING;
                     PatchModels.StructurePatch patch = parsePatchArguments(call.arguments());
+                    if (P2SMod.DEBUG) {
+                        P2SMod.LOGGER.info("[DEBUG] propose_patch raw args: {}", call.arguments());
+                        P2SMod.LOGGER.info("[DEBUG] propose_patch parsed patch: {}", patch == null ? "null" : GSON.toJson(patch));
+                    }
                     if (patch == null) {
                         result.toolMessages.add(buildToolMessage(call, buildToolError(toolName, "Invalid patch arguments")));
                         P2SMod.LOGGER.warn("AgentLoop tool propose_patch failed -> player={}, session={}, reason=parse_failed", playerName, sessionId);
@@ -401,7 +429,7 @@ public final class SessionManager {
             case "redo" -> redo(player);
             case "save" -> save(player, payload);
             case "apply" -> applyPendingPatch(player);
-            case "discard" -> discardPendingPatch(player);
+            case "discard" -> discardPendingPatch(player, payload);
             default -> player.displayClientMessage(Component.literal("Unknown session action: " + action), false);
         }
     }
@@ -430,6 +458,9 @@ public final class SessionManager {
         Session session = ensureSession(player);
         String playerName = player.getGameProfile().getName();
         String sessionId = session == null ? "-" : session.id;
+        if (P2SMod.DEBUG) {
+            P2SMod.LOGGER.info("[DEBUG] ToolBridge request -> player={}, session={}, requestId={}, tool={}, argsJson={}", playerName, sessionId, rid, normalizedTool, argumentsJson);
+        }
         try {
             LLMService.ToolCall call = new LLMService.ToolCall(rid, normalizedTool, arguments);
             ToolCallProcessingResult toolResult = processToolCalls(session, List.of(call), playerName, sessionId);
@@ -633,7 +664,7 @@ public final class SessionManager {
         return true;
     }
 
-    private static void discardPendingPatch(ServerPlayer player) {
+    private static void discardPendingPatch(ServerPlayer player, String reason) {
         if (player == null) {
             return;
         }
@@ -647,7 +678,9 @@ public final class SessionManager {
         session.pendingPatch = null;
         session.runtimeState = RuntimeState.CANCELLED;
         sendPatchPreview(player, null);
-        sendChatResponse(player, "Patch discarded", false, "cancelled");
+        String safeReason = reason == null ? "" : reason.trim();
+        String message = safeReason.isEmpty() ? "Patch discarded" : "Patch discarded: " + safeReason;
+        sendChatResponse(player, message, false, "cancelled");
         sendSessionSync(player, session);
 
         session.runtimeState = RuntimeState.IDLE;
@@ -723,12 +756,61 @@ public final class SessionManager {
     }
 
     private static void trimHistory(Session session) {
-        while (session.history.size() > MAX_HISTORY) {
-            if (session.history.size() <= 1) {
-                break;
-            }
-            session.history.remove(1);
+        while (session.history.size() > MAX_HISTORY && session.history.size() > 1) {
+            int end = findTurnGroupEnd(session.history);
+            if (end <= 0) break;
+            session.history.subList(1, end + 1).clear();
         }
+    }
+
+    /**
+     * Find the end index (inclusive) of the first complete turn group starting at index 1.
+     * Returns -1 if no complete group can be safely removed.
+     */
+    private static int findTurnGroupEnd(List<JsonObject> history) {
+        int size = history.size();
+        if (size <= 2) return -1;
+
+        int i = 1;
+
+        // 1) Skip orphan tool messages (compat with corrupted old history)
+        if ("tool".equals(role(history, i))) {
+            while (i < size && "tool".equals(role(history, i))) i++;
+            return (i < size) ? i - 1 : -1;
+        }
+
+        // 2) Consume user messages
+        while (i < size && "user".equals(role(history, i))) i++;
+
+        // 3) Expect assistant message
+        if (i >= size || !"assistant".equals(role(history, i))) {
+            return (i > 1 && i < size) ? i - 1 : -1;
+        }
+
+        // 4) Check if assistant has tool_calls
+        JsonObject asst = history.get(i);
+        boolean hasTools = asst.has("tool_calls")
+                && asst.get("tool_calls").isJsonArray()
+                && asst.getAsJsonArray("tool_calls").size() > 0;
+        i++;
+
+        // 5) Consume tool messages
+        if (hasTools) {
+            int before = i;
+            while (i < size && "tool".equals(role(history, i))) i++;
+            if (i == before) {
+                // assistant has tool_calls but no following tool messages → incomplete, skip
+                return -1;
+            }
+        }
+
+        // 6) Ensure we don't remove everything (keep system + at least 1 message)
+        return (i < size) ? i - 1 : -1;
+    }
+
+    private static String role(List<JsonObject> history, int index) {
+        JsonObject msg = history.get(index);
+        return msg != null && msg.has("role") ? msg.get("role").getAsString() : "";
     }
 
     private static List<JsonObject> deepCopyMessages(List<JsonObject> source) {

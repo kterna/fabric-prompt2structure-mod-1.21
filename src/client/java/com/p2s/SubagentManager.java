@@ -111,6 +111,11 @@ public final class SubagentManager {
         TASKS.put(id, subagent);
         SESSION_INDEX.computeIfAbsent(sid, k -> new CopyOnWriteArrayList<>()).add(id);
 
+        if (P2SMod.DEBUG) {
+            P2SMod.LOGGER.info("[DEBUG] Subagent created -> id={}, session={}, profile={}, task={}, allowedTools={}, skillIds={}",
+                    id, sid, profile.id(), taskText, profile.allowedTools(), resolveSkills.skillIds());
+        }
+
         try {
             EXECUTOR.execute(() -> runSubagent(subagent, profile));
         } catch (RejectedExecutionException e) {
@@ -307,6 +312,10 @@ public final class SubagentManager {
                     return;
                 }
 
+                if (P2SMod.DEBUG) {
+                    P2SMod.LOGGER.info("[DEBUG] Subagent {} loop iteration {} of {}, historySize={}", task.id, loop, maxLoops, history.size());
+                }
+
                 List<JsonObject> snapshot = deepCopyMessages(history);
                 LLMService.SessionResult result = LLMService.requestWithHistoryWithSkills(
                                 snapshot,
@@ -327,10 +336,18 @@ public final class SubagentManager {
 
                 List<LLMService.ToolCall> toolCalls = result.toolCalls() == null ? List.of() : result.toolCalls();
                 if (!toolCalls.isEmpty()) {
+                    if (P2SMod.DEBUG) {
+                        for (LLMService.ToolCall tc : toolCalls) {
+                            P2SMod.LOGGER.info("[DEBUG] Subagent {} tool call: name={}, args={}", task.id, tc.name(), tc.arguments());
+                        }
+                    }
                     List<ToolCallResult> batchResults = executeToolCallsBatch(task, toolCalls, allowedTools);
                     for (ToolCallResult tcr : batchResults) {
                         history.add(buildToolMessage(tcr.call(), tcr.payload()));
                         appendTrace(task, tcr.call() == null ? "" : tcr.call().name(), tcr.payload());
+                        if (P2SMod.DEBUG) {
+                            P2SMod.LOGGER.info("[DEBUG] Subagent {} tool result: name={}, payload={}", task.id, tcr.call() == null ? "" : tcr.call().name(), GSON.toJson(tcr.payload()));
+                        }
                     }
                     continue;
                 }
@@ -338,6 +355,11 @@ public final class SubagentManager {
                 String text = result.textContent();
                 if (text == null) {
                     text = "";
+                }
+                if (P2SMod.DEBUG) {
+                    long durationMs = System.currentTimeMillis() - task.startedAt;
+                    P2SMod.LOGGER.info("[DEBUG] Subagent {} completed -> durationMs={}, loops={}, responseLen={}", task.id, durationMs, loop + 1, text.length());
+                    P2SMod.LOGGER.info("[DEBUG] Subagent {} final response: {}", task.id, text);
                 }
                 complete(task, text);
                 return;

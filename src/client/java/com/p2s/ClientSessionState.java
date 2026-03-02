@@ -236,6 +236,14 @@ public final class ClientSessionState {
         pendingChoice = null;
     }
 
+    public static void clearPendingPatch() {
+        hasPendingPatch = false;
+        pendingSummary = "";
+        pendingRisk = "";
+        pendingChangedBlocks = 0;
+        clearPreview();
+    }
+
     public static void beginStreaming() {
         synchronized (streamingBuffer) {
             streamingBuffer.setLength(0);

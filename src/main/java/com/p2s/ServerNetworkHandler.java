@@ -15,21 +15,33 @@ public final class ServerNetworkHandler {
     public static void register() {
         ServerPlayNetworking.registerGlobalReceiver(C2SSetSelectionPayload.TYPE, (payload, context) -> {
             ServerPlayer player = context.player();
+            if (P2SMod.DEBUG) {
+                P2SMod.LOGGER.info("[DEBUG] S->C2SSetSelection received -> player={}, pointIndex={}, pos={}", player.getGameProfile().getName(), payload.pointIndex(), payload.pos());
+            }
             runOnPlayerServer(player, () -> SelectionManager.handleClientSelection(player, payload.pointIndex(), payload.pos()));
         });
 
         ServerPlayNetworking.registerGlobalReceiver(C2SChatMessagePayload.TYPE, (payload, context) -> {
             ServerPlayer player = context.player();
+            if (P2SMod.DEBUG) {
+                P2SMod.LOGGER.info("[DEBUG] S->C2SChatMessage received -> player={}, messageLen={}", player.getGameProfile().getName(), payload.message() == null ? 0 : payload.message().length());
+            }
             runOnPlayerServer(player, () -> SessionManager.handleChatMessage(player, payload.message()));
         });
 
         ServerPlayNetworking.registerGlobalReceiver(C2SSessionActionPayload.TYPE, (payload, context) -> {
             ServerPlayer player = context.player();
+            if (P2SMod.DEBUG) {
+                P2SMod.LOGGER.info("[DEBUG] S->C2SSessionAction received -> player={}, action={}, payloadLen={}", player.getGameProfile().getName(), payload.action(), payload.payload() == null ? 0 : payload.payload().length());
+            }
             runOnPlayerServer(player, () -> SessionManager.handleSessionAction(player, payload.action(), payload.payload()));
         });
 
         ServerPlayNetworking.registerGlobalReceiver(C2SToolBridgePayload.TYPE, (payload, context) -> {
             ServerPlayer player = context.player();
+            if (P2SMod.DEBUG) {
+                P2SMod.LOGGER.info("[DEBUG] S->C2SToolBridge received -> player={}, requestId={}, tool={}, argsLen={}", player.getGameProfile().getName(), payload.requestId(), payload.toolName(), payload.argumentsJson() == null ? 0 : payload.argumentsJson().length());
+            }
             runOnPlayerServer(player, () -> SessionManager.handleToolBridgeRequest(
                     player,
                     payload.requestId(),

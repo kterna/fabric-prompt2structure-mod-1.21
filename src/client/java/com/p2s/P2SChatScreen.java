@@ -34,6 +34,11 @@ public class P2SChatScreen extends Screen {
     private final List<Button> choiceButtons = new ArrayList<>();
     private double scrollOffset;
 
+    private boolean discardReasonMode = false;
+    private EditBox discardReasonInput;
+    private Button discardOkButton;
+    private Button discardCancelButton;
+
     public P2SChatScreen() {
         super(Component.literal("P2S Session"));
     }
@@ -87,12 +92,12 @@ public class P2SChatScreen extends Screen {
         int rowY = PADDING + TOP_BUTTON_HEIGHT + 4;
         int rowStart = panelX + panelWidth - PADDING - (SMALL_BUTTON_WIDTH * 4 + 6);
 
-        applyButton = Button.builder(Component.literal("Apply"), btn -> sendSessionAction("apply", ""))
+        applyButton = Button.builder(Component.literal("Apply"), btn -> ClientAgentManager.submitPatchApply())
                 .bounds(rowStart, rowY, SMALL_BUTTON_WIDTH, TOP_BUTTON_HEIGHT)
                 .build();
         addRenderableWidget(applyButton);
 
-        discardButton = Button.builder(Component.literal("Discard"), btn -> sendSessionAction("discard", ""))
+        discardButton = Button.builder(Component.literal("Discard"), btn -> enterDiscardReasonMode())
                 .bounds(rowStart + SMALL_BUTTON_WIDTH + 2, rowY, SMALL_BUTTON_WIDTH, TOP_BUTTON_HEIGHT)
                 .build();
         addRenderableWidget(discardButton);
@@ -122,10 +127,44 @@ public class P2SChatScreen extends Screen {
             choiceButtons.add(choiceBtn);
             addRenderableWidget(choiceBtn);
         }
+
+        int discardRowY = choiceY + TOP_BUTTON_HEIGHT + 2;
+        int discardInputWidth = actionWidth - BUTTON_WIDTH * 2 - 8;
+        discardReasonInput = new EditBox(this.font, rowStart, discardRowY, discardInputWidth, INPUT_HEIGHT, Component.literal(""));
+        discardReasonInput.setMaxLength(256);
+        discardReasonInput.setHint(Component.literal("Reason (optional)"));
+        discardReasonInput.visible = false;
+        addRenderableWidget(discardReasonInput);
+
+        discardOkButton = Button.builder(Component.literal("OK"), btn -> confirmDiscard())
+                .bounds(rowStart + discardInputWidth + 4, discardRowY, BUTTON_WIDTH, INPUT_HEIGHT)
+                .build();
+        discardOkButton.visible = false;
+        addRenderableWidget(discardOkButton);
+
+        discardCancelButton = Button.builder(Component.literal("X"), btn -> exitDiscardReasonMode())
+                .bounds(rowStart + discardInputWidth + BUTTON_WIDTH + 8, discardRowY, BUTTON_WIDTH, INPUT_HEIGHT)
+                .build();
+        discardCancelButton.visible = false;
+        addRenderableWidget(discardCancelButton);
     }
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (discardReasonMode) {
+            if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
+                exitDiscardReasonMode();
+                return true;
+            }
+            if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
+                confirmDiscard();
+                return true;
+            }
+            if (discardReasonInput != null && discardReasonInput.keyPressed(keyCode, scanCode, modifiers)) {
+                return true;
+            }
+            return super.keyPressed(keyCode, scanCode, modifiers);
+        }
         if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
             onClose();
             return true;
@@ -170,10 +209,20 @@ public class P2SChatScreen extends Screen {
     @Override
     public void render(GuiGraphics gfx, int mouseX, int mouseY, float delta) {
         refreshChoiceButtons();
+        if (discardReasonMode && !ClientSessionState.hasPendingPatch()) {
+            exitDiscardReasonMode();
+        }
         if (applyButton != null) {
             boolean pending = ClientSessionState.hasPendingPatch();
-            applyButton.active = pending;
-            discardButton.active = pending;
+            applyButton.active = pending && !discardReasonMode;
+            applyButton.visible = !discardReasonMode;
+            discardButton.active = pending && !discardReasonMode;
+            discardButton.visible = !discardReasonMode;
+        }
+        if (discardReasonInput != null) {
+            discardReasonInput.visible = discardReasonMode;
+            discardOkButton.visible = discardReasonMode;
+            discardCancelButton.visible = discardReasonMode;
         }
         if (undoButton != null) {
             boolean active = ClientSessionState.isActive();
@@ -581,6 +630,37 @@ public class P2SChatScreen extends Screen {
             return max;
         }
         return value;
+    }
+
+    private void enterDiscardReasonMode() {
+        if (!ClientSessionState.hasPendingPatch()) {
+            return;
+        }
+        discardReasonMode = true;
+        if (discardReasonInput != null) {
+            discardReasonInput.setValue("");
+            discardReasonInput.setFocused(true);
+        }
+        if (input != null) {
+            input.setFocused(false);
+        }
+    }
+
+    private void exitDiscardReasonMode() {
+        discardReasonMode = false;
+        if (discardReasonInput != null) {
+            discardReasonInput.setValue("");
+            discardReasonInput.setFocused(false);
+        }
+        if (input != null) {
+            input.setFocused(true);
+        }
+    }
+
+    private void confirmDiscard() {
+        String reason = discardReasonInput != null ? discardReasonInput.getValue() : "";
+        exitDiscardReasonMode();
+        ClientAgentManager.submitPatchDiscard(reason);
     }
 
     private void sendMessage() {

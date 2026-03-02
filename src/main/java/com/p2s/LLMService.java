@@ -43,11 +43,17 @@ public final class LLMService {
             P2SMod.LOGGER.info("LLM request -> url={}, model={}, timeout={}s", ModConfig.API_URL, ModConfig.MODEL, ModConfig.HTTP_TIMEOUT_SECONDS);
             P2SMod.LOGGER.info("Active prompt preset: {}", ModConfig.activePromptName());
             P2SMod.LOGGER.info("LLM prompt: {}", userPrompt);
+            if (P2SMod.DEBUG) {
+                P2SMod.LOGGER.info("[DEBUG] LLM full request body: {}", bodyJson);
+            }
             Request request = new Request.Builder()
                     .url(ModConfig.API_URL)
                     .post(RequestBody.create(bodyJson, JSON))
                     .header("Authorization", "Bearer " + ModConfig.API_KEY)
                     .build();
+            if (P2SMod.DEBUG) {
+                P2SMod.LOGGER.info("[DEBUG] LLM request headers: method={}, url={}, headers={}", request.method(), request.url(), request.headers());
+            }
 
             try (Response response = getClient(ModConfig.HTTP_TIMEOUT_SECONDS).newCall(request).execute()) {
                 if (!response.isSuccessful()) {
@@ -57,6 +63,9 @@ public final class LLMService {
                 }
                 String respBody = response.body() == null ? "" : response.body().string();
                 P2SMod.LOGGER.info("LLM raw response (truncated): {}", truncate(respBody));
+                if (P2SMod.DEBUG) {
+                    P2SMod.LOGGER.info("[DEBUG] LLM full response body: {}", respBody);
+                }
                 return parseResponse(respBody);
             } catch (Exception e) {
                 throw new RuntimeException("LLM 请求异常: " + e.getMessage(), e);
@@ -110,6 +119,9 @@ public final class LLMService {
             int messageCount = messages == null ? 0 : messages.size();
             P2SMod.LOGGER.info("LLM streaming request -> url={}, model={}, timeout={}s, messages={}",
                     cfg.apiUrl(), cfg.model(), cfg.httpTimeoutSeconds(), messageCount);
+            if (P2SMod.DEBUG) {
+                P2SMod.LOGGER.info("[DEBUG] LLM streaming full request body: {}", bodyJson);
+            }
 
             Request request = new Request.Builder()
                     .url(cfg.apiUrl())
@@ -173,7 +185,13 @@ public final class LLMService {
                 }
                 String data = line.substring(6).trim();
                 if ("[DONE]".equals(data)) {
+                    if (P2SMod.DEBUG) {
+                        P2SMod.LOGGER.info("[DEBUG] SSE stream received [DONE]");
+                    }
                     break;
+                }
+                if (P2SMod.DEBUG) {
+                    P2SMod.LOGGER.info("[DEBUG] SSE chunk: {}", data);
                 }
 
                 try {
@@ -297,6 +315,10 @@ public final class LLMService {
                     payloadBytes,
                     cfg.useToolCall(),
                     normalizedAllowedTools == null ? "all" : normalizedAllowedTools.size());
+            if (P2SMod.DEBUG) {
+                P2SMod.LOGGER.info("[DEBUG] LLM session full request body: {}", bodyJson);
+                P2SMod.LOGGER.info("[DEBUG] LLM session messages array: {}", GSON.toJson(messages));
+            }
             Request request = new Request.Builder()
                     .url(cfg.apiUrl())
                     .post(RequestBody.create(bodyJson, JSON))
@@ -311,6 +333,9 @@ public final class LLMService {
                 }
                 String respBody = response.body() == null ? "" : response.body().string();
                 P2SMod.LOGGER.info("LLM raw response (truncated): {}", truncate(respBody));
+                if (P2SMod.DEBUG) {
+                    P2SMod.LOGGER.info("[DEBUG] LLM session full response body: {}", respBody);
+                }
                 return parseSessionResponse(respBody);
             } catch (Exception e) {
                 throw new RuntimeException("LLM 请求异常: " + e.getMessage(), e);

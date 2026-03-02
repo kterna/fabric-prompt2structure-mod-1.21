@@ -274,6 +274,14 @@ public final class ModConfig {
         PROMPTS = new LinkedHashMap<>(file.prompts == null ? defaultPrompts() : file.prompts);
         ensureDefaultPromptEntry(PROMPTS);
         ACTIVE_PROMPT_NAME = pickPromptName("P2S_PROMPT", file.activePrompt, PROMPTS);
+
+        if (P2SMod.DEBUG) {
+            P2SMod.LOGGER.info("[DEBUG] Config applied -> apiUrl={}, model={}, timeout={}s, useToolCall={}, maxPatchOps={}, maxBlocksPerCommit={}, confirmRequired={}, sessionJobTimeout={}s, riskAutoApply={}, activePrompt={}, promptKeys={}",
+                    API_URL, MODEL, HTTP_TIMEOUT_SECONDS, USE_TOOL_CALL, MAX_PATCH_OPS, MAX_BLOCKS_PER_COMMIT, CONFIRM_REQUIRED, SESSION_JOB_TIMEOUT_SECONDS, RISK_AUTO_APPLY_THRESHOLD, ACTIVE_PROMPT_NAME, PROMPTS.keySet());
+            for (Map.Entry<String, String> entry : PROMPTS.entrySet()) {
+                P2SMod.LOGGER.info("[DEBUG] Config prompt [{}]: {}", entry.getKey(), entry.getValue());
+            }
+        }
     }
 
     private static class Values {

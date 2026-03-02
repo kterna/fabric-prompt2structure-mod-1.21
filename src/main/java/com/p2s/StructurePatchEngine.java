@@ -47,6 +47,9 @@ public final class StructurePatchEngine {
                 continue;
             }
             String opName = op.op.trim().toLowerCase();
+            if (P2SMod.DEBUG) {
+                P2SMod.LOGGER.info("[DEBUG] PatchEngine operation: op={}, part={}, priority={}", opName, op.part, op.priority);
+            }
             switch (opName) {
                 case "set_palette" -> applySetPalette(working, op);
                 case "delete_part" -> applyDeletePart(parts, op);
@@ -112,6 +115,9 @@ public final class StructurePatchEngine {
         }
         if (working.palette == null) {
             working.palette = new LinkedHashMap<>();
+        }
+        if (P2SMod.DEBUG) {
+            P2SMod.LOGGER.info("[DEBUG] PatchEngine set_palette delta: {}", op.paletteDelta);
         }
         for (Map.Entry<String, String> entry : op.paletteDelta.entrySet()) {
             if (entry.getKey() == null || entry.getKey().isBlank()) {
