@@ -233,7 +233,7 @@ public class P2SSkillEditorScreen extends Screen {
                 statusColor = 0xFF5555;
                 return;
             }
-            if (parent instanceof P2SSkillConfigScreen cfg) {
+            if (parent instanceof P2SConfigScreen cfg) {
                 cfg.onSkillSaved(saved.meta().id());
             }
             if (this.minecraft != null) {
