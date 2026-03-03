@@ -18,6 +18,8 @@ classes/
 
 # vscode
 
+.cursor/
+.claude/
 .settings/
 .vscode/
 bin/
