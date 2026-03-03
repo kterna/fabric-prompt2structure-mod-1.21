@@ -32,6 +32,7 @@ public final class SubagentManager {
     private static final int MAX_RESPONSE_CHARS = 8192;
     private static final int MAX_SUMMARY_CHARS = 512;
     private static final int MAX_TRACE_ITEMS = 40;
+    private static final int MAX_ATTEMPT_RECORDS = 20;
     private static final int MAX_TOOL_LOOPS = 30;
     private static final ThreadPoolExecutor EXECUTOR = new ThreadPoolExecutor(
             MAX_ACTIVE_SUBAGENTS,
@@ -107,6 +108,9 @@ public final class SubagentManager {
         subagent.status = SubagentStatus.QUEUED;
         subagent.createdAt = now;
         subagent.summary = "Queued";
+        subagent.attempt = 1;
+        subagent.attemptCount = 1;
+        initializeTaskHistory(subagent, profile);
 
         TASKS.put(id, subagent);
         SESSION_INDEX.computeIfAbsent(sid, k -> new CopyOnWriteArrayList<>()).add(id);
@@ -116,16 +120,7 @@ public final class SubagentManager {
                     id, sid, profile.id(), taskText, profile.allowedTools(), resolveSkills.skillIds());
         }
 
-        try {
-            EXECUTOR.execute(() -> runSubagent(subagent, profile));
-        } catch (RejectedExecutionException e) {
-            synchronized (subagent) {
-                subagent.status = SubagentStatus.FAILED;
-                subagent.error = "Subagent queue is full";
-                subagent.summary = "Queue full";
-                subagent.endedAt = System.currentTimeMillis();
-            }
-        }
+        queueSubagentRun(subagent, profile);
 
         JsonObject payload = ok("create_subagent");
         payload.addProperty("subagent_id", id);
@@ -133,11 +128,84 @@ public final class SubagentManager {
         payload.addProperty("profile_id", profile.id());
         payload.addProperty("created_at", now);
         payload.addProperty("queued", subagent.status == SubagentStatus.QUEUED);
+        payload.addProperty("attempt", subagent.attempt);
+        payload.addProperty("attempt_count", subagent.attemptCount);
         payload.addProperty("skill_count", resolveSkills.skillIds().size());
         payload.add("skill_ids", toJsonArray(resolveSkills.skillIds()));
         if (!resolveSkills.warnings().isEmpty()) {
             payload.add("warnings", toJsonArray(resolveSkills.warnings()));
         }
+        return payload;
+    }
+
+    public static JsonObject continueSubagent(String sessionId, JsonObject arguments) {
+        JsonObject args = arguments == null ? new JsonObject() : arguments;
+        String subagentId = asString(args, "id");
+        if (subagentId.isBlank()) {
+            return error("continue_subagent", "Missing id");
+        }
+        SubagentTask task = getBySession(sessionId, subagentId);
+        if (task == null) {
+            return error("continue_subagent", "Subagent not found");
+        }
+        SubagentProfileStore.SubagentProfile profile = SubagentProfileStore.getProfile(task.profileId);
+        if (profile == null) {
+            return error("continue_subagent", "Profile not found: " + task.profileId);
+        }
+        if (!profile.enabled()) {
+            return error("continue_subagent", "Profile disabled: " + profile.id());
+        }
+        if (profile.allowedTools() == null || profile.allowedTools().isEmpty()) {
+            return error("continue_subagent", "Profile has no allowed tools: " + profile.id());
+        }
+
+        String instruction = asString(args, "instruction");
+        if (instruction.isBlank()) {
+            instruction = "Continue from previous context and finish the task with actionable output.";
+        }
+
+        int attempt;
+        int attemptCount;
+        synchronized (task) {
+            if (task.status == SubagentStatus.DELETED) {
+                return error("continue_subagent", "Subagent is deleted");
+            }
+            if (task.status == SubagentStatus.RUNNING || task.status == SubagentStatus.QUEUED) {
+                return error("continue_subagent", "Subagent is already active");
+            }
+            if (!canContinue(task.status)) {
+                return error("continue_subagent", "Subagent cannot continue from status: " + statusName(task.status));
+            }
+            if (task.history == null || task.history.isEmpty()) {
+                initializeTaskHistory(task, profile);
+            }
+            JsonObject continueMsg = new JsonObject();
+            continueMsg.addProperty("role", "user");
+            continueMsg.addProperty("content", instruction);
+            task.history.add(continueMsg);
+            task.cancelRequested = false;
+            task.status = SubagentStatus.QUEUED;
+            task.summary = "Queued (continue)";
+            task.error = "";
+            task.response = "";
+            task.startedAt = 0L;
+            task.endedAt = 0L;
+            task.attempt += 1;
+            task.attemptCount += 1;
+            attempt = task.attempt;
+            attemptCount = task.attemptCount;
+        }
+
+        queueSubagentRun(task, profile);
+        TaskSnapshot snap = snapshot(task);
+
+        JsonObject payload = ok("continue_subagent");
+        payload.addProperty("id", subagentId);
+        payload.addProperty("status", statusName(snap.status));
+        payload.addProperty("continued", true);
+        payload.addProperty("queued", snap.status == SubagentStatus.QUEUED);
+        payload.addProperty("attempt", attempt);
+        payload.addProperty("attempt_count", attemptCount);
         return payload;
     }
 
@@ -164,6 +232,9 @@ public final class SubagentManager {
             item.addProperty("created_at", snapshot.createdAt);
             item.addProperty("started_at", snapshot.startedAt);
             item.addProperty("ended_at", snapshot.endedAt);
+            item.addProperty("attempt", snapshot.attempt);
+            item.addProperty("attempt_count", snapshot.attemptCount);
+            item.addProperty("can_continue", canContinue(snapshot.status));
             item.addProperty("summary", snapshot.summary);
             if (!snapshot.error.isBlank()) {
                 item.addProperty("error", snapshot.error);
@@ -192,6 +263,9 @@ public final class SubagentManager {
         payload.addProperty("created_at", snapshot.createdAt);
         payload.addProperty("started_at", snapshot.startedAt);
         payload.addProperty("ended_at", snapshot.endedAt);
+        payload.addProperty("attempt", snapshot.attempt);
+        payload.addProperty("attempt_count", snapshot.attemptCount);
+        payload.addProperty("can_continue", canContinue(snapshot.status));
         payload.addProperty("summary", snapshot.summary);
         payload.addProperty("response", snapshot.response);
         if (!snapshot.error.isBlank()) {
@@ -201,6 +275,21 @@ public final class SubagentManager {
             payload.add("metadata", snapshot.metadata.deepCopy());
         }
         payload.add("tool_trace", toJsonArray(snapshot.toolTrace));
+        if (snapshot.attempts != null && !snapshot.attempts.isEmpty()) {
+            JsonArray attempts = new JsonArray();
+            for (AttemptRecord record : snapshot.attempts) {
+                JsonObject item = new JsonObject();
+                item.addProperty("attempt", record.attempt());
+                item.addProperty("status", statusName(record.status()));
+                item.addProperty("summary", record.summary());
+                item.addProperty("response", record.response());
+                item.addProperty("error", record.error());
+                item.addProperty("started_at", record.startedAt());
+                item.addProperty("ended_at", record.endedAt());
+                attempts.add(item);
+            }
+            payload.add("attempts", attempts);
+        }
         return payload;
     }
 
@@ -270,6 +359,54 @@ public final class SubagentManager {
         return payload;
     }
 
+    private static void queueSubagentRun(SubagentTask task, SubagentProfileStore.SubagentProfile profile) {
+        if (task == null || profile == null) {
+            return;
+        }
+        try {
+            EXECUTOR.execute(() -> runSubagent(task, profile));
+        } catch (RejectedExecutionException e) {
+            long now = System.currentTimeMillis();
+            synchronized (task) {
+                task.status = SubagentStatus.FAILED;
+                task.error = "Subagent queue is full";
+                task.summary = "Queue full";
+                task.response = "";
+                task.startedAt = now;
+                task.endedAt = now;
+                appendAttemptRecord(task);
+            }
+        }
+    }
+
+    private static void initializeTaskHistory(SubagentTask task, SubagentProfileStore.SubagentProfile profile) {
+        if (task == null || profile == null) {
+            return;
+        }
+        if (task.history == null) {
+            task.history = new ArrayList<>();
+        } else {
+            task.history.clear();
+        }
+
+        JsonObject system = new JsonObject();
+        system.addProperty("role", "system");
+        system.addProperty("content", buildSubagentSystemPrompt(task, profile));
+        task.history.add(system);
+
+        JsonObject user = new JsonObject();
+        user.addProperty("role", "user");
+        user.addProperty("content", task.task == null ? "" : task.task);
+        task.history.add(user);
+
+        if (task.metadata != null && !task.metadata.entrySet().isEmpty()) {
+            JsonObject metadataMsg = new JsonObject();
+            metadataMsg.addProperty("role", "user");
+            metadataMsg.addProperty("content", "metadata: " + GSON.toJson(task.metadata));
+            task.history.add(metadataMsg);
+        }
+    }
+
     private static void runSubagent(SubagentTask task, SubagentProfileStore.SubagentProfile profile) {
         synchronized (task) {
             if (task.cancelRequested || task.status == SubagentStatus.DELETED) {
@@ -279,32 +416,19 @@ public final class SubagentManager {
                 }
                 return;
             }
+            if (task.history == null || task.history.isEmpty()) {
+                initializeTaskHistory(task, profile);
+            }
             task.status = SubagentStatus.RUNNING;
             task.startedAt = System.currentTimeMillis();
-            task.summary = "Running";
+            task.summary = "Running (attempt " + task.attempt + ")";
+            task.error = "";
+            task.response = "";
         }
 
         int maxLoops = clamp(profile.maxLoops(), 1, MAX_TOOL_LOOPS);
         int timeoutSeconds = clamp(profile.timeoutSeconds(), 5, 300);
         Set<String> allowedTools = new LinkedHashSet<>(profile.allowedTools());
-        List<JsonObject> history = new ArrayList<>();
-
-        JsonObject system = new JsonObject();
-        system.addProperty("role", "system");
-        system.addProperty("content", buildSubagentSystemPrompt(task, profile));
-        history.add(system);
-
-        JsonObject user = new JsonObject();
-        user.addProperty("role", "user");
-        user.addProperty("content", task.task);
-        history.add(user);
-
-        if (task.metadata != null && !task.metadata.entrySet().isEmpty()) {
-            JsonObject metadataMsg = new JsonObject();
-            metadataMsg.addProperty("role", "user");
-            metadataMsg.addProperty("content", "metadata: " + GSON.toJson(task.metadata));
-            history.add(metadataMsg);
-        }
 
         try {
             for (int loop = 0; loop < maxLoops; loop++) {
@@ -313,10 +437,17 @@ public final class SubagentManager {
                 }
 
                 if (P2SMod.DEBUG) {
-                    P2SMod.LOGGER.info("[DEBUG] Subagent {} loop iteration {} of {}, historySize={}", task.id, loop, maxLoops, history.size());
+                    int historySize;
+                    synchronized (task) {
+                        historySize = task.history == null ? 0 : task.history.size();
+                    }
+                    P2SMod.LOGGER.info("[DEBUG] Subagent {} loop iteration {} of {}, historySize={}", task.id, loop, maxLoops, historySize);
                 }
 
-                List<JsonObject> snapshot = deepCopyMessages(history);
+                List<JsonObject> snapshot;
+                synchronized (task) {
+                    snapshot = deepCopyMessages(task.history);
+                }
                 LLMService.SessionResult result = LLMService.requestWithHistoryWithSkills(
                                 snapshot,
                                 P2SClientConfig.llmRequestConfig(),
@@ -331,7 +462,9 @@ public final class SubagentManager {
                 }
 
                 if (result.rawAssistantMessage() != null) {
-                    history.add(result.rawAssistantMessage().deepCopy());
+                    synchronized (task) {
+                        task.history.add(result.rawAssistantMessage().deepCopy());
+                    }
                 }
 
                 List<LLMService.ToolCall> toolCalls = result.toolCalls() == null ? List.of() : result.toolCalls();
@@ -343,7 +476,9 @@ public final class SubagentManager {
                     }
                     List<ToolCallResult> batchResults = executeToolCallsBatch(task, toolCalls, allowedTools);
                     for (ToolCallResult tcr : batchResults) {
-                        history.add(buildToolMessage(tcr.call(), tcr.payload()));
+                        synchronized (task) {
+                            task.history.add(buildToolMessage(tcr.call(), tcr.payload()));
+                        }
                         appendTrace(task, tcr.call() == null ? "" : tcr.call().name(), tcr.payload());
                         if (P2SMod.DEBUG) {
                             P2SMod.LOGGER.info("[DEBUG] Subagent {} tool result: name={}, payload={}", task.id, tcr.call() == null ? "" : tcr.call().name(), GSON.toJson(tcr.payload()));
@@ -652,6 +787,9 @@ public final class SubagentManager {
                     new ArrayList<>(task.skillIds),
                     task.metadata == null ? null : task.metadata.deepCopy(),
                     new ArrayList<>(task.toolTrace),
+                    task.attempt,
+                    task.attemptCount,
+                    new ArrayList<>(task.attempts),
                     task.createdAt,
                     task.startedAt,
                     task.endedAt
@@ -670,6 +808,7 @@ public final class SubagentManager {
                 }
                 if (task.status == SubagentStatus.CANCELLED) {
                     task.summary = "Cancelled";
+                    appendAttemptRecord(task);
                 }
                 return true;
             }
@@ -692,6 +831,7 @@ public final class SubagentManager {
             task.response = truncateText(response, MAX_RESPONSE_CHARS);
             task.summary = summarize(task.response);
             task.endedAt = System.currentTimeMillis();
+            appendAttemptRecord(task);
         }
     }
 
@@ -711,6 +851,37 @@ public final class SubagentManager {
             if (task.endedAt <= 0) {
                 task.endedAt = System.currentTimeMillis();
             }
+            appendAttemptRecord(task);
+        }
+    }
+
+    private static boolean canContinue(SubagentStatus status) {
+        return status == SubagentStatus.FAILED
+                || status == SubagentStatus.COMPLETED
+                || status == SubagentStatus.CANCELLED;
+    }
+
+    private static void appendAttemptRecord(SubagentTask task) {
+        if (task == null) {
+            return;
+        }
+        int attempt = task.attempt;
+        for (int i = task.attempts.size() - 1; i >= 0; i--) {
+            if (task.attempts.get(i).attempt() == attempt) {
+                return;
+            }
+        }
+        task.attempts.add(new AttemptRecord(
+                attempt,
+                task.status,
+                truncateText(task.summary == null ? "" : task.summary, MAX_SUMMARY_CHARS),
+                truncateText(task.response == null ? "" : task.response, MAX_SUMMARY_CHARS),
+                truncateText(task.error == null ? "" : task.error, MAX_SUMMARY_CHARS),
+                task.startedAt,
+                task.endedAt
+        ));
+        while (task.attempts.size() > MAX_ATTEMPT_RECORDS) {
+            task.attempts.remove(0);
         }
     }
 
@@ -941,6 +1112,10 @@ public final class SubagentManager {
         List<String> skillIds = new ArrayList<>();
         JsonObject metadata;
         List<String> toolTrace = new ArrayList<>();
+        List<JsonObject> history = new ArrayList<>();
+        int attempt = 1;
+        int attemptCount = 1;
+        List<AttemptRecord> attempts = new ArrayList<>();
         long createdAt;
         long startedAt;
         long endedAt;
@@ -959,7 +1134,21 @@ public final class SubagentManager {
             List<String> skillIds,
             JsonObject metadata,
             List<String> toolTrace,
+            int attempt,
+            int attemptCount,
+            List<AttemptRecord> attempts,
             long createdAt,
+            long startedAt,
+            long endedAt
+    ) {
+    }
+
+    private record AttemptRecord(
+            int attempt,
+            SubagentStatus status,
+            String summary,
+            String response,
+            String error,
             long startedAt,
             long endedAt
     ) {

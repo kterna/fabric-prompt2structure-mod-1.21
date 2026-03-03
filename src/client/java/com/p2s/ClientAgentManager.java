@@ -45,6 +45,7 @@ public final class ClientAgentManager {
             - Use search_block_ids when unsure about block id names.
             - Use list_profiles/get_profile before creating subagents when profile choice matters.
             - Use create_subagent for delegated tasks, then poll with get_subagent.
+            - Use continue_subagent to continue a failed/completed/cancelled subagent with new instructions.
             - Use list_subagents to inspect current subagent states, and delete_subagent to stop/remove one.
             - Do not request recursive subagent creation from subagents.
             """;
@@ -479,6 +480,7 @@ public final class ClientAgentManager {
             case "clear_user_choice" -> clearUserChoicePayload();
             case "list_subagents" -> listSubagentsPayload(session, call.arguments());
             case "create_subagent" -> createSubagentPayload(session, call.arguments());
+            case "continue_subagent" -> continueSubagentPayload(session, call.arguments());
             case "get_subagent" -> getSubagentPayload(session, call.arguments());
             case "delete_subagent" -> deleteSubagentPayload(session, call.arguments());
             case "list_profiles" -> SubagentManager.listProfiles();
@@ -503,6 +505,15 @@ public final class ClientAgentManager {
     private static JsonObject createSubagentPayload(LocalSession session, JsonElement arguments) {
         JsonObject args = normalizeArgsObject(arguments);
         return SubagentManager.createSubagent(sessionId(session), args);
+    }
+
+    private static JsonObject continueSubagentPayload(LocalSession session, JsonElement arguments) {
+        JsonObject args = normalizeArgsObject(arguments);
+        String id = asString(args, "id");
+        if (id.isBlank()) {
+            return toolError("continue_subagent", "Missing id");
+        }
+        return SubagentManager.continueSubagent(sessionId(session), args);
     }
 
     private static JsonObject getSubagentPayload(LocalSession session, JsonElement arguments) {
