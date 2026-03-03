@@ -836,10 +836,31 @@ public final class LLMService {
             readTool.addProperty("type", "function");
             JsonObject readFn = new JsonObject();
             readFn.addProperty("name", "read_workspace_state");
-            readFn.addProperty("description", "Read current (staged) workspace structure, revision, bounds and summary before proposing a patch.");
+            readFn.addProperty("description",
+                    "Read current (staged) workspace structure, revision, bounds and summary. " +
+                    "With no arguments returns full state. Use 'part' to read a single named structure part, " +
+                    "or 'line_start'+'line_end' to read a range of lines from the pretty-printed script JSON. " +
+                    "These two modes are mutually exclusive.");
             JsonObject readParams = new JsonObject();
             readParams.addProperty("type", "object");
-            readParams.add("properties", new JsonObject());
+            JsonObject readProps = new JsonObject();
+
+            JsonObject partProp = new JsonObject();
+            partProp.addProperty("type", "string");
+            partProp.addProperty("description", "Only read a single structure part by name. Returns palette + that part.");
+            readProps.add("part", partProp);
+
+            JsonObject lineStartProp = new JsonObject();
+            lineStartProp.addProperty("type", "integer");
+            lineStartProp.addProperty("description", "Start line number (1-based) of pretty-printed script JSON to read.");
+            readProps.add("line_start", lineStartProp);
+
+            JsonObject lineEndProp = new JsonObject();
+            lineEndProp.addProperty("type", "integer");
+            lineEndProp.addProperty("description", "End line number (1-based, inclusive) of pretty-printed script JSON to read.");
+            readProps.add("line_end", lineEndProp);
+
+            readParams.add("properties", readProps);
             readParams.addProperty("additionalProperties", false);
             readFn.add("parameters", readParams);
             readTool.add("function", readFn);

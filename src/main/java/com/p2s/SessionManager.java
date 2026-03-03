@@ -1,6 +1,7 @@
 package com.p2s;
 
 import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -27,6 +28,7 @@ import java.util.concurrent.TimeoutException;
 
 public final class SessionManager {
     private static final Gson GSON = new Gson();
+    private static final Gson GSON_PRETTY = new GsonBuilder().setPrettyPrinting().create();
     private static final Map<UUID, Session> sessions = new ConcurrentHashMap<>();
     private static final int MAX_HISTORY = 40;
     private static final int MAX_AGENT_LOOPS = 6;
@@ -41,6 +43,10 @@ public final class SessionManager {
     private static final String SESSION_TOOL_CONTRACT = """
             ## IDE Session Contract
             - Use read_workspace_state first when you need current structure/revision/bounds.
+              - No arguments: returns full state with complete (or truncated) script JSON.
+              - part="name": returns palette + only that named part (use when script is large).
+              - line_start=N, line_end=M: returns pretty-printed script lines N..M (1-based, inclusive).
+              - part and line_start/line_end are mutually exclusive.
             - Propose all edits with propose_patch; do not directly build blocks.
             - The user reviews a preview and confirms apply/discard.
             - If a patch is pending, read_workspace_state returns a staged revision that includes pending changes.
@@ -277,8 +283,8 @@ public final class SessionManager {
             }
             switch (toolName) {
                 case "read_workspace_state" -> {
-                    JsonObject payload = buildToolSuccess(toolName);
-                    payload.add("state", buildWorkspaceStatePayload(session));
+                    ReadWorkspaceArgs wsArgs = parseReadWorkspaceArgs(call.arguments());
+                    JsonObject payload = handleReadWorkspaceState(session, toolName, wsArgs);
                     result.toolMessages.add(buildToolMessage(call, payload));
                     P2SMod.LOGGER.info("AgentLoop tool read_workspace_state -> player={}, session={}", playerName, sessionId);
                     if (P2SMod.DEBUG) {
@@ -952,6 +958,132 @@ public final class SessionManager {
         return payload;
     }
 
+    private static JsonObject handleReadWorkspaceState(Session session, String toolName, ReadWorkspaceArgs args) {
+        // Validate: part and line range are mutually exclusive
+        if (args.hasPart() && (args.lineStart > 0 || args.lineEnd > 0)) {
+            return buildToolError(toolName, "Cannot combine 'part' filter with line range. Use one or the other.");
+        }
+
+        // Validate: both line_start and line_end are required together
+        if ((args.lineStart > 0 && args.lineEnd <= 0) || (args.lineEnd > 0 && args.lineStart <= 0)) {
+            return buildToolError(toolName, "Both 'line_start' and 'line_end' are required for line range reading.");
+        }
+
+        // Validate: line_start >= 1
+        if (args.lineStart < 0 || (args.hasLineRange() && args.lineStart < 1)) {
+            return buildToolError(toolName, "line_start must be >= 1.");
+        }
+
+        // Validate: line_end >= line_start
+        if (args.hasLineRange() && args.lineEnd < args.lineStart) {
+            return buildToolError(toolName, "line_end must be >= line_start.");
+        }
+
+        // Default mode: return full state as before
+        if (args.isDefault()) {
+            JsonObject payload = buildToolSuccess(toolName);
+            payload.add("state", buildWorkspaceStatePayload(session));
+            return payload;
+        }
+
+        // Part filter mode
+        if (args.hasPart()) {
+            return buildPartFilterPayload(session, toolName, args.part);
+        }
+
+        // Line range mode
+        return buildLineRangePayload(session, toolName, args.lineStart, args.lineEnd);
+    }
+
+    private static JsonObject buildPartFilterPayload(Session session, String toolName, String partName) {
+        boolean hasPending = session.pendingPatch != null && session.pendingPatch.nextScript != null;
+        StructureBuilder.VbsScriptV2 effectiveScript = hasPending ? session.pendingPatch.nextScript : session.current;
+
+        if (effectiveScript == null || effectiveScript.structures == null || effectiveScript.structures.isEmpty()) {
+            return buildToolError(toolName, "Workspace is empty, no script to read.");
+        }
+
+        StructureBuilder.StructurePart matched = null;
+        List<String> available = new ArrayList<>();
+        for (StructureBuilder.StructurePart p : effectiveScript.structures) {
+            if (p == null || p.name == null) continue;
+            available.add(p.name);
+            if (p.name.equals(partName)) {
+                matched = p;
+            }
+        }
+
+        if (matched == null) {
+            return buildToolError(toolName, "Part '" + partName + "' not found. Available parts: " + available + ".");
+        }
+
+        // Build a filtered script containing palette + only the matched part
+        StructureBuilder.VbsScriptV2 filtered = new StructureBuilder.VbsScriptV2();
+        filtered.palette = effectiveScript.palette;
+        filtered.structures = new ArrayList<>();
+        filtered.structures.add(matched);
+
+        String committedRevision = session.revision == null ? "" : session.revision;
+        String stagedRevision = committedRevision;
+        if (hasPending && session.pendingPatch.revisionAfter != null && !session.pendingPatch.revisionAfter.isBlank()) {
+            stagedRevision = session.pendingPatch.revisionAfter;
+        }
+
+        JsonObject payload = buildToolSuccess(toolName);
+        JsonObject state = new JsonObject();
+        state.addProperty("revision", stagedRevision);
+        state.addProperty("filter", "part");
+        state.addProperty("part_name", partName);
+        state.addProperty("part_count", effectiveScript.structures.size());
+        state.addProperty("total_blocks", countBlocks(effectiveScript));
+        state.add("script", GSON.toJsonTree(filtered));
+        payload.add("state", state);
+        return payload;
+    }
+
+    private static JsonObject buildLineRangePayload(Session session, String toolName, int lineStart, int lineEnd) {
+        boolean hasPending = session.pendingPatch != null && session.pendingPatch.nextScript != null;
+        StructureBuilder.VbsScriptV2 effectiveScript = hasPending ? session.pendingPatch.nextScript : session.current;
+
+        if (effectiveScript == null) {
+            return buildToolError(toolName, "Workspace is empty, no script to read.");
+        }
+
+        String prettyJson = GSON_PRETTY.toJson(effectiveScript);
+        String[] lines = prettyJson.split("\n", -1);
+        int totalLines = lines.length;
+
+        if (lineStart > totalLines) {
+            return buildToolError(toolName, "line_start (" + lineStart + ") exceeds total lines (" + totalLines + "). Use line_start=1 to read from the beginning.");
+        }
+
+        // Clamp line_end to totalLines
+        int clampedEnd = Math.min(lineEnd, totalLines);
+
+        StringBuilder sb = new StringBuilder();
+        for (int i = lineStart - 1; i < clampedEnd; i++) {
+            if (sb.length() > 0) sb.append("\n");
+            sb.append(lines[i]);
+        }
+
+        String committedRevision = session.revision == null ? "" : session.revision;
+        String stagedRevision = committedRevision;
+        if (hasPending && session.pendingPatch.revisionAfter != null && !session.pendingPatch.revisionAfter.isBlank()) {
+            stagedRevision = session.pendingPatch.revisionAfter;
+        }
+
+        JsonObject payload = buildToolSuccess(toolName);
+        JsonObject state = new JsonObject();
+        state.addProperty("revision", stagedRevision);
+        state.addProperty("filter", "lines");
+        state.addProperty("total_lines", totalLines);
+        state.addProperty("line_start", lineStart);
+        state.addProperty("line_end", clampedEnd);
+        state.addProperty("script_lines", sb.toString());
+        payload.add("state", state);
+        return payload;
+    }
+
     private static PatchModels.StructurePatch parsePatchArguments(JsonElement argsElem) {
         if (argsElem == null || argsElem.isJsonNull()) {
             return null;
@@ -1008,6 +1140,39 @@ public final class SessionManager {
         } catch (Exception e) {
             P2SMod.LOGGER.warn("Failed to parse search_block_ids arguments: {}", e.getMessage());
             return null;
+        }
+    }
+
+    private static ReadWorkspaceArgs parseReadWorkspaceArgs(JsonElement argsElem) {
+        if (argsElem == null || argsElem.isJsonNull()) {
+            return new ReadWorkspaceArgs(null, 0, 0);
+        }
+        try {
+            JsonElement parsed = argsElem;
+            if (argsElem.isJsonPrimitive() && argsElem.getAsJsonPrimitive().isString()) {
+                String raw = argsElem.getAsString();
+                if (raw == null || raw.isBlank()) {
+                    return new ReadWorkspaceArgs(null, 0, 0);
+                }
+                parsed = JsonParser.parseString(raw);
+            }
+            if (!parsed.isJsonObject()) {
+                return new ReadWorkspaceArgs(null, 0, 0);
+            }
+            JsonObject obj = parsed.getAsJsonObject();
+            String part = obj.has("part") && obj.get("part").isJsonPrimitive()
+                    ? obj.get("part").getAsString()
+                    : null;
+            int lineStart = obj.has("line_start") && obj.get("line_start").isJsonPrimitive()
+                    ? obj.get("line_start").getAsInt()
+                    : 0;
+            int lineEnd = obj.has("line_end") && obj.get("line_end").isJsonPrimitive()
+                    ? obj.get("line_end").getAsInt()
+                    : 0;
+            return new ReadWorkspaceArgs(part, lineStart, lineEnd);
+        } catch (Exception e) {
+            P2SMod.LOGGER.warn("Failed to parse read_workspace_state arguments: {}", e.getMessage());
+            return new ReadWorkspaceArgs(null, 0, 0);
         }
     }
 
@@ -1605,6 +1770,22 @@ public final class SessionManager {
             this.query = query;
             this.limit = limit;
         }
+    }
+
+    private static final class ReadWorkspaceArgs {
+        final String part;
+        final int lineStart;
+        final int lineEnd;
+
+        ReadWorkspaceArgs(String part, int lineStart, int lineEnd) {
+            this.part = part;
+            this.lineStart = lineStart;
+            this.lineEnd = lineEnd;
+        }
+
+        boolean hasLineRange() { return lineStart > 0 && lineEnd > 0; }
+        boolean hasPart() { return part != null && !part.isBlank(); }
+        boolean isDefault() { return !hasLineRange() && !hasPart(); }
     }
 
     private static final class CommitEntry {
