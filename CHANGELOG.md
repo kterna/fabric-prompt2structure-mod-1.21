@@ -36,3 +36,7 @@
 - Subagent 支持 `continue_subagent`，可恢复失败/完成任务继续执行。
 - `read_workspace_state` 增加 part 过滤和行区间读取能力。
 - 补充 `.gitignore` 调整。
+- 动作模型断代重构：由 `fill/frame/set` 全量切换为 `box/plane/line/points`。
+- 新增基础几何表达：`box.mode=solid|shell|walls`、`plane.axis=x|y|z` + `plane.mode=solid|outline`。
+- Builder / LLM schema / PatchValidator / PatchEngine / Session 统计与摘要全链路同步到新动作协议。
+- 旧动作类型在执行与校验阶段均强制报错并给出迁移提示，不再兼容旧脚本。

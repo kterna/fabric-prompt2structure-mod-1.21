@@ -114,6 +114,8 @@ public final class StructurePatchEngine {
         if (a == null || b == null) return false;
         if (!Objects.equals(normalize(a.type), normalize(b.type))) return false;
         if (!Objects.equals(normalize(a.block), normalize(b.block))) return false;
+        if (!Objects.equals(normalize(a.mode), normalize(b.mode))) return false;
+        if (!Objects.equals(normalize(a.axis), normalize(b.axis))) return false;
         if (!Objects.equals(normalize(a.facing), normalize(b.facing))) return false;
         if (!Objects.equals(a.from, b.from)) return false;
         if (!Objects.equals(a.to, b.to)) return false;
@@ -177,6 +179,12 @@ public final class StructurePatchEngine {
         if (a == null) return "null";
         StringBuilder sb = new StringBuilder();
         sb.append(a.type == null ? "?" : a.type);
+        if (a.mode != null && !a.mode.isBlank()) {
+            sb.append(" mode=").append(a.mode);
+        }
+        if (a.axis != null && !a.axis.isBlank()) {
+            sb.append(" axis=").append(a.axis);
+        }
         sb.append(" ").append(a.block == null ? "?" : a.block);
         if (a.from != null) sb.append(" ").append(a.from);
         if (a.to != null) sb.append("->").append(a.to);
@@ -654,6 +662,8 @@ public final class StructurePatchEngine {
         } else {
             copy.at = null;
         }
+        copy.mode = action.mode;
+        copy.axis = action.axis;
         copy.facing = action.facing;
         return copy;
     }
@@ -704,11 +714,14 @@ public final class StructurePatchEngine {
                 BlockState state = resolveActionState(palette, missingPaletteKeys, action);
                 String type = action.type.trim().toLowerCase();
                 switch (type) {
-                    case "fill" -> writeFill(map, action, state);
-                    case "frame" -> writeFrame(map, action, state);
-                    case "set" -> writeSet(map, action, state);
-                    default -> {
-                    }
+                    case "box" -> writeBox(map, action, state);
+                    case "plane" -> writePlane(map, action, state);
+                    case "line" -> writeLine(map, action, state);
+                    case "points" -> writePoints(map, action, state);
+                    case "fill", "frame", "set" -> throw new IllegalArgumentException(
+                            "Legacy action type '" + type + "' is no longer supported. Use box/plane/line/points."
+                    );
+                    default -> throw new IllegalArgumentException("Unsupported action type: " + action.type);
                 }
             }
         }
@@ -762,63 +775,115 @@ public final class StructurePatchEngine {
                 }
                 String type = action.type.trim().toLowerCase();
                 switch (type) {
-                    case "fill" -> analyzeFill(written, stats, part, action);
-                    case "frame" -> analyzeFrame(written, stats, part, action);
-                    case "set" -> analyzeSet(written, stats, part, action);
-                    default -> {
-                    }
+                    case "box" -> analyzeBox(written, stats, part, action);
+                    case "plane" -> analyzePlane(written, stats, part, action);
+                    case "line" -> analyzeLine(written, stats, part, action);
+                    case "points" -> analyzePoints(written, stats, part, action);
+                    case "fill", "frame", "set" -> throw new IllegalArgumentException(
+                            "Legacy action type '" + type + "' is no longer supported. Use box/plane/line/points."
+                    );
+                    default -> throw new IllegalArgumentException("Unsupported action type: " + action.type);
                 }
             }
         }
         return stats;
     }
 
-    private static void writeFill(Map<Int3, BlockState> map, StructureBuilder.VbsAction action, BlockState state) {
+    private static void writeBox(Map<Int3, BlockState> map, StructureBuilder.VbsAction action, BlockState state) {
         int[] from = coords(action.from);
         int[] to = coords(action.to);
         if (from == null || to == null) {
             return;
         }
-        int minX = Math.min(from[0], to[0]);
-        int minY = Math.min(from[1], to[1]);
-        int minZ = Math.min(from[2], to[2]);
-        int maxX = Math.max(from[0], to[0]);
-        int maxY = Math.max(from[1], to[1]);
-        int maxZ = Math.max(from[2], to[2]);
+        int[] bounds = bounds(from, to);
+        int minX = bounds[0];
+        int minY = bounds[1];
+        int minZ = bounds[2];
+        int maxX = bounds[3];
+        int maxY = bounds[4];
+        int maxZ = bounds[5];
+        String mode = normalize(action.mode);
+        if (mode.isBlank()) {
+            mode = "solid";
+        }
+
         for (int x = minX; x <= maxX; x++) {
             for (int y = minY; y <= maxY; y++) {
                 for (int z = minZ; z <= maxZ; z++) {
+                    boolean place = switch (mode) {
+                        case "solid" -> true;
+                        case "shell" -> x == minX || x == maxX || y == minY || y == maxY || z == minZ || z == maxZ;
+                        case "walls" -> x == minX || x == maxX || z == minZ || z == maxZ;
+                        default -> false;
+                    };
+                    if (!place) {
+                        continue;
+                    }
                     map.put(new Int3(x, y, z), state);
                 }
             }
         }
     }
 
-    private static void writeFrame(Map<Int3, BlockState> map, StructureBuilder.VbsAction action, BlockState state) {
+    private static void writePlane(Map<Int3, BlockState> map, StructureBuilder.VbsAction action, BlockState state) {
         int[] from = coords(action.from);
         int[] to = coords(action.to);
         if (from == null || to == null) {
             return;
         }
-        int minX = Math.min(from[0], to[0]);
-        int minY = Math.min(from[1], to[1]);
-        int minZ = Math.min(from[2], to[2]);
-        int maxX = Math.max(from[0], to[0]);
-        int maxY = Math.max(from[1], to[1]);
-        int maxZ = Math.max(from[2], to[2]);
+        int axisIdx = axisIndex(action.axis);
+        if (axisIdx < 0 || from[axisIdx] != to[axisIdx]) {
+            return;
+        }
+        int[] bounds = bounds(from, to);
+        int minX = bounds[0];
+        int minY = bounds[1];
+        int minZ = bounds[2];
+        int maxX = bounds[3];
+        int maxY = bounds[4];
+        int maxZ = bounds[5];
+        String mode = normalize(action.mode);
+        if (mode.isBlank()) {
+            mode = "solid";
+        }
+
         for (int x = minX; x <= maxX; x++) {
             for (int y = minY; y <= maxY; y++) {
                 for (int z = minZ; z <= maxZ; z++) {
-                    boolean boundary = x == minX || x == maxX || y == minY || y == maxY || z == minZ || z == maxZ;
-                    if (boundary) {
-                        map.put(new Int3(x, y, z), state);
+                    if (!isOnAxisPlane(axisIdx, from, x, y, z)) {
+                        continue;
                     }
+                    if ("outline".equals(mode)) {
+                        boolean boundary;
+                        if (axisIdx == 0) {
+                            boundary = y == minY || y == maxY || z == minZ || z == maxZ;
+                        } else if (axisIdx == 1) {
+                            boundary = x == minX || x == maxX || z == minZ || z == maxZ;
+                        } else {
+                            boundary = x == minX || x == maxX || y == minY || y == maxY;
+                        }
+                        if (!boundary) {
+                            continue;
+                        }
+                    } else if (!"solid".equals(mode)) {
+                        continue;
+                    }
+                    map.put(new Int3(x, y, z), state);
                 }
             }
         }
     }
 
-    private static void writeSet(Map<Int3, BlockState> map, StructureBuilder.VbsAction action, BlockState state) {
+    private static void writeLine(Map<Int3, BlockState> map, StructureBuilder.VbsAction action, BlockState state) {
+        int[] from = coords(action.from);
+        int[] to = coords(action.to);
+        if (from == null || to == null) {
+            return;
+        }
+        drawLine(from[0], from[1], from[2], to[0], to[1], to[2], (x, y, z) -> map.put(new Int3(x, y, z), state));
+    }
+
+    private static void writePoints(Map<Int3, BlockState> map, StructureBuilder.VbsAction action, BlockState state) {
         if (action.at == null) {
             return;
         }
@@ -831,44 +896,35 @@ public final class StructurePatchEngine {
         }
     }
 
-    private static void analyzeFill(Map<Int3, BlockSource> written, OverrideStats stats, StructureBuilder.StructurePart part, StructureBuilder.VbsAction action) {
+    private static void analyzeBox(Map<Int3, BlockSource> written, OverrideStats stats, StructureBuilder.StructurePart part,
+                                   StructureBuilder.VbsAction action) {
         int[] from = coords(action.from);
         int[] to = coords(action.to);
         if (from == null || to == null) {
             return;
         }
-        int minX = Math.min(from[0], to[0]);
-        int minY = Math.min(from[1], to[1]);
-        int minZ = Math.min(from[2], to[2]);
-        int maxX = Math.max(from[0], to[0]);
-        int maxY = Math.max(from[1], to[1]);
-        int maxZ = Math.max(from[2], to[2]);
-        for (int x = minX; x <= maxX; x++) {
-            for (int y = minY; y <= maxY; y++) {
-                for (int z = minZ; z <= maxZ; z++) {
-                    recordWrite(written, stats, part, x, y, z);
-                }
-            }
+        int[] bounds = bounds(from, to);
+        int minX = bounds[0];
+        int minY = bounds[1];
+        int minZ = bounds[2];
+        int maxX = bounds[3];
+        int maxY = bounds[4];
+        int maxZ = bounds[5];
+        String mode = normalize(action.mode);
+        if (mode.isBlank()) {
+            mode = "solid";
         }
-    }
 
-    private static void analyzeFrame(Map<Int3, BlockSource> written, OverrideStats stats, StructureBuilder.StructurePart part, StructureBuilder.VbsAction action) {
-        int[] from = coords(action.from);
-        int[] to = coords(action.to);
-        if (from == null || to == null) {
-            return;
-        }
-        int minX = Math.min(from[0], to[0]);
-        int minY = Math.min(from[1], to[1]);
-        int minZ = Math.min(from[2], to[2]);
-        int maxX = Math.max(from[0], to[0]);
-        int maxY = Math.max(from[1], to[1]);
-        int maxZ = Math.max(from[2], to[2]);
         for (int x = minX; x <= maxX; x++) {
             for (int y = minY; y <= maxY; y++) {
                 for (int z = minZ; z <= maxZ; z++) {
-                    boolean boundary = x == minX || x == maxX || y == minY || y == maxY || z == minZ || z == maxZ;
-                    if (!boundary) {
+                    boolean place = switch (mode) {
+                        case "solid" -> true;
+                        case "shell" -> x == minX || x == maxX || y == minY || y == maxY || z == minZ || z == maxZ;
+                        case "walls" -> x == minX || x == maxX || z == minZ || z == maxZ;
+                        default -> false;
+                    };
+                    if (!place) {
                         continue;
                     }
                     recordWrite(written, stats, part, x, y, z);
@@ -877,7 +933,68 @@ public final class StructurePatchEngine {
         }
     }
 
-    private static void analyzeSet(Map<Int3, BlockSource> written, OverrideStats stats, StructureBuilder.StructurePart part, StructureBuilder.VbsAction action) {
+    private static void analyzePlane(Map<Int3, BlockSource> written, OverrideStats stats, StructureBuilder.StructurePart part,
+                                     StructureBuilder.VbsAction action) {
+        int[] from = coords(action.from);
+        int[] to = coords(action.to);
+        if (from == null || to == null) {
+            return;
+        }
+        int axisIdx = axisIndex(action.axis);
+        if (axisIdx < 0 || from[axisIdx] != to[axisIdx]) {
+            return;
+        }
+        int[] bounds = bounds(from, to);
+        int minX = bounds[0];
+        int minY = bounds[1];
+        int minZ = bounds[2];
+        int maxX = bounds[3];
+        int maxY = bounds[4];
+        int maxZ = bounds[5];
+        String mode = normalize(action.mode);
+        if (mode.isBlank()) {
+            mode = "solid";
+        }
+
+        for (int x = minX; x <= maxX; x++) {
+            for (int y = minY; y <= maxY; y++) {
+                for (int z = minZ; z <= maxZ; z++) {
+                    if (!isOnAxisPlane(axisIdx, from, x, y, z)) {
+                        continue;
+                    }
+                    if ("outline".equals(mode)) {
+                        boolean boundary;
+                        if (axisIdx == 0) {
+                            boundary = y == minY || y == maxY || z == minZ || z == maxZ;
+                        } else if (axisIdx == 1) {
+                            boundary = x == minX || x == maxX || z == minZ || z == maxZ;
+                        } else {
+                            boundary = x == minX || x == maxX || y == minY || y == maxY;
+                        }
+                        if (!boundary) {
+                            continue;
+                        }
+                    } else if (!"solid".equals(mode)) {
+                        continue;
+                    }
+                    recordWrite(written, stats, part, x, y, z);
+                }
+            }
+        }
+    }
+
+    private static void analyzeLine(Map<Int3, BlockSource> written, OverrideStats stats, StructureBuilder.StructurePart part,
+                                    StructureBuilder.VbsAction action) {
+        int[] from = coords(action.from);
+        int[] to = coords(action.to);
+        if (from == null || to == null) {
+            return;
+        }
+        drawLine(from[0], from[1], from[2], to[0], to[1], to[2], (x, y, z) -> recordWrite(written, stats, part, x, y, z));
+    }
+
+    private static void analyzePoints(Map<Int3, BlockSource> written, OverrideStats stats, StructureBuilder.StructurePart part,
+                                      StructureBuilder.VbsAction action) {
         if (action.at == null) {
             return;
         }
@@ -915,6 +1032,104 @@ public final class StructurePatchEngine {
         }
         if (!prev.partName.isBlank()) {
             stats.overriddenCounts.merge(prev.partName, 1, Integer::sum);
+        }
+    }
+
+    private static int[] bounds(int[] from, int[] to) {
+        return new int[]{
+                Math.min(from[0], to[0]),
+                Math.min(from[1], to[1]),
+                Math.min(from[2], to[2]),
+                Math.max(from[0], to[0]),
+                Math.max(from[1], to[1]),
+                Math.max(from[2], to[2])
+        };
+    }
+
+    private static int axisIndex(String axis) {
+        return switch (normalize(axis)) {
+            case "x" -> 0;
+            case "y" -> 1;
+            case "z" -> 2;
+            default -> -1;
+        };
+    }
+
+    private static boolean isOnAxisPlane(int axisIdx, int[] from, int x, int y, int z) {
+        return switch (axisIdx) {
+            case 0 -> x == from[0];
+            case 1 -> y == from[1];
+            case 2 -> z == from[2];
+            default -> false;
+        };
+    }
+
+    private interface PointVisitor {
+        void visit(int x, int y, int z);
+    }
+
+    private static void drawLine(int x1, int y1, int z1, int x2, int y2, int z2, PointVisitor visitor) {
+        int dx = Math.abs(x2 - x1);
+        int dy = Math.abs(y2 - y1);
+        int dz = Math.abs(z2 - z1);
+        int xs = x2 >= x1 ? 1 : -1;
+        int ys = y2 >= y1 ? 1 : -1;
+        int zs = z2 >= z1 ? 1 : -1;
+
+        visitor.visit(x1, y1, z1);
+        if (dx >= dy && dx >= dz) {
+            int p1 = 2 * dy - dx;
+            int p2 = 2 * dz - dx;
+            while (x1 != x2) {
+                x1 += xs;
+                if (p1 >= 0) {
+                    y1 += ys;
+                    p1 -= 2 * dx;
+                }
+                if (p2 >= 0) {
+                    z1 += zs;
+                    p2 -= 2 * dx;
+                }
+                p1 += 2 * dy;
+                p2 += 2 * dz;
+                visitor.visit(x1, y1, z1);
+            }
+            return;
+        }
+        if (dy >= dx && dy >= dz) {
+            int p1 = 2 * dx - dy;
+            int p2 = 2 * dz - dy;
+            while (y1 != y2) {
+                y1 += ys;
+                if (p1 >= 0) {
+                    x1 += xs;
+                    p1 -= 2 * dy;
+                }
+                if (p2 >= 0) {
+                    z1 += zs;
+                    p2 -= 2 * dy;
+                }
+                p1 += 2 * dx;
+                p2 += 2 * dz;
+                visitor.visit(x1, y1, z1);
+            }
+            return;
+        }
+        int p1 = 2 * dy - dz;
+        int p2 = 2 * dx - dz;
+        while (z1 != z2) {
+            z1 += zs;
+            if (p1 >= 0) {
+                y1 += ys;
+                p1 -= 2 * dz;
+            }
+            if (p2 >= 0) {
+                x1 += xs;
+                p2 -= 2 * dz;
+            }
+            p1 += 2 * dy;
+            p2 += 2 * dx;
+            visitor.visit(x1, y1, z1);
         }
     }
 

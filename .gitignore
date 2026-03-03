@@ -18,6 +18,7 @@ classes/
 
 # vscode
 
+temp/
 .cursor/
 .claude/
 .settings/

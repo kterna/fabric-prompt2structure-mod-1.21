@@ -20,9 +20,33 @@ public final class PatchValidator {
     );
 
     private static final Set<String> SUPPORTED_ACTION_TYPES = Set.of(
+            "box",
+            "plane",
+            "line",
+            "points"
+    );
+
+    private static final Set<String> LEGACY_ACTION_TYPES = Set.of(
             "fill",
             "frame",
             "set"
+    );
+
+    private static final Set<String> SUPPORTED_BOX_MODES = Set.of(
+            "solid",
+            "shell",
+            "walls"
+    );
+
+    private static final Set<String> SUPPORTED_PLANE_MODES = Set.of(
+            "solid",
+            "outline"
+    );
+
+    private static final Set<String> SUPPORTED_AXES = Set.of(
+            "x",
+            "y",
+            "z"
     );
 
     private static final Set<String> SUPPORTED_FACING = Set.of(
@@ -294,6 +318,10 @@ public final class PatchValidator {
         }
 
         String type = normalize(action.type);
+        if (LEGACY_ACTION_TYPES.contains(type)) {
+            result.addError(path + " legacy action type '" + action.type + "' is removed; use box/plane/line/points");
+            return;
+        }
         if (!SUPPORTED_ACTION_TYPES.contains(type)) {
             result.addError(path + " unsupported action type '" + action.type + "'");
             return;
@@ -306,7 +334,47 @@ public final class PatchValidator {
         }
 
         switch (type) {
-            case "fill", "frame" -> {
+            case "box" -> {
+                if (!isVec3(action.from)) {
+                    result.addError(path + " requires from=[x,y,z]");
+                }
+                if (!isVec3(action.to)) {
+                    result.addError(path + " requires to=[x,y,z]");
+                }
+                String mode = normalize(action.mode);
+                if (mode.isBlank()) {
+                    result.addError(path + " box requires mode=solid|shell|walls");
+                } else if (!SUPPORTED_BOX_MODES.contains(mode)) {
+                    result.addError(path + " invalid box mode '" + action.mode + "'");
+                }
+            }
+            case "plane" -> {
+                if (!isVec3(action.from)) {
+                    result.addError(path + " requires from=[x,y,z]");
+                }
+                if (!isVec3(action.to)) {
+                    result.addError(path + " requires to=[x,y,z]");
+                }
+                String axis = normalize(action.axis);
+                if (axis.isBlank()) {
+                    result.addError(path + " plane requires axis=x|y|z");
+                } else if (!SUPPORTED_AXES.contains(axis)) {
+                    result.addError(path + " invalid axis '" + action.axis + "'");
+                }
+                String mode = normalize(action.mode);
+                if (mode.isBlank()) {
+                    result.addError(path + " plane requires mode=solid|outline");
+                } else if (!SUPPORTED_PLANE_MODES.contains(mode)) {
+                    result.addError(path + " invalid plane mode '" + action.mode + "'");
+                }
+                if (isVec3(action.from) && isVec3(action.to) && SUPPORTED_AXES.contains(axis)) {
+                    int idx = axisIndex(axis);
+                    if (idx >= 0 && !action.from.get(idx).equals(action.to.get(idx))) {
+                        result.addError(path + " plane requires from/to with same coordinate on axis '" + axis + "'");
+                    }
+                }
+            }
+            case "line" -> {
                 if (!isVec3(action.from)) {
                     result.addError(path + " requires from=[x,y,z]");
                 }
@@ -314,9 +382,9 @@ public final class PatchValidator {
                     result.addError(path + " requires to=[x,y,z]");
                 }
             }
-            case "set" -> {
+            case "points" -> {
                 if (action.at == null || action.at.isEmpty()) {
-                    result.addError(path + " set requires non-empty at");
+                    result.addError(path + " points requires non-empty at");
                 } else {
                     for (int i = 0; i < action.at.size(); i++) {
                         if (!isVec3(action.at.get(i))) {
@@ -391,13 +459,22 @@ public final class PatchValidator {
                 if (action.at != null) {
                     for (List<Integer> point : action.at) {
                         if (!checkVec(point, maxX, maxY, maxZ)) {
-                            result.addError("Out-of-bounds 'set' point in part '" + part.name + "'");
+                            result.addError("Out-of-bounds 'points' point in part '" + part.name + "'");
                             break;
                         }
                     }
                 }
             }
         }
+    }
+
+    private static int axisIndex(String axis) {
+        return switch (normalize(axis)) {
+            case "x" -> 0;
+            case "y" -> 1;
+            case "z" -> 2;
+            default -> -1;
+        };
     }
 
     private static boolean checkVec(List<Integer> vec, int maxX, int maxY, int maxZ) {

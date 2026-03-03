@@ -460,9 +460,10 @@ public final class LLMService {
         JsonObject type = new JsonObject();
         type.addProperty("type", "string");
         JsonArray typeEnum = new JsonArray();
-        typeEnum.add("fill");
-        typeEnum.add("frame");
-        typeEnum.add("set");
+        typeEnum.add("box");
+        typeEnum.add("plane");
+        typeEnum.add("line");
+        typeEnum.add("points");
         type.add("enum", typeEnum);
         actionProps.add("type", type);
 
@@ -500,6 +501,25 @@ public final class LLMService {
         at.add("items", atItems);
         actionProps.add("at", at);
 
+        JsonObject mode = new JsonObject();
+        mode.addProperty("type", "string");
+        JsonArray modeEnum = new JsonArray();
+        modeEnum.add("solid");
+        modeEnum.add("shell");
+        modeEnum.add("walls");
+        modeEnum.add("outline");
+        mode.add("enum", modeEnum);
+        actionProps.add("mode", mode);
+
+        JsonObject axis = new JsonObject();
+        axis.addProperty("type", "string");
+        JsonArray axisEnum = new JsonArray();
+        axisEnum.add("x");
+        axisEnum.add("y");
+        axisEnum.add("z");
+        axis.add("enum", axisEnum);
+        actionProps.add("axis", axis);
+
         JsonObject facing = new JsonObject();
         facing.addProperty("type", "string");
         JsonArray facingEnum = new JsonArray();
@@ -517,6 +537,7 @@ public final class LLMService {
         actionRequired.add("type");
         actionRequired.add("block");
         actionsItems.add("required", actionRequired);
+        actionsItems.addProperty("additionalProperties", false);
         actions.add("items", actionsItems);
         structuresProps.add("actions", actions);
 
@@ -1254,9 +1275,10 @@ public final class LLMService {
         JsonObject type = new JsonObject();
         type.addProperty("type", "string");
         JsonArray typeEnum = new JsonArray();
-        typeEnum.add("fill");
-        typeEnum.add("frame");
-        typeEnum.add("set");
+        typeEnum.add("box");
+        typeEnum.add("plane");
+        typeEnum.add("line");
+        typeEnum.add("points");
         type.add("enum", typeEnum);
         props.add("type", type);
 
@@ -1290,6 +1312,25 @@ public final class LLMService {
         at.add("items", vec3);
         props.add("at", at);
 
+        JsonObject mode = new JsonObject();
+        mode.addProperty("type", "string");
+        JsonArray modeEnum = new JsonArray();
+        modeEnum.add("solid");
+        modeEnum.add("shell");
+        modeEnum.add("walls");
+        modeEnum.add("outline");
+        mode.add("enum", modeEnum);
+        props.add("mode", mode);
+
+        JsonObject axis = new JsonObject();
+        axis.addProperty("type", "string");
+        JsonArray axisEnum = new JsonArray();
+        axisEnum.add("x");
+        axisEnum.add("y");
+        axisEnum.add("z");
+        axis.add("enum", axisEnum);
+        props.add("axis", axis);
+
         JsonObject facing = new JsonObject();
         facing.addProperty("type", "string");
         JsonArray facingEnum = new JsonArray();
@@ -1307,6 +1348,7 @@ public final class LLMService {
         required.add("type");
         required.add("block");
         schema.add("required", required);
+        schema.addProperty("additionalProperties", false);
         return schema;
     }
 

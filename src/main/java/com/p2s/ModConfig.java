@@ -35,18 +35,19 @@ public final class ModConfig {
             {
               "palette": {"KEY": "minecraft:block_id"},
               "structure": [
-                {"actions": [{"type": "fill", "block": "KEY", "from": [x,y,z], "to": [x,y,z]}]}
+                {"actions": [{"type": "box", "block": "KEY", "mode": "solid", "from": [x,y,z], "to": [x,y,z]}]}
               ]
             }
             Actions:
-            1. "fill": Fill a solid cuboid.
-            2. "frame": Create hollow walls/box (faces only) for the cuboid region.
-            3. "set": Place blocks at specific list of coordinates "at": [[x,y,z],...].
+            1. "box": Cuboid primitives with mode=solid|shell|walls.
+            2. "plane": Flat primitives with axis=x|y|z and mode=solid|outline.
+            3. "line": Draw a 3D line from "from" to "to".
+            4. "points": Place blocks at explicit coordinates "at": [[x,y,z],...].
             Optional per-action field: "facing": "north|south|east|west|up|down" to set block facing when supported.
             Rules:
             - Coordinates are relative to 0,0,0.
             - Use standard Minecraft Java Edition block IDs (e.g., minecraft:oak_log).
-            - Optimize: Use "fill" and "frame" for large areas to save tokens.
+            - Optimize: Use "box" and "plane" for large areas to save tokens.
             """;
 
     public static final String DEFAULT_SYSTEM_PROMPT = """
@@ -62,7 +63,7 @@ public final class ModConfig {
             - base_revision: revision string from read_workspace_state
             - operations: ordered patch operations
             - op values: upsert_part | delete_part | patch_actions | set_palette
-            - actions support fill/frame/set with optional facing
+            - actions support box/plane/line/points with optional facing
 
             ## Tool: read_workspace_state
             - Read current structure, origin/size limits, and revision before editing.

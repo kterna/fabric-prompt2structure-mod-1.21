@@ -1387,13 +1387,13 @@ public final class SessionManager {
             sb.append(" block=").append(block);
         }
         switch (type) {
-            case "fill", "frame" -> {
+            case "box", "plane", "line" -> {
                 String range = formatRange(action.from, action.to);
                 if (!range.isBlank()) {
                     sb.append(" ").append(range);
                 }
             }
-            case "set" -> {
+            case "points" -> {
                 String at = formatAt(action.at);
                 if (!at.isBlank()) {
                     sb.append(" ").append(at);
@@ -1401,6 +1401,12 @@ public final class SessionManager {
             }
             default -> {
             }
+        }
+        if (action.mode != null && !action.mode.isBlank()) {
+            sb.append(" mode=").append(action.mode.trim().toLowerCase());
+        }
+        if (action.axis != null && !action.axis.isBlank()) {
+            sb.append(" axis=").append(action.axis.trim().toLowerCase());
         }
         if (action.facing != null && !action.facing.isBlank()) {
             sb.append(" facing=").append(action.facing.trim().toLowerCase());
@@ -1587,9 +1593,10 @@ public final class SessionManager {
                     continue;
                 }
                 switch (action.type.toLowerCase()) {
-                    case "fill" -> total += countFill(action);
-                    case "frame" -> total += countFrame(action);
-                    case "set" -> total += action.at == null ? 0 : action.at.size();
+                    case "box" -> total += countBox(action);
+                    case "plane" -> total += countPlane(action);
+                    case "line" -> total += countLine(action);
+                    case "points" -> total += action.at == null ? 0 : action.at.size();
                     default -> {
                     }
                 }
@@ -1598,28 +1605,83 @@ public final class SessionManager {
         return total;
     }
 
-    private static int countFill(StructureBuilder.VbsAction action) {
+    private static int countBox(StructureBuilder.VbsAction action) {
         if (action.from == null || action.to == null || action.from.size() < 3 || action.to.size() < 3) {
             return 0;
         }
         int dx = Math.abs(action.from.get(0) - action.to.get(0)) + 1;
         int dy = Math.abs(action.from.get(1) - action.to.get(1)) + 1;
         int dz = Math.abs(action.from.get(2) - action.to.get(2)) + 1;
-        return dx * dy * dz;
-    }
-
-    private static int countFrame(StructureBuilder.VbsAction action) {
-        if (action.from == null || action.to == null || action.from.size() < 3 || action.to.size() < 3) {
-            return 0;
-        }
-        int dx = Math.abs(action.from.get(0) - action.to.get(0)) + 1;
-        int dy = Math.abs(action.from.get(1) - action.to.get(1)) + 1;
-        int dz = Math.abs(action.from.get(2) - action.to.get(2)) + 1;
-        if (dx <= 2 || dy <= 2 || dz <= 2) {
+        String mode = normalizeActionValue(action.mode);
+        if (mode.isBlank() || "solid".equals(mode)) {
             return dx * dy * dz;
         }
-        int surface = 2 * (dx * dy + dx * dz + dy * dz) - 4 * (dx + dy + dz) + 8;
-        return Math.max(surface, 0);
+        if ("shell".equals(mode)) {
+            if (dx <= 2 || dy <= 2 || dz <= 2) {
+                return dx * dy * dz;
+            }
+            int surface = 2 * (dx * dy + dx * dz + dy * dz) - 4 * (dx + dy + dz) + 8;
+            return Math.max(surface, 0);
+        }
+        if ("walls".equals(mode)) {
+            int perimeterXZ;
+            if (dx == 1 || dz == 1) {
+                perimeterXZ = dx * dz;
+            } else {
+                perimeterXZ = 2 * dx + 2 * dz - 4;
+            }
+            return perimeterXZ * dy;
+        }
+        return 0;
+    }
+
+    private static int countPlane(StructureBuilder.VbsAction action) {
+        if (action.from == null || action.to == null || action.from.size() < 3 || action.to.size() < 3) {
+            return 0;
+        }
+        String axis = normalizeActionValue(action.axis);
+        int a;
+        int b;
+        if ("x".equals(axis)) {
+            a = Math.abs(action.from.get(1) - action.to.get(1)) + 1;
+            b = Math.abs(action.from.get(2) - action.to.get(2)) + 1;
+        } else if ("y".equals(axis)) {
+            a = Math.abs(action.from.get(0) - action.to.get(0)) + 1;
+            b = Math.abs(action.from.get(2) - action.to.get(2)) + 1;
+        } else if ("z".equals(axis)) {
+            a = Math.abs(action.from.get(0) - action.to.get(0)) + 1;
+            b = Math.abs(action.from.get(1) - action.to.get(1)) + 1;
+        } else {
+            return 0;
+        }
+        String mode = normalizeActionValue(action.mode);
+        if (mode.isBlank() || "solid".equals(mode)) {
+            return a * b;
+        }
+        if ("outline".equals(mode)) {
+            if (a == 1 || b == 1) {
+                return a * b;
+            }
+            return 2 * a + 2 * b - 4;
+        }
+        return 0;
+    }
+
+    private static int countLine(StructureBuilder.VbsAction action) {
+        if (action.from == null || action.to == null || action.from.size() < 3 || action.to.size() < 3) {
+            return 0;
+        }
+        int dx = Math.abs(action.from.get(0) - action.to.get(0));
+        int dy = Math.abs(action.from.get(1) - action.to.get(1));
+        int dz = Math.abs(action.from.get(2) - action.to.get(2));
+        return Math.max(dx, Math.max(dy, dz)) + 1;
+    }
+
+    private static String normalizeActionValue(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.trim().toLowerCase();
     }
 
     private static void sendSessionSync(ServerPlayer player, Session session) {

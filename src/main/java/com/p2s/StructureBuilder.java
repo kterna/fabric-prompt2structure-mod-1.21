@@ -62,12 +62,7 @@ public final class StructureBuilder {
                 if (action == null || action.type == null) {
                     continue;
                 }
-                switch (action.type.toLowerCase()) {
-                    case "fill" -> handleFill(world, origin, palette, missingPaletteKeys, mutable, action);
-                    case "frame" -> handleFrame(world, origin, palette, missingPaletteKeys, mutable, action);
-                    case "set" -> handleSet(world, origin, palette, missingPaletteKeys, mutable, action);
-                    default -> P2SMod.LOGGER.warn("未知动作类型: {}", action.type);
-                }
+                executeAction(world, origin, palette, missingPaletteKeys, mutable, action);
             }
         }
     }
@@ -93,12 +88,7 @@ public final class StructureBuilder {
                 if (action == null || action.type == null) {
                     continue;
                 }
-                switch (action.type.toLowerCase()) {
-                    case "fill" -> handleFill(world, origin, palette, missingPaletteKeys, mutable, action);
-                    case "frame" -> handleFrame(world, origin, palette, missingPaletteKeys, mutable, action);
-                    case "set" -> handleSet(world, origin, palette, missingPaletteKeys, mutable, action);
-                    default -> P2SMod.LOGGER.warn("未知动作类型: {}", action.type);
-                }
+                executeAction(world, origin, palette, missingPaletteKeys, mutable, action);
             }
         }
     }
@@ -262,72 +252,261 @@ public final class StructureBuilder {
         return palette;
     }
 
-    private static void handleFill(ServerLevel world, BlockPos origin, Map<String, BlockState> palette, Set<String> missingPaletteKeys, BlockPos.MutableBlockPos mutable, VbsAction action) {
-        int[] from = coords(action.from);
-        int[] to = coords(action.to);
-        if (from == null || to == null) {
-            return;
-        }
+    private static void executeAction(ServerLevel world, BlockPos origin, Map<String, BlockState> palette,
+                                      Set<String> missingPaletteKeys, BlockPos.MutableBlockPos mutable, VbsAction action) {
+        String type = normalize(action.type);
         BlockState state = getState(palette, missingPaletteKeys, action.block, action.facing);
-
-        int minX = Math.min(from[0], to[0]);
-        int minY = Math.min(from[1], to[1]);
-        int minZ = Math.min(from[2], to[2]);
-        int maxX = Math.max(from[0], to[0]);
-        int maxY = Math.max(from[1], to[1]);
-        int maxZ = Math.max(from[2], to[2]);
-
-        for (int x = minX; x <= maxX; x++) {
-            for (int y = minY; y <= maxY; y++) {
-                for (int z = minZ; z <= maxZ; z++) {
-                    mutable.set(origin.getX() + x, origin.getY() + y, origin.getZ() + z);
-                    world.setBlockAndUpdate(mutable, state);
-                }
-            }
+        switch (type) {
+            case "box" -> handleBox(world, origin, mutable, state, action);
+            case "plane" -> handlePlane(world, origin, mutable, state, action);
+            case "line" -> handleLine(world, origin, mutable, state, action);
+            case "points" -> handlePoints(world, origin, mutable, state, action);
+            case "fill", "frame", "set" -> throw new IllegalArgumentException(
+                    "Legacy action type '" + type + "' is no longer supported. Use box/plane/line/points."
+            );
+            default -> throw new IllegalArgumentException("Unsupported action type: " + action.type);
         }
     }
 
-    private static void handleFrame(ServerLevel world, BlockPos origin, Map<String, BlockState> palette, Set<String> missingPaletteKeys, BlockPos.MutableBlockPos mutable, VbsAction action) {
+    private static void handleBox(ServerLevel world, BlockPos origin, BlockPos.MutableBlockPos mutable,
+                                  BlockState state, VbsAction action) {
         int[] from = coords(action.from);
         int[] to = coords(action.to);
         if (from == null || to == null) {
-            return;
+            throw new IllegalArgumentException("box action requires from/to");
         }
-        BlockState state = getState(palette, missingPaletteKeys, action.block, action.facing);
+        int[] bounds = bounds(from, to);
+        int minX = bounds[0];
+        int minY = bounds[1];
+        int minZ = bounds[2];
+        int maxX = bounds[3];
+        int maxY = bounds[4];
+        int maxZ = bounds[5];
 
-        int minX = Math.min(from[0], to[0]);
-        int minY = Math.min(from[1], to[1]);
-        int minZ = Math.min(from[2], to[2]);
-        int maxX = Math.max(from[0], to[0]);
-        int maxY = Math.max(from[1], to[1]);
-        int maxZ = Math.max(from[2], to[2]);
+        String mode = normalize(action.mode);
+        if (mode.isBlank()) {
+            mode = "solid";
+        }
+        switch (mode) {
+            case "solid" -> {
+                for (int x = minX; x <= maxX; x++) {
+                    for (int y = minY; y <= maxY; y++) {
+                        for (int z = minZ; z <= maxZ; z++) {
+                            place(world, origin, mutable, state, x, y, z);
+                        }
+                    }
+                }
+            }
+            case "shell" -> {
+                for (int x = minX; x <= maxX; x++) {
+                    for (int y = minY; y <= maxY; y++) {
+                        for (int z = minZ; z <= maxZ; z++) {
+                            boolean boundary = x == minX || x == maxX || y == minY || y == maxY || z == minZ || z == maxZ;
+                            if (!boundary) {
+                                continue;
+                            }
+                            place(world, origin, mutable, state, x, y, z);
+                        }
+                    }
+                }
+            }
+            case "walls" -> {
+                for (int x = minX; x <= maxX; x++) {
+                    for (int y = minY; y <= maxY; y++) {
+                        for (int z = minZ; z <= maxZ; z++) {
+                            boolean boundary = x == minX || x == maxX || z == minZ || z == maxZ;
+                            if (!boundary) {
+                                continue;
+                            }
+                            place(world, origin, mutable, state, x, y, z);
+                        }
+                    }
+                }
+            }
+            default -> throw new IllegalArgumentException("Unsupported box mode: " + action.mode);
+        }
+    }
+
+    private static void handlePlane(ServerLevel world, BlockPos origin, BlockPos.MutableBlockPos mutable,
+                                    BlockState state, VbsAction action) {
+        int[] from = coords(action.from);
+        int[] to = coords(action.to);
+        if (from == null || to == null) {
+            throw new IllegalArgumentException("plane action requires from/to");
+        }
+        int axisIdx = axisIndex(action.axis);
+        if (axisIdx < 0) {
+            throw new IllegalArgumentException("plane action requires axis=x|y|z");
+        }
+        if (from[axisIdx] != to[axisIdx]) {
+            throw new IllegalArgumentException("plane action requires from/to with same coordinate on axis=" + normalize(action.axis));
+        }
+        int[] bounds = bounds(from, to);
+        int minX = bounds[0];
+        int minY = bounds[1];
+        int minZ = bounds[2];
+        int maxX = bounds[3];
+        int maxY = bounds[4];
+        int maxZ = bounds[5];
+
+        String mode = normalize(action.mode);
+        if (mode.isBlank()) {
+            mode = "solid";
+        }
 
         for (int x = minX; x <= maxX; x++) {
             for (int y = minY; y <= maxY; y++) {
                 for (int z = minZ; z <= maxZ; z++) {
-                    boolean boundary = x == minX || x == maxX || y == minY || y == maxY || z == minZ || z == maxZ;
-                    if (!boundary) {
+                    if (!isOnAxisPlane(axisIdx, from, x, y, z)) {
                         continue;
                     }
-                    mutable.set(origin.getX() + x, origin.getY() + y, origin.getZ() + z);
-                    world.setBlockAndUpdate(mutable, state);
+                    if ("outline".equals(mode)) {
+                        boolean boundary;
+                        if (axisIdx == 0) {
+                            boundary = y == minY || y == maxY || z == minZ || z == maxZ;
+                        } else if (axisIdx == 1) {
+                            boundary = x == minX || x == maxX || z == minZ || z == maxZ;
+                        } else {
+                            boundary = x == minX || x == maxX || y == minY || y == maxY;
+                        }
+                        if (!boundary) {
+                            continue;
+                        }
+                    } else if (!"solid".equals(mode)) {
+                        throw new IllegalArgumentException("Unsupported plane mode: " + action.mode);
+                    }
+                    place(world, origin, mutable, state, x, y, z);
                 }
             }
         }
     }
 
-    private static void handleSet(ServerLevel world, BlockPos origin, Map<String, BlockState> palette, Set<String> missingPaletteKeys, BlockPos.MutableBlockPos mutable, VbsAction action) {
-        if (action.at == null) {
-            return;
+    private static void handleLine(ServerLevel world, BlockPos origin, BlockPos.MutableBlockPos mutable,
+                                   BlockState state, VbsAction action) {
+        int[] from = coords(action.from);
+        int[] to = coords(action.to);
+        if (from == null || to == null) {
+            throw new IllegalArgumentException("line action requires from/to");
         }
-        BlockState state = getState(palette, missingPaletteKeys, action.block, action.facing);
+        drawLine(from[0], from[1], from[2], to[0], to[1], to[2], (x, y, z) -> place(world, origin, mutable, state, x, y, z));
+    }
+
+    private static void handlePoints(ServerLevel world, BlockPos origin, BlockPos.MutableBlockPos mutable,
+                                     BlockState state, VbsAction action) {
+        if (action.at == null) {
+            throw new IllegalArgumentException("points action requires at");
+        }
         for (List<Integer> point : action.at) {
-            int[] coords = coords(point);
-            if (coords == null) {
+            int[] c = coords(point);
+            if (c == null) {
                 continue;
             }
-            mutable.set(origin.getX() + coords[0], origin.getY() + coords[1], origin.getZ() + coords[2]);
-            world.setBlockAndUpdate(mutable, state);
+            place(world, origin, mutable, state, c[0], c[1], c[2]);
+        }
+    }
+
+    private static boolean isOnAxisPlane(int axisIdx, int[] from, int x, int y, int z) {
+        return switch (axisIdx) {
+            case 0 -> x == from[0];
+            case 1 -> y == from[1];
+            case 2 -> z == from[2];
+            default -> false;
+        };
+    }
+
+    private static int axisIndex(String axis) {
+        String v = normalize(axis);
+        return switch (v) {
+            case "x" -> 0;
+            case "y" -> 1;
+            case "z" -> 2;
+            default -> -1;
+        };
+    }
+
+    private static int[] bounds(int[] from, int[] to) {
+        return new int[]{
+                Math.min(from[0], to[0]),
+                Math.min(from[1], to[1]),
+                Math.min(from[2], to[2]),
+                Math.max(from[0], to[0]),
+                Math.max(from[1], to[1]),
+                Math.max(from[2], to[2])
+        };
+    }
+
+    private static void place(ServerLevel world, BlockPos origin, BlockPos.MutableBlockPos mutable,
+                              BlockState state, int x, int y, int z) {
+        mutable.set(origin.getX() + x, origin.getY() + y, origin.getZ() + z);
+        world.setBlockAndUpdate(mutable, state);
+    }
+
+    private interface PointVisitor {
+        void visit(int x, int y, int z);
+    }
+
+    private static void drawLine(int x1, int y1, int z1, int x2, int y2, int z2, PointVisitor visitor) {
+        int dx = Math.abs(x2 - x1);
+        int dy = Math.abs(y2 - y1);
+        int dz = Math.abs(z2 - z1);
+        int xs = x2 >= x1 ? 1 : -1;
+        int ys = y2 >= y1 ? 1 : -1;
+        int zs = z2 >= z1 ? 1 : -1;
+
+        visitor.visit(x1, y1, z1);
+        if (dx >= dy && dx >= dz) {
+            int p1 = 2 * dy - dx;
+            int p2 = 2 * dz - dx;
+            while (x1 != x2) {
+                x1 += xs;
+                if (p1 >= 0) {
+                    y1 += ys;
+                    p1 -= 2 * dx;
+                }
+                if (p2 >= 0) {
+                    z1 += zs;
+                    p2 -= 2 * dx;
+                }
+                p1 += 2 * dy;
+                p2 += 2 * dz;
+                visitor.visit(x1, y1, z1);
+            }
+            return;
+        }
+        if (dy >= dx && dy >= dz) {
+            int p1 = 2 * dx - dy;
+            int p2 = 2 * dz - dy;
+            while (y1 != y2) {
+                y1 += ys;
+                if (p1 >= 0) {
+                    x1 += xs;
+                    p1 -= 2 * dy;
+                }
+                if (p2 >= 0) {
+                    z1 += zs;
+                    p2 -= 2 * dy;
+                }
+                p1 += 2 * dx;
+                p2 += 2 * dz;
+                visitor.visit(x1, y1, z1);
+            }
+            return;
+        }
+        int p1 = 2 * dy - dz;
+        int p2 = 2 * dx - dz;
+        while (z1 != z2) {
+            z1 += zs;
+            if (p1 >= 0) {
+                y1 += ys;
+                p1 -= 2 * dz;
+            }
+            if (p2 >= 0) {
+                x1 += xs;
+                p2 -= 2 * dz;
+            }
+            p1 += 2 * dy;
+            p2 += 2 * dx;
+            visitor.visit(x1, y1, z1);
         }
     }
 
@@ -336,6 +515,13 @@ public final class StructureBuilder {
             return null;
         }
         return new int[]{list.get(0), list.get(1), list.get(2)};
+    }
+
+    private static String normalize(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.trim().toLowerCase();
     }
 
     private static BlockState getState(Map<String, BlockState> palette, Set<String> missingPaletteKeys, String key, String facing) {
@@ -518,6 +704,8 @@ public final class StructureBuilder {
         public List<Integer> from;
         public List<Integer> to;
         public List<List<Integer>> at;
+        public String mode;
+        public String axis;
         public String facing;
     }
 }
