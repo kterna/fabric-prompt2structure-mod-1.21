@@ -21,7 +21,8 @@ public record S2CSessionSyncPayload(
         int pendingChangedBlocks,
         int originX, int originY, int originZ,
         boolean hasSize,
-        int sizeX, int sizeY, int sizeZ
+        int sizeX, int sizeY, int sizeZ,
+        String checkpointsJson
 ) implements CustomPacketPayload {
     public static final Type<S2CSessionSyncPayload> TYPE = new Type<>(P2SNetworkConstants.S2C_SESSION_SYNC_ID);
     public static final StreamCodec<FriendlyByteBuf, S2CSessionSyncPayload> CODEC = StreamCodec.of(
@@ -46,6 +47,7 @@ public record S2CSessionSyncPayload(
                 buf.writeInt(payload.sizeX);
                 buf.writeInt(payload.sizeY);
                 buf.writeInt(payload.sizeZ);
+                buf.writeUtf(payload.checkpointsJson == null ? "" : payload.checkpointsJson, 16384);
             },
             buf -> new S2CSessionSyncPayload(
                     buf.readBoolean(),
@@ -67,7 +69,8 @@ public record S2CSessionSyncPayload(
                     buf.readBoolean(),
                     buf.readInt(),
                     buf.readInt(),
-                    buf.readInt()
+                    buf.readInt(),
+                    buf.readUtf(16384)
             )
     );
 

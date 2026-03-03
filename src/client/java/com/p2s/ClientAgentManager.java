@@ -37,7 +37,7 @@ public final class ClientAgentManager {
             - Use list_skills to inspect available player skills by name/description.
             - Read full skill text only when needed via read_skill.
             - Use search_skill to locate relevant snippets quickly before reading full body.
-            - Keep an explicit todo list with set_todo/edit_todo_item/delete_todo_item/clear_todo.
+            - Keep an explicit todo list with the todo tool (actions: get/set/upsert/delete/clear).
             - Before asking the user to choose among alternatives, call request_user_choice.
             - After request_user_choice, wait for user selection before continuing execution.
             - Use read_workspace_state first when structure/revision context is required.
@@ -56,7 +56,7 @@ public final class ClientAgentManager {
         return t;
     });
     private static final Set<String> PARALLEL_SAFE_TOOLS = Set.of(
-            "list_skills", "read_skill", "search_skill", "get_todo",
+            "list_skills", "read_skill", "search_skill", "todo",
             "read_workspace_state", "search_block_ids", "explain_plan",
             "list_subagents", "get_subagent", "list_profiles", "get_profile"
     );
@@ -471,11 +471,12 @@ public final class ClientAgentManager {
             case "list_skills" -> listSkillsPayload();
             case "read_skill" -> readSkillPayload(call.arguments());
             case "search_skill" -> searchSkillPayload(call.arguments());
-            case "get_todo" -> getTodoPayload();
-            case "set_todo" -> setTodoPayload(call.arguments());
-            case "edit_todo_item" -> editTodoItemPayload(call.arguments());
-            case "delete_todo_item" -> deleteTodoItemPayload(call.arguments());
-            case "clear_todo" -> clearTodoPayload();
+            case "todo" -> todoPayload(call.arguments());
+            case "get_todo" -> todoPayload(buildTodoActionArgs("get", call.arguments()));
+            case "set_todo" -> todoPayload(buildTodoActionArgs("set", call.arguments()));
+            case "edit_todo_item" -> todoPayload(buildTodoActionArgs("upsert", call.arguments()));
+            case "delete_todo_item" -> todoPayload(buildTodoActionArgs("delete", call.arguments()));
+            case "clear_todo" -> todoPayload(buildTodoActionArgs("clear", call.arguments()));
             case "request_user_choice" -> requestUserChoicePayload(call.arguments());
             case "clear_user_choice" -> clearUserChoicePayload();
             case "list_subagents" -> listSubagentsPayload(session, call.arguments());
@@ -609,8 +610,29 @@ public final class ClientAgentManager {
         return payload;
     }
 
-    private static JsonObject getTodoPayload() {
-        JsonObject payload = toolOk("get_todo");
+    private static JsonObject todoPayload(JsonElement arguments) {
+        JsonObject args = normalizeArgsObject(arguments);
+        String action = normalizeTodoAction(asString(args, "action"));
+        if (action.isBlank()) {
+            action = inferLegacyTodoAction(args);
+        }
+        if (action.isBlank()) {
+            return toolError("todo", "Missing action (get/set/upsert/delete/clear)");
+        }
+
+        return switch (action) {
+            case "get" -> todoGetPayload();
+            case "set" -> todoSetPayload(args);
+            case "upsert" -> todoUpsertPayload(args);
+            case "delete" -> todoDeletePayload(args);
+            case "clear" -> todoClearPayload();
+            default -> toolError("todo", "Unsupported action: " + action);
+        };
+    }
+
+    private static JsonObject todoGetPayload() {
+        JsonObject payload = toolOk("todo");
+        payload.addProperty("action", "get");
         payload.addProperty("title", ClientSessionState.getTodoTitle());
         JsonArray arr = new JsonArray();
         for (ClientSessionState.TodoItem item : ClientSessionState.getTodoItems()) {
@@ -625,10 +647,9 @@ public final class ClientAgentManager {
         return payload;
     }
 
-    private static JsonObject setTodoPayload(JsonElement arguments) {
-        JsonObject args = normalizeArgsObject(arguments);
+    private static JsonObject todoSetPayload(JsonObject args) {
         if (!args.has("items") || !args.get("items").isJsonArray()) {
-            return toolError("set_todo", "Missing items array");
+            return toolError("todo", "Missing items array for action=set");
         }
         String title = asString(args, "title");
         JsonArray itemsArg = args.getAsJsonArray("items");
@@ -660,17 +681,17 @@ public final class ClientAgentManager {
         }
 
         ClientSessionState.setTodo(title, items);
-        JsonObject payload = toolOk("set_todo");
+        JsonObject payload = toolOk("todo");
+        payload.addProperty("action", "set");
         payload.addProperty("title", title == null ? "" : title.trim());
         payload.addProperty("count", items.size());
         return payload;
     }
 
-    private static JsonObject editTodoItemPayload(JsonElement arguments) {
-        JsonObject args = normalizeArgsObject(arguments);
+    private static JsonObject todoUpsertPayload(JsonObject args) {
         String id = normalizeTodoId(asString(args, "id"));
         if (id.isBlank()) {
-            return toolError("edit_todo_item", "Missing id");
+            return toolError("todo", "Missing id for action=upsert");
         }
         String content = asString(args, "content");
         if (content.isBlank()) {
@@ -681,35 +702,72 @@ public final class ClientAgentManager {
 
         boolean ok = ClientSessionState.upsertTodoItem(id, content, status);
         if (!ok) {
-            return toolError("edit_todo_item", "Cannot create item without content");
+            return toolError("todo", "Cannot create item without content");
         }
 
-        JsonObject payload = toolOk("edit_todo_item");
+        JsonObject payload = toolOk("todo");
+        payload.addProperty("action", "upsert");
         payload.addProperty("id", id);
-        payload.addProperty("action", exists ? "updated" : "created");
+        payload.addProperty("result", exists ? "updated" : "created");
         return payload;
     }
 
-    private static JsonObject deleteTodoItemPayload(JsonElement arguments) {
-        JsonObject args = normalizeArgsObject(arguments);
+    private static JsonObject todoDeletePayload(JsonObject args) {
         String id = normalizeTodoId(asString(args, "id"));
         if (id.isBlank()) {
-            return toolError("delete_todo_item", "Missing id");
+            return toolError("todo", "Missing id for action=delete");
         }
         boolean removed = ClientSessionState.removeTodoItem(id);
         if (!removed) {
-            return toolError("delete_todo_item", "Todo item not found: " + id);
+            return toolError("todo", "Todo item not found: " + id);
         }
-        JsonObject payload = toolOk("delete_todo_item");
+        JsonObject payload = toolOk("todo");
+        payload.addProperty("action", "delete");
         payload.addProperty("id", id);
         return payload;
     }
 
-    private static JsonObject clearTodoPayload() {
+    private static JsonObject todoClearPayload() {
         ClientSessionState.clearTodo();
-        JsonObject payload = toolOk("clear_todo");
+        JsonObject payload = toolOk("todo");
+        payload.addProperty("action", "clear");
         payload.addProperty("cleared", true);
         return payload;
+    }
+
+    private static String normalizeTodoAction(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        String action = value.trim().toLowerCase();
+        return switch (action) {
+            case "get", "set", "upsert", "delete", "clear" -> action;
+            case "edit", "update", "create" -> "upsert";
+            case "remove" -> "delete";
+            default -> "";
+        };
+    }
+
+    private static String inferLegacyTodoAction(JsonObject args) {
+        if (args == null) {
+            return "";
+        }
+        if (args.has("items") && args.get("items").isJsonArray()) {
+            return "set";
+        }
+        if (args.has("id") && args.get("id").isJsonPrimitive()) {
+            if (args.has("content") || args.has("text") || args.has("status")) {
+                return "upsert";
+            }
+            return "delete";
+        }
+        return "get";
+    }
+
+    private static JsonElement buildTodoActionArgs(String action, JsonElement originalArgs) {
+        JsonObject args = normalizeArgsObject(originalArgs);
+        args.addProperty("action", action == null ? "" : action.trim().toLowerCase());
+        return args;
     }
 
     private static JsonObject requestUserChoicePayload(JsonElement arguments) {

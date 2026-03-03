@@ -46,6 +46,11 @@ public class P2SChatScreen extends Screen {
     private Button discardButton;
     private Button undoButton;
     private Button redoButton;
+    private Button checkpointCreateButton;
+    private Button checkpointPrevButton;
+    private Button checkpointNextButton;
+    private Button checkpointRollbackButton;
+    private Button checkpointModeButton;
     private final List<Button> choiceButtons = new ArrayList<>();
     private double scrollOffset;
 
@@ -65,6 +70,7 @@ public class P2SChatScreen extends Screen {
     private Button contextFormatButton;
     private Button contextClearJsonButton;
     private Button contextClearQueueButton;
+    private Button contextDiffButton;
     private Button contextAddRangeButton;
     private Button contextUpButton;
     private Button contextDownButton;
@@ -154,9 +160,41 @@ public class P2SChatScreen extends Screen {
                 .build();
         addRenderableWidget(redoButton);
 
+        int cpY = rowY + TOP_BUTTON_HEIGHT + 2;
+        int cpX = panelX + PADDING;
+        checkpointCreateButton = Button.builder(Component.literal("CP+"), btn -> createCheckpoint())
+                .bounds(cpX, cpY, 36, TOP_BUTTON_HEIGHT)
+                .build();
+        addRenderableWidget(checkpointCreateButton);
+
+        checkpointPrevButton = Button.builder(Component.literal("<"), btn -> ClientSessionState.selectPreviousCheckpoint())
+                .bounds(cpX + 38, cpY, 20, TOP_BUTTON_HEIGHT)
+                .build();
+        addRenderableWidget(checkpointPrevButton);
+
+        checkpointNextButton = Button.builder(Component.literal(">"), btn -> ClientSessionState.selectNextCheckpoint())
+                .bounds(cpX + 60, cpY, 20, TOP_BUTTON_HEIGHT)
+                .build();
+        addRenderableWidget(checkpointNextButton);
+
+        checkpointRollbackButton = Button.builder(Component.literal("RB"), btn -> rollbackSelectedCheckpoint())
+                .bounds(cpX + 82, cpY, 30, TOP_BUTTON_HEIGHT)
+                .build();
+        addRenderableWidget(checkpointRollbackButton);
+
+        checkpointModeButton = Button.builder(Component.literal(modeLabel()), btn -> {
+                    ClientSessionState.toggleRollbackMode();
+                    if (checkpointModeButton != null) {
+                        checkpointModeButton.setMessage(Component.literal(modeLabel()));
+                    }
+                })
+                .bounds(cpX + 114, cpY, 54, TOP_BUTTON_HEIGHT)
+                .build();
+        addRenderableWidget(checkpointModeButton);
+
         choiceButtons.clear();
         int actionWidth = SMALL_BUTTON_WIDTH * 4 + 6;
-        int choiceY = rowY + TOP_BUTTON_HEIGHT + 2;
+        int choiceY = cpY + TOP_BUTTON_HEIGHT + 2;
         int choiceGap = 2;
         int choiceWidth = (actionWidth - choiceGap * (CHOICE_BUTTON_COUNT - 1)) / CHOICE_BUTTON_COUNT;
         for (int i = 0; i < CHOICE_BUTTON_COUNT; i++) {
@@ -209,7 +247,7 @@ public class P2SChatScreen extends Screen {
         contextFileInput.setValue(contextFileName == null || contextFileName.isBlank() ? "workspace-state.json" : contextFileName);
         addRenderableWidget(contextFileInput);
 
-        int row2ButtonCount = 4;
+        int row2ButtonCount = 5;
         int row2BtnWidth = Math.max(46, (leftWidth - rowGap * (row2ButtonCount - 1)) / row2ButtonCount);
         int row2X = leftX;
         contextLoadButton = addRenderableWidget(Button.builder(Component.literal("Load"), btn -> loadWorkspaceStateJson())
@@ -222,6 +260,9 @@ public class P2SChatScreen extends Screen {
                 .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
         row2X += row2BtnWidth + rowGap;
         contextClearQueueButton = addRenderableWidget(Button.builder(Component.literal("Clear Ctx"), btn -> clearContextQueue())
+                .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
+        row2X += row2BtnWidth + rowGap;
+        contextDiffButton = addRenderableWidget(Button.builder(Component.literal("Diff"), btn -> loadWorkspaceDiff())
                 .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
 
         int startWidth = 52;
@@ -293,6 +334,110 @@ public class P2SChatScreen extends Screen {
     private void loadWorkspaceStateJson() {
         setContextJsonText(buildWorkspaceStateJson());
         setContextStatus("Loaded current workspace state", 0x55FF55);
+    }
+
+
+    private void loadWorkspaceDiff() {
+        setContextStatus("Loading workspace diff...", 0xAAAAAA);
+
+        JsonObject committedArgs = new JsonObject();
+        committedArgs.addProperty("committed", true);
+        JsonObject stagedArgs = new JsonObject();
+
+        ClientToolBridge.call("read_workspace_state", committedArgs)
+                .thenCombine(ClientToolBridge.call("read_workspace_state", stagedArgs), (committed, staged) -> {
+                    String committedText = extractWorkspaceScriptText(committed);
+                    String stagedText = extractWorkspaceScriptText(staged);
+                    return buildLineDiff(committedText, stagedText);
+                })
+                .thenAccept(diffText -> {
+                    Minecraft mc = this.minecraft;
+                    if (mc != null) {
+                        mc.execute(() -> {
+                            setContextJsonText(diffText);
+                            setContextStatus("Workspace diff loaded", 0x55FF55);
+                        });
+                    }
+                })
+                .exceptionally(ex -> {
+                    Minecraft mc = this.minecraft;
+                    if (mc != null) {
+                        mc.execute(() -> setContextStatus("Diff failed: " + shortError(ex.getMessage()), 0xFF5555));
+                    }
+                    return null;
+                });
+    }
+
+    private String extractWorkspaceScriptText(JsonObject toolPayload) {
+        if (toolPayload == null || !toolPayload.has("state") || !toolPayload.get("state").isJsonObject()) {
+            return "";
+        }
+        JsonObject state = toolPayload.getAsJsonObject("state");
+        if (state.has("script") && state.get("script").isJsonObject()) {
+            return CONTEXT_GSON.toJson(state.get("script"));
+        }
+        if (state.has("script_json") && state.get("script_json").isJsonPrimitive()) {
+            return state.get("script_json").getAsString();
+        }
+        return "";
+    }
+
+    private String buildLineDiff(String committedText, String stagedText) {
+        String[] a = normalizeLines(committedText);
+        String[] b = normalizeLines(stagedText);
+
+        int n = Math.max(a.length, b.length);
+        StringBuilder sb = new StringBuilder();
+        sb.append("{\n");
+        sb.append("  \"diff_format\": \"line_prefix\",\n");
+        sb.append("  \"legend\": \"  = unchanged, - removed from committed, + added in staged\",\n");
+        sb.append("  \"lines\": [\n");
+
+        int emitted = 0;
+        int maxLines = 800;
+        for (int i = 0; i < n && emitted < maxLines; i++) {
+            String av = i < a.length ? a[i] : null;
+            String bv = i < b.length ? b[i] : null;
+            if (av != null && bv != null && av.equals(bv)) {
+                sb.append("    \"  ").append(escapeJson(av)).append("\",\n");
+                emitted++;
+                continue;
+            }
+            if (av != null) {
+                sb.append("    \"- ").append(escapeJson(av)).append("\",\n");
+                emitted++;
+            }
+            if (bv != null && emitted < maxLines) {
+                sb.append("    \"+ ").append(escapeJson(bv)).append("\",\n");
+                emitted++;
+            }
+        }
+
+        if (emitted >= maxLines) {
+            sb.append("    \"... diff truncated\",\n");
+        }
+
+        if (sb.lastIndexOf(",\n") == sb.length() - 2) {
+            sb.delete(sb.length() - 2, sb.length());
+            sb.append("\n");
+        }
+        sb.append("  ]\n");
+        sb.append("}\n");
+        return sb.toString();
+    }
+
+    private String[] normalizeLines(String text) {
+        if (text == null) {
+            return new String[0];
+        }
+        return text.replace("\r\n", "\n").replace('\r', '\n').split("\n", -1);
+    }
+
+    private String escapeJson(String text) {
+        if (text == null || text.isEmpty()) {
+            return "";
+        }
+        return text.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     private void formatContextJson() {
@@ -750,6 +895,7 @@ public class P2SChatScreen extends Screen {
     @Override
     public void render(GuiGraphics gfx, int mouseX, int mouseY, float delta) {
         refreshChoiceButtons();
+        if (checkpointModeButton != null) { checkpointModeButton.setMessage(Component.literal(modeLabel())); }
         if (discardReasonMode && !ClientSessionState.hasPendingPatch()) {
             exitDiscardReasonMode();
         }
@@ -965,6 +1111,17 @@ public class P2SChatScreen extends Screen {
                 y += this.font.lineHeight + LINE_SPACING;
             }
         }
+
+        List<FormattedCharSequence> checkpointLines = getCheckpointLines(panelWidth - PADDING * 2);
+        if (!checkpointLines.isEmpty()) {
+            y += this.font.lineHeight + 4;
+            gfx.drawString(this.font, "Checkpoints [mode=" + modeLabel() + "]", panelX + PADDING, y, 0x99FFCC, true);
+            y += this.font.lineHeight + 2;
+            for (FormattedCharSequence line : checkpointLines) {
+                gfx.drawString(this.font, line, panelX + PADDING, y, 0xCCFFEE, true);
+                y += this.font.lineHeight + LINE_SPACING;
+            }
+        }
     }
 
     private void drawStatus(GuiGraphics gfx, int panelX) {
@@ -1095,6 +1252,12 @@ public class P2SChatScreen extends Screen {
             extra += todoLines.size() * (this.font.lineHeight + LINE_SPACING);
             extra += LINE_SPACING;
         }
+        List<FormattedCharSequence> checkpointLines = getCheckpointLines(panelWidth - PADDING * 2);
+        if (!checkpointLines.isEmpty()) {
+            extra += this.font.lineHeight + 4;
+            extra += checkpointLines.size() * (this.font.lineHeight + LINE_SPACING);
+            extra += LINE_SPACING;
+        }
         return base + extra;
     }
 
@@ -1194,6 +1357,55 @@ public class P2SChatScreen extends Screen {
             lines.add(Component.literal("... +" + more + " more").getVisualOrderText());
         }
         return lines;
+    }
+
+
+    private List<FormattedCharSequence> getCheckpointLines(int contentWidth) {
+        List<ClientSessionState.CheckpointInfo> checkpoints = ClientSessionState.getCheckpoints();
+        if (checkpoints.isEmpty()) {
+            return List.of();
+        }
+        ClientSessionState.CheckpointInfo selected = ClientSessionState.getSelectedCheckpoint();
+        List<FormattedCharSequence> lines = new ArrayList<>();
+        int start = Math.max(0, checkpoints.size() - 6);
+        for (int i = start; i < checkpoints.size(); i++) {
+            ClientSessionState.CheckpointInfo cp = checkpoints.get(i);
+            boolean isSelected = selected != null && cp.id().equals(selected.id());
+            String marker = isSelected ? ">" : "-";
+            String text = marker + " " + shortId(cp.id()) + " " + (cp.label() == null ? "" : cp.label()) +
+                    (cp.revision() == null || cp.revision().isBlank() ? "" : " [" + cp.revision() + "]");
+            lines.addAll(this.font.split(Component.literal(text), contentWidth));
+        }
+        return lines;
+    }
+
+    private String shortId(String id) {
+        if (id == null) {
+            return "";
+        }
+        String v = id.trim();
+        return v.length() <= 8 ? v : v.substring(0, 8);
+    }
+
+    private String modeLabel() {
+        return "session_only".equals(ClientSessionState.getRollbackMode()) ? "Chat" : "All";
+    }
+
+    private void createCheckpoint() {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("label", "manual-" + ClientSessionState.getTurnCount());
+        sendSessionAction("create_checkpoint", payload.toString());
+    }
+
+    private void rollbackSelectedCheckpoint() {
+        ClientSessionState.CheckpointInfo cp = ClientSessionState.getSelectedCheckpoint();
+        if (cp == null || cp.id() == null || cp.id().isBlank()) {
+            return;
+        }
+        JsonObject payload = new JsonObject();
+        payload.addProperty("id", cp.id());
+        payload.addProperty("mode", ClientSessionState.getRollbackMode());
+        sendSessionAction("rollback_checkpoint", payload.toString());
     }
 
     private void refreshChoiceButtons() {

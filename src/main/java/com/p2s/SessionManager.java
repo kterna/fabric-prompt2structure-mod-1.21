@@ -39,6 +39,7 @@ public final class SessionManager {
     private static final int MAX_PREVIEW_DETAIL_CHARS = 12000;
     private static final int MAX_PREVIEW_OPERATION_LINES = 40;
     private static final int MAX_PREVIEW_WARNING_LINES = 20;
+    private static final int MAX_CHECKPOINTS = 24;
 
     private static final String SESSION_TOOL_CONTRACT = """
             ## IDE Session Contract
@@ -47,6 +48,7 @@ public final class SessionManager {
               - part="name": returns palette + only that named part (use when script is large).
               - line_start=N, line_end=M: returns pretty-printed script lines N..M (1-based, inclusive).
               - part and line_start/line_end are mutually exclusive.
+              - committed=true reads committed revision even when pending patch exists (for UI diff/review).
             - Propose all edits with propose_patch; do not directly build blocks.
             - The user reviews a preview and confirms apply/discard.
             - If a patch is pending, read_workspace_state returns a staged revision that includes pending changes.
@@ -473,6 +475,8 @@ public final class SessionManager {
             case "save" -> save(player, payload);
             case "apply" -> applyPendingPatch(player);
             case "discard" -> discardPendingPatch(player, payload);
+            case "create_checkpoint" -> createCheckpoint(player, payload);
+            case "rollback_checkpoint" -> rollbackCheckpoint(player, payload);
             default -> player.displayClientMessage(Component.literal("Unknown session action: " + action), false);
         }
     }
@@ -606,6 +610,7 @@ public final class SessionManager {
         session.redoStack.push(commit);
         session.pendingPatch = null;
         session.runtimeState = RuntimeState.IDLE;
+        addCheckpoint(session, "undo:" + (commit.summary == null ? "patch" : commit.summary));
 
         sendPatchPreview(player, null);
         sendSessionSync(player, session);
@@ -630,6 +635,7 @@ public final class SessionManager {
         session.undoStack.push(commit);
         session.pendingPatch = null;
         session.runtimeState = RuntimeState.IDLE;
+        addCheckpoint(session, "redo:" + (commit.summary == null ? "patch" : commit.summary));
 
         sendPatchPreview(player, null);
         sendSessionSync(player, session);
@@ -727,6 +733,7 @@ public final class SessionManager {
         session.redoStack.clear();
         session.turnCount += 1;
         session.runtimeState = RuntimeState.COMMITTED;
+        addCheckpoint(session, autoApply ? "auto-apply" : "apply");
 
         sendPatchPreview(player, null);
         String prefix = autoApply ? "Patch auto-applied: " : "Patch applied: ";
@@ -800,6 +807,7 @@ public final class SessionManager {
         session.history.add(systemMsg);
         session.revision = "rev-0";
         session.runtimeState = RuntimeState.IDLE;
+        addCheckpoint(session, "session-start");
         return session;
     }
 
@@ -825,6 +833,7 @@ public final class SessionManager {
         session.redoStack.clear();
         session.turnCount += 1;
         session.runtimeState = RuntimeState.COMMITTED;
+        addCheckpoint(session, "legacy-commit");
 
         sendChatResponse(player, text == null ? "Applied generated structure." : text, true, "committed");
         sendSessionSync(player, session);
@@ -903,7 +912,7 @@ public final class SessionManager {
         return script == null ? null : GSON.fromJson(GSON.toJson(script), StructureBuilder.VbsScriptV2.class);
     }
 
-    private static JsonObject buildWorkspaceStatePayload(Session session) {
+    private static JsonObject buildWorkspaceStatePayload(Session session, boolean committedOnly) {
         JsonObject payload = new JsonObject();
         String committedRevision = session.revision == null ? "" : session.revision;
         boolean hasPending = session.pendingPatch != null && session.pendingPatch.nextScript != null;
@@ -911,10 +920,11 @@ public final class SessionManager {
         if (hasPending && session.pendingPatch.revisionAfter != null && !session.pendingPatch.revisionAfter.isBlank()) {
             stagedRevision = session.pendingPatch.revisionAfter;
         }
-        StructureBuilder.VbsScriptV2 effectiveScript = hasPending ? session.pendingPatch.nextScript : session.current;
+        StructureBuilder.VbsScriptV2 effectiveScript = committedOnly ? session.current : (hasPending ? session.pendingPatch.nextScript : session.current);
 
-        payload.addProperty("revision", stagedRevision);
-        if (hasPending) {
+        payload.addProperty("revision", committedOnly ? committedRevision : stagedRevision);
+        payload.addProperty("committed", committedOnly);
+        if (!committedOnly && hasPending) {
             payload.addProperty("staged", true);
             payload.addProperty("committed_revision", committedRevision);
             if (session.pendingPatch.preview != null) {
@@ -982,22 +992,22 @@ public final class SessionManager {
         // Default mode: return full state as before
         if (args.isDefault()) {
             JsonObject payload = buildToolSuccess(toolName);
-            payload.add("state", buildWorkspaceStatePayload(session));
+            payload.add("state", buildWorkspaceStatePayload(session, args.committed));
             return payload;
         }
 
         // Part filter mode
         if (args.hasPart()) {
-            return buildPartFilterPayload(session, toolName, args.part);
+            return buildPartFilterPayload(session, toolName, args.part, args.committed);
         }
 
         // Line range mode
-        return buildLineRangePayload(session, toolName, args.lineStart, args.lineEnd);
+        return buildLineRangePayload(session, toolName, args.lineStart, args.lineEnd, args.committed);
     }
 
-    private static JsonObject buildPartFilterPayload(Session session, String toolName, String partName) {
+    private static JsonObject buildPartFilterPayload(Session session, String toolName, String partName, boolean committedOnly) {
         boolean hasPending = session.pendingPatch != null && session.pendingPatch.nextScript != null;
-        StructureBuilder.VbsScriptV2 effectiveScript = hasPending ? session.pendingPatch.nextScript : session.current;
+        StructureBuilder.VbsScriptV2 effectiveScript = committedOnly ? session.current : (hasPending ? session.pendingPatch.nextScript : session.current);
 
         if (effectiveScript == null || effectiveScript.structures == null || effectiveScript.structures.isEmpty()) {
             return buildToolError(toolName, "Workspace is empty, no script to read.");
@@ -1031,7 +1041,8 @@ public final class SessionManager {
 
         JsonObject payload = buildToolSuccess(toolName);
         JsonObject state = new JsonObject();
-        state.addProperty("revision", stagedRevision);
+        state.addProperty("revision", committedOnly ? committedRevision : stagedRevision);
+        state.addProperty("committed", committedOnly);
         state.addProperty("filter", "part");
         state.addProperty("part_name", partName);
         state.addProperty("part_count", effectiveScript.structures.size());
@@ -1041,9 +1052,9 @@ public final class SessionManager {
         return payload;
     }
 
-    private static JsonObject buildLineRangePayload(Session session, String toolName, int lineStart, int lineEnd) {
+    private static JsonObject buildLineRangePayload(Session session, String toolName, int lineStart, int lineEnd, boolean committedOnly) {
         boolean hasPending = session.pendingPatch != null && session.pendingPatch.nextScript != null;
-        StructureBuilder.VbsScriptV2 effectiveScript = hasPending ? session.pendingPatch.nextScript : session.current;
+        StructureBuilder.VbsScriptV2 effectiveScript = committedOnly ? session.current : (hasPending ? session.pendingPatch.nextScript : session.current);
 
         if (effectiveScript == null) {
             return buildToolError(toolName, "Workspace is empty, no script to read.");
@@ -1074,7 +1085,8 @@ public final class SessionManager {
 
         JsonObject payload = buildToolSuccess(toolName);
         JsonObject state = new JsonObject();
-        state.addProperty("revision", stagedRevision);
+        state.addProperty("revision", committedOnly ? committedRevision : stagedRevision);
+        state.addProperty("committed", committedOnly);
         state.addProperty("filter", "lines");
         state.addProperty("total_lines", totalLines);
         state.addProperty("line_start", lineStart);
@@ -1145,19 +1157,19 @@ public final class SessionManager {
 
     private static ReadWorkspaceArgs parseReadWorkspaceArgs(JsonElement argsElem) {
         if (argsElem == null || argsElem.isJsonNull()) {
-            return new ReadWorkspaceArgs(null, 0, 0);
+            return new ReadWorkspaceArgs(null, 0, 0, false);
         }
         try {
             JsonElement parsed = argsElem;
             if (argsElem.isJsonPrimitive() && argsElem.getAsJsonPrimitive().isString()) {
                 String raw = argsElem.getAsString();
                 if (raw == null || raw.isBlank()) {
-                    return new ReadWorkspaceArgs(null, 0, 0);
+                    return new ReadWorkspaceArgs(null, 0, 0, false);
                 }
                 parsed = JsonParser.parseString(raw);
             }
             if (!parsed.isJsonObject()) {
-                return new ReadWorkspaceArgs(null, 0, 0);
+                return new ReadWorkspaceArgs(null, 0, 0, false);
             }
             JsonObject obj = parsed.getAsJsonObject();
             String part = obj.has("part") && obj.get("part").isJsonPrimitive()
@@ -1169,10 +1181,11 @@ public final class SessionManager {
             int lineEnd = obj.has("line_end") && obj.get("line_end").isJsonPrimitive()
                     ? obj.get("line_end").getAsInt()
                     : 0;
-            return new ReadWorkspaceArgs(part, lineStart, lineEnd);
+            boolean committed = obj.has("committed") && obj.get("committed").isJsonPrimitive() && obj.get("committed").getAsBoolean();
+            return new ReadWorkspaceArgs(part, lineStart, lineEnd, committed);
         } catch (Exception e) {
             P2SMod.LOGGER.warn("Failed to parse read_workspace_state arguments: {}", e.getMessage());
-            return new ReadWorkspaceArgs(null, 0, 0);
+            return new ReadWorkspaceArgs(null, 0, 0, false);
         }
     }
 
@@ -1622,6 +1635,146 @@ public final class SessionManager {
         return Math.max(surface, 0);
     }
 
+
+    private static void createCheckpoint(ServerPlayer player, String payload) {
+        if (player == null) {
+            return;
+        }
+        Session session = sessions.get(player.getUUID());
+        if (session == null) {
+            player.displayClientMessage(Component.literal("No active session"), false);
+            return;
+        }
+        String label = "";
+        if (payload != null && !payload.isBlank()) {
+            try {
+                JsonObject obj = JsonParser.parseString(payload).getAsJsonObject();
+                if (obj.has("label") && obj.get("label").isJsonPrimitive()) {
+                    label = obj.get("label").getAsString();
+                }
+            } catch (Exception ignored) {
+                label = payload.trim();
+            }
+        }
+        if (label == null || label.isBlank()) {
+            label = "turn-" + session.turnCount;
+        }
+        addCheckpoint(session, label);
+        sendSessionSync(player, session);
+        player.displayClientMessage(Component.literal("Checkpoint created: " + label), false);
+    }
+
+    private static void rollbackCheckpoint(ServerPlayer player, String payload) {
+        if (player == null) {
+            return;
+        }
+        Session session = sessions.get(player.getUUID());
+        if (session == null) {
+            player.displayClientMessage(Component.literal("No active session"), false);
+            return;
+        }
+
+        String targetId = "";
+        String mode = "workspace_and_session";
+        if (payload != null && !payload.isBlank()) {
+            try {
+                JsonObject obj = JsonParser.parseString(payload).getAsJsonObject();
+                if (obj.has("id") && obj.get("id").isJsonPrimitive()) {
+                    targetId = obj.get("id").getAsString();
+                }
+                if (obj.has("mode") && obj.get("mode").isJsonPrimitive()) {
+                    mode = obj.get("mode").getAsString();
+                }
+            } catch (Exception e) {
+                targetId = payload.trim();
+            }
+        }
+
+        CheckpointEntry cp = findCheckpoint(session, targetId);
+        if (cp == null) {
+            player.displayClientMessage(Component.literal("Checkpoint not found"), false);
+            return;
+        }
+
+        boolean sessionOnly = "session_only".equalsIgnoreCase(mode);
+        if (!sessionOnly) {
+            StructureBuilder.VbsScriptV2 from = copyScript(session.current);
+            StructureBuilder.VbsScriptV2 to = copyScript(cp.script);
+            StructurePatchEngine.DiffResult diff = StructurePatchEngine.diff(from, to);
+            if (player.serverLevel() != null && session.origin != null) {
+                StructurePatchEngine.applyBlockOps(player.serverLevel(), session.origin, diff.forwardOps);
+            }
+            session.current = to;
+            session.revision = cp.revision;
+            session.undoStack.clear();
+            session.redoStack.clear();
+            session.pendingPatch = null;
+            sendPatchPreview(player, null);
+        }
+
+        session.history = deepCopyMessages(cp.history);
+        session.turnCount = cp.turnCount;
+        session.runtimeState = RuntimeState.IDLE;
+        session.inFlight = false;
+
+        sendSessionSync(player, session);
+        player.displayClientMessage(Component.literal("Rolled back to checkpoint: " + cp.label + (sessionOnly ? " (session only)" : "")), false);
+    }
+
+    private static void addCheckpoint(Session session, String label) {
+        if (session == null) {
+            return;
+        }
+        CheckpointEntry cp = new CheckpointEntry();
+        cp.id = UUID.randomUUID().toString();
+        cp.label = label == null || label.isBlank() ? "checkpoint" : label.trim();
+        cp.revision = session.revision == null ? "" : session.revision;
+        cp.script = copyScript(session.current);
+        cp.history = deepCopyMessages(session.history == null ? List.of() : session.history);
+        cp.turnCount = session.turnCount;
+        cp.createdAt = System.currentTimeMillis();
+        session.checkpoints.add(cp);
+        while (session.checkpoints.size() > MAX_CHECKPOINTS) {
+            session.checkpoints.remove(0);
+        }
+    }
+
+    private static CheckpointEntry findCheckpoint(Session session, String id) {
+        if (session == null || session.checkpoints == null || session.checkpoints.isEmpty()) {
+            return null;
+        }
+        if (id == null || id.isBlank()) {
+            return session.checkpoints.get(session.checkpoints.size() - 1);
+        }
+        String target = id.trim();
+        for (CheckpointEntry cp : session.checkpoints) {
+            if (cp != null && target.equals(cp.id)) {
+                return cp;
+            }
+        }
+        return null;
+    }
+
+    private static String checkpointsJson(Session session) {
+        JsonArray arr = new JsonArray();
+        if (session == null || session.checkpoints == null) {
+            return "[]";
+        }
+        int start = Math.max(0, session.checkpoints.size() - 12);
+        for (int i = start; i < session.checkpoints.size(); i++) {
+            CheckpointEntry cp = session.checkpoints.get(i);
+            if (cp == null) {
+                continue;
+            }
+            JsonObject item = new JsonObject();
+            item.addProperty("id", cp.id == null ? "" : cp.id);
+            item.addProperty("label", cp.label == null ? "" : cp.label);
+            item.addProperty("revision", cp.revision == null ? "" : cp.revision);
+            arr.add(item);
+        }
+        return GSON.toJson(arr);
+    }
+
     private static void sendSessionSync(ServerPlayer player, Session session) {
         if (player == null) {
             return;
@@ -1666,7 +1819,8 @@ public final class SessionManager {
                 pendingChanged,
                 ox, oy, oz,
                 hasSz,
-                sx, sy, sz
+                sx, sy, sz,
+                checkpointsJson(session)
         ));
     }
 
@@ -1776,16 +1930,28 @@ public final class SessionManager {
         final String part;
         final int lineStart;
         final int lineEnd;
+        final boolean committed;
 
-        ReadWorkspaceArgs(String part, int lineStart, int lineEnd) {
+        ReadWorkspaceArgs(String part, int lineStart, int lineEnd, boolean committed) {
             this.part = part;
             this.lineStart = lineStart;
             this.lineEnd = lineEnd;
+            this.committed = committed;
         }
 
         boolean hasLineRange() { return lineStart > 0 && lineEnd > 0; }
         boolean hasPart() { return part != null && !part.isBlank(); }
         boolean isDefault() { return !hasLineRange() && !hasPart(); }
+    }
+
+    private static final class CheckpointEntry {
+        private String id;
+        private String label;
+        private String revision;
+        private StructureBuilder.VbsScriptV2 script;
+        private List<JsonObject> history = new ArrayList<>();
+        private int turnCount;
+        private long createdAt;
     }
 
     private static final class CommitEntry {
@@ -1814,5 +1980,6 @@ public final class SessionManager {
         PendingPatch pendingPatch;
         Deque<CommitEntry> undoStack = new ArrayDeque<>();
         Deque<CommitEntry> redoStack = new ArrayDeque<>();
+        List<CheckpointEntry> checkpoints = new ArrayList<>();
     }
 }

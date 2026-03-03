@@ -51,7 +51,8 @@ public final class ClientNetworkHandler {
                     payload.hasSize(),
                     payload.sizeX(),
                     payload.sizeY(),
-                    payload.sizeZ()
+                    payload.sizeZ(),
+                    payload.checkpointsJson()
             ));
         });
 
