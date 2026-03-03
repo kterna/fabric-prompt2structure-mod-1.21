@@ -1,4 +1,6 @@
-# Prompt to Structure (Fabric 1.21.x)
+# P2S Workspace (Fabric 1.21.x)
+
+P2S Workspace is an AI IDE-style pipeline for Minecraft structure generation, patching, and iterative editing.
 
 P2S 是一个用于 Minecraft 结构生成与迭代编辑的 Fabric 模组，支持两条主路径：
 - 一次性生成（`/p2s <x> <y> <z> <prompt>`）

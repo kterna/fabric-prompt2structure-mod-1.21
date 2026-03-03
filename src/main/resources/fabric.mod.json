@@ -2,8 +2,8 @@
 	"schemaVersion": 1,
 	"id": "prompt2structure",
 	"version": "${version}",
-	"name": "Prompt to Structure",
-	"description": "Generate and build structures from LLM prompts.",
+	"name": "P2S Workspace",
+	"description": "AI IDE-style pipeline workspace for Minecraft structure generation, patching, and iterative editing.",
 	"authors": [
 		"kterna"
 	],
