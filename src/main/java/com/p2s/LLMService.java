@@ -1117,6 +1117,33 @@ public final class LLMService {
             tools.add(createSubagentTool);
         }
 
+        if (includeSkillTools && allowsTool(allowedTools, "continue_subagent")) {
+            JsonObject continueSubagentTool = new JsonObject();
+            continueSubagentTool.addProperty("type", "function");
+            JsonObject continueSubagentFn = new JsonObject();
+            continueSubagentFn.addProperty("name", "continue_subagent");
+            continueSubagentFn.addProperty("description", "Continue a failed/completed/cancelled subagent with optional new instruction.");
+            JsonObject continueSubagentParams = new JsonObject();
+            continueSubagentParams.addProperty("type", "object");
+            JsonObject continueSubagentProps = new JsonObject();
+            JsonObject subagentId = new JsonObject();
+            subagentId.addProperty("type", "string");
+            subagentId.addProperty("description", "Subagent id to continue.");
+            continueSubagentProps.add("id", subagentId);
+            JsonObject instruction = new JsonObject();
+            instruction.addProperty("type", "string");
+            instruction.addProperty("description", "Optional follow-up instruction for the continued run.");
+            continueSubagentProps.add("instruction", instruction);
+            continueSubagentParams.add("properties", continueSubagentProps);
+            JsonArray continueSubagentRequired = new JsonArray();
+            continueSubagentRequired.add("id");
+            continueSubagentParams.add("required", continueSubagentRequired);
+            continueSubagentParams.addProperty("additionalProperties", false);
+            continueSubagentFn.add("parameters", continueSubagentParams);
+            continueSubagentTool.add("function", continueSubagentFn);
+            tools.add(continueSubagentTool);
+        }
+
         if (includeSkillTools && allowsTool(allowedTools, "get_subagent")) {
             JsonObject getSubagentTool = new JsonObject();
             getSubagentTool.addProperty("type", "function");
