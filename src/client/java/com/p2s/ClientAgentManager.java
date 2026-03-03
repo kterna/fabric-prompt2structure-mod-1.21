@@ -67,9 +67,17 @@ public final class ClientAgentManager {
     }
 
     public static void submitUserMessage(String text) {
+        submitUserMessage(text, text);
+    }
+
+    public static void submitUserMessage(String text, String displayText) {
         String msg = text == null ? "" : text.trim();
+        String visible = displayText == null ? "" : displayText.trim();
         if (msg.isBlank()) {
             return;
+        }
+        if (visible.isBlank()) {
+            visible = msg;
         }
         if (ClientSessionState.hasPendingPatch()) {
             postToClient(() -> ClientSessionState.onChatResponse(
@@ -103,8 +111,9 @@ public final class ClientAgentManager {
             trimHistoryLocked(session);
         }
 
+        String finalVisible = visible;
         postToClient(() -> {
-            ClientSessionState.addUserMessage(msg);
+            ClientSessionState.addUserMessage(finalVisible);
             ClientSessionState.setStatus("planning");
         });
 
