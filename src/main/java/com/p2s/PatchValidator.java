@@ -9,10 +9,14 @@ import java.util.Set;
 
 public final class PatchValidator {
     private static final Set<String> SUPPORTED_OPS = Set.of(
-            "upsert_part",
+            "insert_part",
             "delete_part",
-            "patch_actions",
-            "set_palette"
+            "replace_part",
+            "insert_actions",
+            "delete_actions",
+            "replace_actions",
+            "move_actions",
+            "update_palette"
     );
 
     private static final Set<String> SUPPORTED_ACTION_TYPES = Set.of(
@@ -120,24 +124,101 @@ public final class PatchValidator {
                 result.addError(prefix + " requires non-empty part");
             }
 
-            if ("set_palette".equals(opName) && (op.paletteDelta == null || op.paletteDelta.isEmpty())) {
-                result.addWarning(prefix + " set_palette has empty palette_delta");
-            }
-
-            if ("upsert_part".equals(opName) && (op.actionsAdd == null || op.actionsAdd.isEmpty())) {
-                result.addError(prefix + " upsert_part requires actions_add");
-            }
-
-            if ("patch_actions".equals(opName)) {
-                boolean hasAdd = op.actionsAdd != null && !op.actionsAdd.isEmpty();
-                boolean hasRemove = op.actionsRemoveMatch != null && !op.actionsRemoveMatch.isEmpty();
-                if (!hasAdd && !hasRemove) {
-                    result.addError(prefix + " patch_actions requires actions_add or actions_remove_match");
+            switch (opName) {
+                case "insert_part" -> {
+                    if (op.actionsAdd == null || op.actionsAdd.isEmpty()) {
+                        result.addError(prefix + " insert_part requires actions_add");
+                    }
+                    validateAddActions(op.actionsAdd, prefix, result);
+                }
+                case "delete_part" -> {
+                    validateOldActions(op.oldActions, prefix, "delete_part", result);
+                }
+                case "replace_part" -> {
+                    validateOldActions(op.oldActions, prefix, "replace_part", result);
+                    validateNewActions(op.newActions, prefix, "replace_part", result);
+                }
+                case "insert_actions" -> {
+                    if (op.actionsAdd == null || op.actionsAdd.isEmpty()) {
+                        result.addError(prefix + " insert_actions requires actions_add");
+                    }
+                    validateAddActions(op.actionsAdd, prefix, result);
+                }
+                case "delete_actions" -> {
+                    validateOldActions(op.oldActions, prefix, "delete_actions", result);
+                }
+                case "replace_actions" -> {
+                    validateOldActions(op.oldActions, prefix, "replace_actions", result);
+                    validateNewActions(op.newActions, prefix, "replace_actions", result);
+                }
+                case "move_actions" -> {
+                    validateOldActions(op.oldActions, prefix, "move_actions", result);
+                    validateOffset(op.offset, prefix, result);
+                }
+                case "update_palette" -> {
+                    validatePaletteEntries(op.entries, prefix, result);
+                }
+                default -> {
                 }
             }
+        }
+    }
 
-            validateAddActions(op.actionsAdd, prefix, result);
-            validateRemoveMatches(op.actionsRemoveMatch, prefix, result);
+    private static void validateOldActions(List<StructureBuilder.VbsAction> oldActions, String prefix,
+                                           String opName, PatchModels.ValidationResult result) {
+        if (oldActions == null || oldActions.isEmpty()) {
+            result.addError(prefix + " " + opName + " requires old_actions");
+            return;
+        }
+        for (int i = 0; i < oldActions.size(); i++) {
+            validateAction(oldActions.get(i), prefix + ".old_actions[" + i + "]", result);
+        }
+    }
+
+    private static void validateNewActions(List<StructureBuilder.VbsAction> newActions, String prefix,
+                                           String opName, PatchModels.ValidationResult result) {
+        if (newActions == null || newActions.isEmpty()) {
+            result.addError(prefix + " " + opName + " requires new_actions");
+            return;
+        }
+        for (int i = 0; i < newActions.size(); i++) {
+            validateAction(newActions.get(i), prefix + ".new_actions[" + i + "]", result);
+        }
+    }
+
+    private static void validateOffset(List<Integer> offset, String prefix, PatchModels.ValidationResult result) {
+        if (offset == null || offset.size() < 3) {
+            result.addError(prefix + " move_actions requires offset=[dx,dy,dz]");
+            return;
+        }
+        if (offset.get(0) == null || offset.get(1) == null || offset.get(2) == null) {
+            result.addError(prefix + " offset values must not be null");
+        }
+    }
+
+    private static void validatePaletteEntries(List<PatchModels.PaletteEntry> entries, String prefix,
+                                               PatchModels.ValidationResult result) {
+        if (entries == null || entries.isEmpty()) {
+            result.addWarning(prefix + " update_palette has empty entries");
+            return;
+        }
+        for (int i = 0; i < entries.size(); i++) {
+            PatchModels.PaletteEntry entry = entries.get(i);
+            String path = prefix + ".entries[" + i + "]";
+            if (entry == null) {
+                result.addError(path + " is null");
+                continue;
+            }
+            if (isBlank(entry.key)) {
+                result.addError(path + " missing key");
+                continue;
+            }
+            // new_value validation: if adding or modifying, new_value should resolve
+            if (entry.newValue != null && !entry.newValue.isBlank()) {
+                if (StructureBuilder.resolveDirectBlockState(entry.newValue.trim()) == null) {
+                    result.addError(path + " new_value '" + entry.newValue + "' is not a valid block id");
+                }
+            }
         }
     }
 
@@ -159,52 +240,42 @@ public final class PatchValidator {
                 continue;
             }
             String prefix = "Operation[" + i + "]";
-            if (op.paletteDelta != null && !op.paletteDelta.isEmpty()) {
-                for (Map.Entry<String, String> entry : op.paletteDelta.entrySet()) {
-                    String key = entry.getKey();
-                    String value = entry.getValue();
-                    if (isBlank(key)) {
-                        result.addError(prefix + " palette_delta has blank key");
-                        continue;
-                    }
-                    if (isBlank(value)) {
-                        result.addError(prefix + " palette_delta[" + key + "] missing block id");
-                        continue;
-                    }
-                    if (StructureBuilder.resolveDirectBlockState(value) == null) {
-                        result.addError(prefix + " palette_delta[" + key + "] invalid block id '" + value + "'");
-                    }
-                }
-            }
 
-            if (op.actionsAdd == null) {
-                continue;
-            }
-            for (int j = 0; j < op.actionsAdd.size(); j++) {
-                StructureBuilder.VbsAction action = op.actionsAdd.get(j);
-                if (action == null) {
-                    continue;
+            // Check actions_add block references
+            checkActionsBlockRefs(op.actionsAdd, prefix + ".actions_add", palette, result);
+            // Check new_actions block references
+            checkActionsBlockRefs(op.newActions, prefix + ".new_actions", palette, result);
+
+            // Check palette entries new_value block references
+            if (op.entries != null) {
+                for (int j = 0; j < op.entries.size(); j++) {
+                    PatchModels.PaletteEntry entry = op.entries.get(j);
+                    if (entry == null) continue;
+                    if (entry.newValue != null && !entry.newValue.isBlank()) {
+                        // Already validated in validatePaletteEntries
+                    }
                 }
-                String block = action.block;
-                String path = prefix + ".actions_add[" + j + "]";
-                if (isBlank(block)) {
-                    continue;
-                }
-                if (palette.containsKey(block)) {
-                    continue;
-                }
-                if (StructureBuilder.resolveDirectBlockState(block) != null) {
-                    continue;
-                }
-                result.addError(path + " block '" + block + "' not in palette and not a valid block id");
             }
         }
     }
 
+    private static void checkActionsBlockRefs(List<StructureBuilder.VbsAction> actions, String prefix,
+                                              Map<String, String> palette, PatchModels.ValidationResult result) {
+        if (actions == null) return;
+        for (int j = 0; j < actions.size(); j++) {
+            StructureBuilder.VbsAction action = actions.get(j);
+            if (action == null) continue;
+            String block = action.block;
+            String path = prefix + "[" + j + "]";
+            if (isBlank(block)) continue;
+            if (palette.containsKey(block)) continue;
+            if (StructureBuilder.resolveDirectBlockState(block) != null) continue;
+            result.addError(path + " block '" + block + "' not in palette and not a valid block id");
+        }
+    }
+
     private static boolean requiresPart(String opName) {
-        return "upsert_part".equals(opName)
-                || "delete_part".equals(opName)
-                || "patch_actions".equals(opName);
+        return !"update_palette".equals(opName);
     }
 
     private static void validateAddActions(List<StructureBuilder.VbsAction> actions, String prefix, PatchModels.ValidationResult result) {
@@ -213,15 +284,6 @@ public final class PatchValidator {
         }
         for (int i = 0; i < actions.size(); i++) {
             validateAction(actions.get(i), prefix + ".actions_add[" + i + "]", result);
-        }
-    }
-
-    private static void validateRemoveMatches(List<PatchModels.ActionMatch> matches, String prefix, PatchModels.ValidationResult result) {
-        if (matches == null) {
-            return;
-        }
-        for (int i = 0; i < matches.size(); i++) {
-            validateActionMatch(matches.get(i), prefix + ".actions_remove_match[" + i + "]", result);
         }
     }
 
@@ -267,49 +329,6 @@ public final class PatchValidator {
             default -> {
             }
         }
-    }
-
-    private static void validateActionMatch(PatchModels.ActionMatch match, String path, PatchModels.ValidationResult result) {
-        if (match == null) {
-            result.addError(path + " is null");
-            return;
-        }
-
-        String type = normalize(match.type);
-        if (!type.isBlank() && !SUPPORTED_ACTION_TYPES.contains(type)) {
-            result.addError(path + " unsupported type '" + match.type + "'");
-        }
-        if (!isBlank(match.facing) && !SUPPORTED_FACING.contains(normalize(match.facing))) {
-            result.addError(path + " invalid facing '" + match.facing + "'");
-        }
-        if (match.from != null && !isVec3(match.from)) {
-            result.addError(path + " from must be [x,y,z]");
-        }
-        if (match.to != null && !isVec3(match.to)) {
-            result.addError(path + " to must be [x,y,z]");
-        }
-        if (match.at != null) {
-            for (int i = 0; i < match.at.size(); i++) {
-                if (!isVec3(match.at.get(i))) {
-                    result.addError(path + " at[" + i + "] must be [x,y,z]");
-                    break;
-                }
-            }
-        }
-
-        if (isActionMatchEmpty(match)) {
-            result.addError(path + " cannot be empty (would match all actions)");
-        }
-    }
-
-    private static boolean isActionMatchEmpty(PatchModels.ActionMatch match) {
-        return match != null
-                && isBlank(match.type)
-                && isBlank(match.block)
-                && isBlank(match.facing)
-                && match.from == null
-                && match.to == null
-                && match.at == null;
     }
 
     private static boolean isVec3(List<Integer> vec) {

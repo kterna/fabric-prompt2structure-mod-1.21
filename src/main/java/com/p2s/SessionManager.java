@@ -49,6 +49,13 @@ public final class SessionManager {
             - If propose_patch returns errors or warnings, adjust the patch before asking user to apply.
             - Keep patches minimal and focused on requested changes.
             - Only call read_workspace_state/propose_patch/explain_plan/search_block_ids in session mode.
+            ## Verification Model
+            - propose_patch uses strict verification: for modify/delete operations you MUST provide old_actions
+              matching the current state exactly. If verification fails, you get verification_failed with the
+              actual state — call read_workspace_state then retry with corrected old_actions.
+            - Operations: insert_part, delete_part, replace_part, insert_actions, delete_actions,
+              replace_actions, move_actions, update_palette.
+            - For update_palette, each entry requires old_value for modify/delete, old_value=null for add-new.
             """;
 
     private SessionManager() {
@@ -311,7 +318,32 @@ public final class SessionManager {
                     }
 
                     StructureBuilder.VbsScriptV2 committedBase = copyScript(session.current);
-                    StructureBuilder.VbsScriptV2 next = StructurePatchEngine.applyPatchToModel(stagedBase, patch);
+                    StructurePatchEngine.PatchApplyResult applyResult = StructurePatchEngine.applyPatchToModel(stagedBase, patch);
+
+                    // Handle verification failure — stay in VALIDATING, let agent retry
+                    if (!applyResult.ok && applyResult.error != null) {
+                        JsonObject payload = new JsonObject();
+                        payload.addProperty("ok", false);
+                        payload.addProperty("verification_failed", true);
+                        payload.addProperty("operation_index", applyResult.error.operationIndex);
+                        payload.addProperty("op", applyResult.error.op == null ? "" : applyResult.error.op);
+                        payload.addProperty("part", applyResult.error.part == null ? "" : applyResult.error.part);
+                        payload.addProperty("error", applyResult.error.error == null ? "" : applyResult.error.error);
+                        if (applyResult.error.expected != null) {
+                            payload.add("expected", GSON.toJsonTree(applyResult.error.expected));
+                        }
+                        if (applyResult.error.actual != null) {
+                            payload.add("actual", GSON.toJsonTree(applyResult.error.actual));
+                        }
+                        payload.addProperty("hint", applyResult.error.hint == null ? "" : applyResult.error.hint);
+                        result.toolMessages.add(buildToolMessage(call, payload));
+                        // Keep runtimeState as VALIDATING — agent should retry
+                        P2SMod.LOGGER.info("AgentLoop tool propose_patch verification_failed -> player={}, session={}, op={}, part={}, error={}",
+                                playerName, sessionId, applyResult.error.op, applyResult.error.part, applyResult.error.error);
+                        break;
+                    }
+
+                    StructureBuilder.VbsScriptV2 next = applyResult.result;
                     StructurePatchEngine.DiffResult diff = StructurePatchEngine.diff(committedBase, next);
 
                     PatchModels.StructurePatch mergedPatch = mergePatches(
@@ -1002,11 +1034,11 @@ public final class SessionManager {
             if (op.actionsAdd == null) {
                 op.actionsAdd = new ArrayList<>();
             }
-            if (op.actionsRemoveMatch == null) {
-                op.actionsRemoveMatch = new ArrayList<>();
+            if (op.oldActions == null) {
+                op.oldActions = new ArrayList<>();
             }
-            if (op.paletteDelta == null) {
-                op.paletteDelta = Map.of();
+            if (op.newActions == null) {
+                op.newActions = new ArrayList<>();
             }
         }
     }
@@ -1111,10 +1143,19 @@ public final class SessionManager {
         String name = op.op == null ? "unknown" : op.op;
         String part = op.part == null ? "" : op.part;
         int add = op.actionsAdd == null ? 0 : op.actionsAdd.size();
-        int remove = op.actionsRemoveMatch == null ? 0 : op.actionsRemoveMatch.size();
-        int palette = op.paletteDelta == null ? 0 : op.paletteDelta.size();
-        return name + (part.isBlank() ? "" : "(" + part + ")") +
-                " add=" + add + " remove=" + remove + " palette=" + palette;
+        int old = op.oldActions == null ? 0 : op.oldActions.size();
+        int nw = op.newActions == null ? 0 : op.newActions.size();
+        int entries = op.entries == null ? 0 : op.entries.size();
+        StringBuilder sb = new StringBuilder();
+        sb.append(name);
+        if (!part.isBlank()) sb.append("(").append(part).append(")");
+        if (add > 0) sb.append(" add=").append(add);
+        if (old > 0) sb.append(" old=").append(old);
+        if (nw > 0) sb.append(" new=").append(nw);
+        if (entries > 0) sb.append(" entries=").append(entries);
+        if (op.offset != null) sb.append(" offset=").append(op.offset);
+        if (op.targetPart != null && !op.targetPart.isBlank()) sb.append(" target=").append(op.targetPart);
+        return sb.toString();
     }
 
     private static int countParts(StructureBuilder.VbsScriptV2 script) {

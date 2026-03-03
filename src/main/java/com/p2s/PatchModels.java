@@ -4,9 +4,7 @@ import com.google.gson.annotations.SerializedName;
 import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
 public final class PatchModels {
     private PatchModels() {
@@ -30,22 +28,53 @@ public final class PatchModels {
         public Integer priority;
 
         @SerializedName(value = "actions_add", alternate = {"actionsAdd"})
-        public List<StructureBuilder.VbsAction> actionsAdd = new ArrayList<>();
+        public List<StructureBuilder.VbsAction> actionsAdd;
 
-        @SerializedName(value = "actions_remove_match", alternate = {"actionsRemoveMatch"})
-        public List<ActionMatch> actionsRemoveMatch = new ArrayList<>();
+        @SerializedName(value = "old_actions", alternate = {"oldActions"})
+        public List<StructureBuilder.VbsAction> oldActions;
 
-        @SerializedName(value = "palette_delta", alternate = {"paletteDelta"})
-        public Map<String, String> paletteDelta = new LinkedHashMap<>();
+        @SerializedName(value = "new_actions", alternate = {"newActions"})
+        public List<StructureBuilder.VbsAction> newActions;
+
+        public List<Integer> offset;
+
+        @SerializedName(value = "target_part", alternate = {"targetPart"})
+        public String targetPart;
+
+        public List<PaletteEntry> entries;
     }
 
-    public static final class ActionMatch {
-        public String type;
-        public String block;
-        public List<Integer> from;
-        public List<Integer> to;
-        public List<List<Integer>> at;
-        public String facing;
+    public static final class PaletteEntry {
+        public String key;
+
+        @SerializedName(value = "old_value", alternate = {"oldValue"})
+        public String oldValue;
+
+        @SerializedName(value = "new_value", alternate = {"newValue"})
+        public String newValue;
+    }
+
+    public static final class VerificationError {
+        @SerializedName(value = "operation_index", alternate = {"operationIndex"})
+        public int operationIndex;
+        public String op;
+        public String part;
+        public String error;
+        public List<StructureBuilder.VbsAction> expected;
+        public List<StructureBuilder.VbsAction> actual;
+        public String hint;
+
+        public VerificationError(int operationIndex, String op, String part, String error,
+                                 List<StructureBuilder.VbsAction> expected,
+                                 List<StructureBuilder.VbsAction> actual) {
+            this.operationIndex = operationIndex;
+            this.op = op;
+            this.part = part;
+            this.error = error;
+            this.expected = expected;
+            this.actual = actual;
+            this.hint = "Read workspace state with read_workspace_state and retry with corrected old_actions.";
+        }
     }
 
     public record BlockOp(int x, int y, int z, BlockState state) {

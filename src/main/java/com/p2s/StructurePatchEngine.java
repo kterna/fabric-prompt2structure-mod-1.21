@@ -19,7 +19,37 @@ public final class StructurePatchEngine {
     private StructurePatchEngine() {
     }
 
-    public static StructureBuilder.VbsScriptV2 applyPatchToModel(StructureBuilder.VbsScriptV2 base, PatchModels.StructurePatch patch) {
+    // ── Result wrapper ──────────────────────────────────────────────────
+
+    public static final class PatchApplyResult {
+        public final boolean ok;
+        public final StructureBuilder.VbsScriptV2 result;
+        public final PatchModels.VerificationError error;
+
+        private PatchApplyResult(StructureBuilder.VbsScriptV2 result) {
+            this.ok = true;
+            this.result = result;
+            this.error = null;
+        }
+
+        private PatchApplyResult(PatchModels.VerificationError error, StructureBuilder.VbsScriptV2 snapshot) {
+            this.ok = false;
+            this.result = snapshot;
+            this.error = error;
+        }
+
+        public static PatchApplyResult success(StructureBuilder.VbsScriptV2 script) {
+            return new PatchApplyResult(script);
+        }
+
+        public static PatchApplyResult fail(PatchModels.VerificationError error, StructureBuilder.VbsScriptV2 snapshot) {
+            return new PatchApplyResult(error, snapshot);
+        }
+    }
+
+    // ── Main entry point ────────────────────────────────────────────────
+
+    public static PatchApplyResult applyPatchToModel(StructureBuilder.VbsScriptV2 base, PatchModels.StructurePatch patch) {
         StructureBuilder.VbsScriptV2 working = copyScript(base);
         if (working == null) {
             working = new StructureBuilder.VbsScriptV2();
@@ -31,7 +61,7 @@ public final class StructurePatchEngine {
             working.structures = new ArrayList<>();
         }
         if (patch == null || patch.operations == null) {
-            return working;
+            return PatchApplyResult.success(working);
         }
 
         LinkedHashMap<String, StructureBuilder.StructurePart> parts = new LinkedHashMap<>();
@@ -42,7 +72,8 @@ public final class StructurePatchEngine {
             parts.put(part.name, copyPart(part));
         }
 
-        for (PatchModels.PatchOperation op : patch.operations) {
+        for (int i = 0; i < patch.operations.size(); i++) {
+            PatchModels.PatchOperation op = patch.operations.get(i);
             if (op == null || op.op == null || op.op.isBlank()) {
                 continue;
             }
@@ -50,18 +81,477 @@ public final class StructurePatchEngine {
             if (P2SMod.DEBUG) {
                 P2SMod.LOGGER.info("[DEBUG] PatchEngine operation: op={}, part={}, priority={}", opName, op.part, op.priority);
             }
-            switch (opName) {
-                case "set_palette" -> applySetPalette(working, op);
-                case "delete_part" -> applyDeletePart(parts, op);
-                case "upsert_part" -> applyUpsertPart(parts, op);
-                case "patch_actions" -> applyPatchActions(parts, op);
-                default -> P2SMod.LOGGER.warn("Unknown patch operation: {}", op.op);
+
+            PatchModels.VerificationError err = switch (opName) {
+                case "insert_part" -> applyInsertPart(parts, op, i);
+                case "delete_part" -> applyDeletePart(parts, op, i);
+                case "replace_part" -> applyReplacePart(parts, op, i);
+                case "insert_actions" -> applyInsertActions(parts, op, i);
+                case "delete_actions" -> applyDeleteActions(parts, op, i);
+                case "replace_actions" -> applyReplaceActions(parts, op, i);
+                case "move_actions" -> applyMoveActions(parts, op, i);
+                case "update_palette" -> applyUpdatePalette(working, op, i);
+                default -> {
+                    P2SMod.LOGGER.warn("Unknown patch operation: {}", op.op);
+                    yield null;
+                }
+            };
+
+            if (err != null) {
+                working.structures = new ArrayList<>(parts.values());
+                return PatchApplyResult.fail(err, working);
             }
         }
 
         working.structures = new ArrayList<>(parts.values());
-        return working;
+        return PatchApplyResult.success(working);
     }
+
+    // ── Exact matching ──────────────────────────────────────────────────
+
+    static boolean actionsExactEqual(StructureBuilder.VbsAction a, StructureBuilder.VbsAction b) {
+        if (a == null && b == null) return true;
+        if (a == null || b == null) return false;
+        if (!Objects.equals(normalize(a.type), normalize(b.type))) return false;
+        if (!Objects.equals(normalize(a.block), normalize(b.block))) return false;
+        if (!Objects.equals(normalize(a.facing), normalize(b.facing))) return false;
+        if (!Objects.equals(a.from, b.from)) return false;
+        if (!Objects.equals(a.to, b.to)) return false;
+        if (!Objects.equals(a.at, b.at)) return false;
+        return true;
+    }
+
+    /**
+     * Ordered full match: old_actions must equal part.actions element-by-element.
+     * Returns null on success, or an error message on failure.
+     */
+    private static String exactOrderedMatch(List<StructureBuilder.VbsAction> oldActions,
+                                            List<StructureBuilder.VbsAction> partActions) {
+        int expected = oldActions == null ? 0 : oldActions.size();
+        int actual = partActions == null ? 0 : partActions.size();
+        if (expected != actual) {
+            return "Action count mismatch: old_actions has " + expected + " but part has " + actual;
+        }
+        for (int i = 0; i < expected; i++) {
+            if (!actionsExactEqual(oldActions.get(i), partActions.get(i))) {
+                return "Action mismatch at index " + i;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Subset match: each old_actions[i] must find a unique exact match in partActions.
+     * Returns matched indices on success, or null on failure (caller checks).
+     */
+    private static int[] subsetExactMatch(List<StructureBuilder.VbsAction> oldActions,
+                                          List<StructureBuilder.VbsAction> partActions) {
+        if (oldActions == null || oldActions.isEmpty()) {
+            return new int[0];
+        }
+        if (partActions == null || partActions.isEmpty()) {
+            return null;
+        }
+        boolean[] used = new boolean[partActions.size()];
+        int[] indices = new int[oldActions.size()];
+
+        for (int i = 0; i < oldActions.size(); i++) {
+            StructureBuilder.VbsAction needle = oldActions.get(i);
+            int found = -1;
+            for (int j = 0; j < partActions.size(); j++) {
+                if (!used[j] && actionsExactEqual(needle, partActions.get(j))) {
+                    found = j;
+                    break;
+                }
+            }
+            if (found < 0) {
+                return null;
+            }
+            used[found] = true;
+            indices[i] = found;
+        }
+        return indices;
+    }
+
+    private static String describeAction(StructureBuilder.VbsAction a) {
+        if (a == null) return "null";
+        StringBuilder sb = new StringBuilder();
+        sb.append(a.type == null ? "?" : a.type);
+        sb.append(" ").append(a.block == null ? "?" : a.block);
+        if (a.from != null) sb.append(" ").append(a.from);
+        if (a.to != null) sb.append("->").append(a.to);
+        if (a.at != null) sb.append(" at ").append(a.at.size()).append(" points");
+        return sb.toString();
+    }
+
+    // ── Coordinate translation ──────────────────────────────────────────
+
+    private static StructureBuilder.VbsAction translateAction(StructureBuilder.VbsAction action, List<Integer> offset) {
+        if (action == null || offset == null || offset.size() < 3) {
+            return action == null ? null : copyAction(action);
+        }
+        StructureBuilder.VbsAction copy = copyAction(action);
+        int dx = offset.get(0);
+        int dy = offset.get(1);
+        int dz = offset.get(2);
+
+        if (copy.from != null && copy.from.size() >= 3) {
+            copy.from.set(0, copy.from.get(0) + dx);
+            copy.from.set(1, copy.from.get(1) + dy);
+            copy.from.set(2, copy.from.get(2) + dz);
+        }
+        if (copy.to != null && copy.to.size() >= 3) {
+            copy.to.set(0, copy.to.get(0) + dx);
+            copy.to.set(1, copy.to.get(1) + dy);
+            copy.to.set(2, copy.to.get(2) + dz);
+        }
+        if (copy.at != null) {
+            for (List<Integer> point : copy.at) {
+                if (point != null && point.size() >= 3) {
+                    point.set(0, point.get(0) + dx);
+                    point.set(1, point.get(1) + dy);
+                    point.set(2, point.get(2) + dz);
+                }
+            }
+        }
+        return copy;
+    }
+
+    // ── 8 operation handlers ────────────────────────────────────────────
+
+    private static PatchModels.VerificationError applyInsertPart(
+            LinkedHashMap<String, StructureBuilder.StructurePart> parts,
+            PatchModels.PatchOperation op, int opIndex) {
+        String partName = normalizePartName(op.part);
+        if (partName == null) return null;
+
+        if (parts.containsKey(partName)) {
+            StructureBuilder.StructurePart existing = parts.get(partName);
+            List<StructureBuilder.VbsAction> actual = existing.actions == null ? new ArrayList<>() : existing.actions;
+            return new PatchModels.VerificationError(opIndex, "insert_part", partName,
+                    "Part '" + partName + "' already exists with " + actual.size() + " actions",
+                    null, copyActions(actual));
+        }
+
+        StructureBuilder.StructurePart next = new StructureBuilder.StructurePart();
+        next.name = partName;
+        next.priority = op.priority == null ? 10 : op.priority;
+        next.actions = copyActions(op.actionsAdd);
+        parts.put(partName, next);
+        return null;
+    }
+
+    private static PatchModels.VerificationError applyDeletePart(
+            LinkedHashMap<String, StructureBuilder.StructurePart> parts,
+            PatchModels.PatchOperation op, int opIndex) {
+        String partName = normalizePartName(op.part);
+        if (partName == null) return null;
+
+        StructureBuilder.StructurePart existing = parts.get(partName);
+        if (existing == null) {
+            return new PatchModels.VerificationError(opIndex, "delete_part", partName,
+                    "Part '" + partName + "' does not exist",
+                    op.oldActions, new ArrayList<>());
+        }
+
+        List<StructureBuilder.VbsAction> actual = existing.actions == null ? new ArrayList<>() : existing.actions;
+        String matchErr = exactOrderedMatch(op.oldActions, actual);
+        if (matchErr != null) {
+            return new PatchModels.VerificationError(opIndex, "delete_part", partName,
+                    matchErr, op.oldActions, copyActions(actual));
+        }
+
+        parts.remove(partName);
+        return null;
+    }
+
+    private static PatchModels.VerificationError applyReplacePart(
+            LinkedHashMap<String, StructureBuilder.StructurePart> parts,
+            PatchModels.PatchOperation op, int opIndex) {
+        String partName = normalizePartName(op.part);
+        if (partName == null) return null;
+
+        StructureBuilder.StructurePart existing = parts.get(partName);
+        if (existing == null) {
+            return new PatchModels.VerificationError(opIndex, "replace_part", partName,
+                    "Part '" + partName + "' does not exist",
+                    op.oldActions, new ArrayList<>());
+        }
+
+        List<StructureBuilder.VbsAction> actual = existing.actions == null ? new ArrayList<>() : existing.actions;
+        String matchErr = exactOrderedMatch(op.oldActions, actual);
+        if (matchErr != null) {
+            return new PatchModels.VerificationError(opIndex, "replace_part", partName,
+                    matchErr, op.oldActions, copyActions(actual));
+        }
+
+        StructureBuilder.StructurePart next = new StructureBuilder.StructurePart();
+        next.name = partName;
+        next.priority = op.priority != null ? op.priority : existing.priority;
+        next.actions = copyActions(op.newActions);
+        parts.put(partName, next);
+        return null;
+    }
+
+    private static PatchModels.VerificationError applyInsertActions(
+            LinkedHashMap<String, StructureBuilder.StructurePart> parts,
+            PatchModels.PatchOperation op, int opIndex) {
+        String partName = normalizePartName(op.part);
+        if (partName == null) return null;
+
+        StructureBuilder.StructurePart existing = parts.get(partName);
+        if (existing == null) {
+            return new PatchModels.VerificationError(opIndex, "insert_actions", partName,
+                    "Part '" + partName + "' does not exist (insert_actions does not auto-create parts)",
+                    null, new ArrayList<>());
+        }
+
+        StructureBuilder.StructurePart part = copyPart(existing);
+        if (part.actions == null) {
+            part.actions = new ArrayList<>();
+        }
+        part.actions.addAll(copyActions(op.actionsAdd));
+        parts.put(partName, part);
+        return null;
+    }
+
+    private static PatchModels.VerificationError applyDeleteActions(
+            LinkedHashMap<String, StructureBuilder.StructurePart> parts,
+            PatchModels.PatchOperation op, int opIndex) {
+        String partName = normalizePartName(op.part);
+        if (partName == null) return null;
+
+        StructureBuilder.StructurePart existing = parts.get(partName);
+        if (existing == null) {
+            return new PatchModels.VerificationError(opIndex, "delete_actions", partName,
+                    "Part '" + partName + "' does not exist",
+                    op.oldActions, new ArrayList<>());
+        }
+
+        List<StructureBuilder.VbsAction> actual = existing.actions == null ? new ArrayList<>() : existing.actions;
+        int[] matched = subsetExactMatch(op.oldActions, actual);
+        if (matched == null) {
+            StructureBuilder.VbsAction notFound = findFirstUnmatched(op.oldActions, actual);
+            return new PatchModels.VerificationError(opIndex, "delete_actions", partName,
+                    "Action not found in part '" + partName + "': " + describeAction(notFound),
+                    op.oldActions, copyActions(actual));
+        }
+
+        StructureBuilder.StructurePart part = copyPart(existing);
+        // Remove matched indices in reverse order to preserve indices
+        boolean[] toRemove = new boolean[part.actions.size()];
+        for (int idx : matched) {
+            toRemove[idx] = true;
+        }
+        List<StructureBuilder.VbsAction> remaining = new ArrayList<>();
+        for (int j = 0; j < part.actions.size(); j++) {
+            if (!toRemove[j]) {
+                remaining.add(part.actions.get(j));
+            }
+        }
+        part.actions = remaining;
+        parts.put(partName, part);
+        return null;
+    }
+
+    private static PatchModels.VerificationError applyReplaceActions(
+            LinkedHashMap<String, StructureBuilder.StructurePart> parts,
+            PatchModels.PatchOperation op, int opIndex) {
+        String partName = normalizePartName(op.part);
+        if (partName == null) return null;
+
+        StructureBuilder.StructurePart existing = parts.get(partName);
+        if (existing == null) {
+            return new PatchModels.VerificationError(opIndex, "replace_actions", partName,
+                    "Part '" + partName + "' does not exist",
+                    op.oldActions, new ArrayList<>());
+        }
+
+        int oldSize = op.oldActions == null ? 0 : op.oldActions.size();
+        int newSize = op.newActions == null ? 0 : op.newActions.size();
+        if (oldSize != newSize) {
+            return new PatchModels.VerificationError(opIndex, "replace_actions", partName,
+                    "old_actions length (" + oldSize + ") must equal new_actions length (" + newSize + ")",
+                    op.oldActions, existing.actions == null ? new ArrayList<>() : copyActions(existing.actions));
+        }
+
+        List<StructureBuilder.VbsAction> actual = existing.actions == null ? new ArrayList<>() : existing.actions;
+        int[] matched = subsetExactMatch(op.oldActions, actual);
+        if (matched == null) {
+            StructureBuilder.VbsAction notFound = findFirstUnmatched(op.oldActions, actual);
+            return new PatchModels.VerificationError(opIndex, "replace_actions", partName,
+                    "Action not found in part '" + partName + "': " + describeAction(notFound),
+                    op.oldActions, copyActions(actual));
+        }
+
+        StructureBuilder.StructurePart part = copyPart(existing);
+        // Replace matched actions 1:1
+        for (int i = 0; i < matched.length; i++) {
+            part.actions.set(matched[i], copyAction(op.newActions.get(i)));
+        }
+        parts.put(partName, part);
+        return null;
+    }
+
+    private static PatchModels.VerificationError applyMoveActions(
+            LinkedHashMap<String, StructureBuilder.StructurePart> parts,
+            PatchModels.PatchOperation op, int opIndex) {
+        String partName = normalizePartName(op.part);
+        if (partName == null) return null;
+
+        StructureBuilder.StructurePart existing = parts.get(partName);
+        if (existing == null) {
+            return new PatchModels.VerificationError(opIndex, "move_actions", partName,
+                    "Part '" + partName + "' does not exist",
+                    op.oldActions, new ArrayList<>());
+        }
+
+        List<StructureBuilder.VbsAction> actual = existing.actions == null ? new ArrayList<>() : existing.actions;
+        int[] matched = subsetExactMatch(op.oldActions, actual);
+        if (matched == null) {
+            StructureBuilder.VbsAction notFound = findFirstUnmatched(op.oldActions, actual);
+            return new PatchModels.VerificationError(opIndex, "move_actions", partName,
+                    "Action not found in part '" + partName + "': " + describeAction(notFound),
+                    op.oldActions, copyActions(actual));
+        }
+
+        // Translate actions
+        List<StructureBuilder.VbsAction> translated = new ArrayList<>();
+        for (int i = 0; i < op.oldActions.size(); i++) {
+            translated.add(translateAction(op.oldActions.get(i), op.offset));
+        }
+
+        String targetPartName = op.targetPart == null || op.targetPart.isBlank() ? null : op.targetPart.trim();
+
+        if (targetPartName == null || targetPartName.equals(partName)) {
+            // In-place move: replace matched actions with translated versions
+            StructureBuilder.StructurePart part = copyPart(existing);
+            for (int i = 0; i < matched.length; i++) {
+                part.actions.set(matched[i], translated.get(i));
+            }
+            parts.put(partName, part);
+        } else {
+            // Cross-part move: remove from source, add to target
+            StructureBuilder.StructurePart sourcePart = copyPart(existing);
+            boolean[] toRemove = new boolean[sourcePart.actions.size()];
+            for (int idx : matched) {
+                toRemove[idx] = true;
+            }
+            List<StructureBuilder.VbsAction> remaining = new ArrayList<>();
+            for (int j = 0; j < sourcePart.actions.size(); j++) {
+                if (!toRemove[j]) {
+                    remaining.add(sourcePart.actions.get(j));
+                }
+            }
+            sourcePart.actions = remaining;
+            parts.put(partName, sourcePart);
+
+            StructureBuilder.StructurePart target = parts.get(targetPartName);
+            if (target == null) {
+                return new PatchModels.VerificationError(opIndex, "move_actions", partName,
+                        "Target part '" + targetPartName + "' does not exist",
+                        op.oldActions, copyActions(actual));
+            }
+            StructureBuilder.StructurePart targetCopy = copyPart(target);
+            if (targetCopy.actions == null) {
+                targetCopy.actions = new ArrayList<>();
+            }
+            targetCopy.actions.addAll(translated);
+            parts.put(targetPartName, targetCopy);
+        }
+
+        return null;
+    }
+
+    private static PatchModels.VerificationError applyUpdatePalette(
+            StructureBuilder.VbsScriptV2 working,
+            PatchModels.PatchOperation op, int opIndex) {
+        if (op.entries == null || op.entries.isEmpty()) {
+            return null;
+        }
+        if (working.palette == null) {
+            working.palette = new LinkedHashMap<>();
+        }
+
+        for (PatchModels.PaletteEntry entry : op.entries) {
+            if (entry == null || entry.key == null || entry.key.isBlank()) {
+                continue;
+            }
+            String key = entry.key.trim();
+            String currentValue = working.palette.get(key);
+            boolean exists = working.palette.containsKey(key);
+
+            if (entry.oldValue == null) {
+                // Add new entry: key must not exist
+                if (exists) {
+                    List<StructureBuilder.VbsAction> hint = new ArrayList<>();
+                    return new PatchModels.VerificationError(opIndex, "update_palette", key,
+                            "Palette key '" + key + "' already exists with value '" + currentValue
+                                    + "' (old_value=null means add-new, but key exists)",
+                            null, hint);
+                }
+                if (entry.newValue != null && !entry.newValue.isBlank()) {
+                    working.palette.put(key, entry.newValue.trim());
+                }
+            } else if (entry.newValue == null) {
+                // Delete entry: old_value must match
+                if (!exists) {
+                    return new PatchModels.VerificationError(opIndex, "update_palette", key,
+                            "Palette key '" + key + "' does not exist (cannot delete)",
+                            null, new ArrayList<>());
+                }
+                if (!entry.oldValue.trim().equals(currentValue == null ? "" : currentValue.trim())) {
+                    return new PatchModels.VerificationError(opIndex, "update_palette", key,
+                            "Palette key '" + key + "' old_value mismatch: expected '"
+                                    + entry.oldValue + "' but actual is '" + currentValue + "'",
+                            null, new ArrayList<>());
+                }
+                working.palette.remove(key);
+            } else {
+                // Modify entry: old_value must match
+                if (!exists) {
+                    return new PatchModels.VerificationError(opIndex, "update_palette", key,
+                            "Palette key '" + key + "' does not exist (cannot modify)",
+                            null, new ArrayList<>());
+                }
+                if (!entry.oldValue.trim().equals(currentValue == null ? "" : currentValue.trim())) {
+                    return new PatchModels.VerificationError(opIndex, "update_palette", key,
+                            "Palette key '" + key + "' old_value mismatch: expected '"
+                                    + entry.oldValue + "' but actual is '" + currentValue + "'",
+                            null, new ArrayList<>());
+                }
+                working.palette.put(key, entry.newValue.trim());
+            }
+        }
+        return null;
+    }
+
+    // ── Helper: find first unmatched old action for error reporting ──────
+
+    private static StructureBuilder.VbsAction findFirstUnmatched(
+            List<StructureBuilder.VbsAction> oldActions,
+            List<StructureBuilder.VbsAction> partActions) {
+        if (oldActions == null || oldActions.isEmpty()) return null;
+        if (partActions == null || partActions.isEmpty()) return oldActions.get(0);
+
+        boolean[] used = new boolean[partActions.size()];
+        for (StructureBuilder.VbsAction needle : oldActions) {
+            boolean found = false;
+            for (int j = 0; j < partActions.size(); j++) {
+                if (!used[j] && actionsExactEqual(needle, partActions.get(j))) {
+                    used[j] = true;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                return needle;
+            }
+        }
+        return null;
+    }
+
+    // ── Diff / BlockOps (unchanged) ─────────────────────────────────────
 
     public static DiffResult diff(StructureBuilder.VbsScriptV2 before, StructureBuilder.VbsScriptV2 after) {
         Map<Int3, BlockState> beforeMap = materialize(before);
@@ -109,124 +599,7 @@ public final class StructurePatchEngine {
         }
     }
 
-    private static void applySetPalette(StructureBuilder.VbsScriptV2 working, PatchModels.PatchOperation op) {
-        if (op.paletteDelta == null || op.paletteDelta.isEmpty()) {
-            return;
-        }
-        if (working.palette == null) {
-            working.palette = new LinkedHashMap<>();
-        }
-        if (P2SMod.DEBUG) {
-            P2SMod.LOGGER.info("[DEBUG] PatchEngine set_palette delta: {}", op.paletteDelta);
-        }
-        for (Map.Entry<String, String> entry : op.paletteDelta.entrySet()) {
-            if (entry.getKey() == null || entry.getKey().isBlank()) {
-                continue;
-            }
-            if (entry.getValue() == null || entry.getValue().isBlank()) {
-                continue;
-            }
-            working.palette.put(entry.getKey().trim(), entry.getValue().trim());
-        }
-    }
-
-    private static void applyDeletePart(LinkedHashMap<String, StructureBuilder.StructurePart> parts, PatchModels.PatchOperation op) {
-        String partName = normalizePartName(op.part);
-        if (partName == null) {
-            return;
-        }
-        parts.remove(partName);
-    }
-
-    private static void applyUpsertPart(LinkedHashMap<String, StructureBuilder.StructurePart> parts, PatchModels.PatchOperation op) {
-        String partName = normalizePartName(op.part);
-        if (partName == null) {
-            return;
-        }
-        StructureBuilder.StructurePart existing = parts.get(partName);
-        StructureBuilder.StructurePart next = new StructureBuilder.StructurePart();
-        next.name = partName;
-        if (op.priority != null) {
-            next.priority = op.priority;
-        } else if (existing != null) {
-            next.priority = existing.priority;
-        } else {
-            next.priority = 10;
-        }
-        next.actions = copyActions(op.actionsAdd);
-        parts.put(partName, next);
-    }
-
-    private static void applyPatchActions(LinkedHashMap<String, StructureBuilder.StructurePart> parts, PatchModels.PatchOperation op) {
-        String partName = normalizePartName(op.part);
-        if (partName == null) {
-            return;
-        }
-
-        StructureBuilder.StructurePart part = parts.get(partName);
-        if (part == null) {
-            part = new StructureBuilder.StructurePart();
-            part.name = partName;
-            part.priority = op.priority == null ? 10 : op.priority;
-            part.actions = new ArrayList<>();
-        } else {
-            part = copyPart(part);
-        }
-
-        if (op.priority != null) {
-            part.priority = op.priority;
-        }
-
-        if (part.actions == null) {
-            part.actions = new ArrayList<>();
-        }
-        if (op.actionsRemoveMatch != null && !op.actionsRemoveMatch.isEmpty()) {
-            part.actions.removeIf(action -> matchesAny(action, op.actionsRemoveMatch));
-        }
-        part.actions.addAll(copyActions(op.actionsAdd));
-        parts.put(partName, part);
-    }
-
-    private static boolean matchesAny(StructureBuilder.VbsAction action, List<PatchModels.ActionMatch> matches) {
-        for (PatchModels.ActionMatch match : matches) {
-            if (matchesAction(action, match)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static boolean matchesAction(StructureBuilder.VbsAction action, PatchModels.ActionMatch match) {
-        if (action == null || match == null) {
-            return false;
-        }
-        if (!equalsIgnoreBlank(action.type, match.type)) {
-            return false;
-        }
-        if (!equalsIgnoreBlank(action.block, match.block)) {
-            return false;
-        }
-        if (!equalsIgnoreBlank(action.facing, match.facing)) {
-            return false;
-        }
-        if (match.from != null && !Objects.equals(action.from, match.from)) {
-            return false;
-        }
-        if (match.to != null && !Objects.equals(action.to, match.to)) {
-            return false;
-        }
-        if (match.at != null && !Objects.equals(action.at, match.at)) {
-            return false;
-        }
-        return true;
-    }
-
-    private static boolean equalsIgnoreBlank(String value, String condition) {
-        if (condition == null || condition.isBlank()) {
-            return true;
-        }
-        return Objects.equals(normalize(condition), normalize(value));
-    }
+    // ── Normalize / Copy helpers (preserved) ────────────────────────────
 
     private static String normalize(String value) {
         if (value == null) {
@@ -242,7 +615,7 @@ public final class StructurePatchEngine {
         return partName.trim();
     }
 
-    private static StructureBuilder.StructurePart copyPart(StructureBuilder.StructurePart part) {
+    static StructureBuilder.StructurePart copyPart(StructureBuilder.StructurePart part) {
         if (part == null) {
             return null;
         }
@@ -253,7 +626,7 @@ public final class StructurePatchEngine {
         return copy;
     }
 
-    private static List<StructureBuilder.VbsAction> copyActions(List<StructureBuilder.VbsAction> actions) {
+    static List<StructureBuilder.VbsAction> copyActions(List<StructureBuilder.VbsAction> actions) {
         List<StructureBuilder.VbsAction> out = new ArrayList<>();
         if (actions == null) {
             return out;
@@ -267,7 +640,7 @@ public final class StructurePatchEngine {
         return out;
     }
 
-    private static StructureBuilder.VbsAction copyAction(StructureBuilder.VbsAction action) {
+    static StructureBuilder.VbsAction copyAction(StructureBuilder.VbsAction action) {
         StructureBuilder.VbsAction copy = new StructureBuilder.VbsAction();
         copy.type = action.type;
         copy.block = action.block;
@@ -285,7 +658,7 @@ public final class StructurePatchEngine {
         return copy;
     }
 
-    private static StructureBuilder.VbsScriptV2 copyScript(StructureBuilder.VbsScriptV2 source) {
+    static StructureBuilder.VbsScriptV2 copyScript(StructureBuilder.VbsScriptV2 source) {
         if (source == null) {
             return null;
         }
@@ -306,6 +679,8 @@ public final class StructurePatchEngine {
         }
         return copy;
     }
+
+    // ── Materialize (unchanged) ─────────────────────────────────────────
 
     private static Map<Int3, BlockState> materialize(StructureBuilder.VbsScriptV2 script) {
         Map<Int3, BlockState> map = new HashMap<>();
@@ -364,6 +739,8 @@ public final class StructurePatchEngine {
         }
         return StructureBuilder.applyFacingState(base, action.facing);
     }
+
+    // ── Override analysis (unchanged) ───────────────────────────────────
 
     public static OverrideStats analyzeOverrides(StructureBuilder.VbsScriptV2 script) {
         OverrideStats stats = new OverrideStats();
