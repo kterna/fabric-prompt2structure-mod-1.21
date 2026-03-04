@@ -10,9 +10,9 @@ public record C2SSessionActionPayload(String action, String payload) implements 
     public static final StreamCodec<FriendlyByteBuf, C2SSessionActionPayload> CODEC = StreamCodec.of(
             (buf, data) -> {
                 buf.writeUtf(data.action, 32);
-                buf.writeUtf(data.payload == null ? "" : data.payload, 8192);
+                buf.writeUtf(data.payload == null ? "" : data.payload, 65536);
             },
-            buf -> new C2SSessionActionPayload(buf.readUtf(32), buf.readUtf(8192))
+            buf -> new C2SSessionActionPayload(buf.readUtf(32), buf.readUtf(65536))
     );
 
     @Override

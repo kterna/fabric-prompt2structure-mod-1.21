@@ -44,3 +44,12 @@
 - 默认 skill 体系拆分为“总控 + 专项”：`default-builder` 负责协议与分流，新增 `size-planner`、`style-knowledge`、`interior-furniture` 分别承载尺寸、风格、内饰桌椅规则，并注册到 `SkillStore` 默认模板。
 - 新增 `read_subdoc` 工具：支持按 skill 内相对路径读取子文档；`read_skill` 现返回可读 `subdocs` 列表，`search_skill` 也会检索子文档内容。
 - 新增默认技能 `component-library`，并移植外部项目的核心组件示例到 `subdocs`（墙体、框架、门窗、屋顶、楼梯、曲线、几何体、散布）且统一为 `box/plane/line/points` 模式。
+
+## 2026-03-04 上下文编辑器 Tab 化 & Script 同步 & Info 浮层
+- **上下文编辑器 Tab 化**：左侧 JSON 编辑器由单一文件模式重构为 `State / Script / Diff` 三 Tab，各自独立维护编辑状态（光标、滚动、内容），Tab 切换时自动保存与恢复。
+- **Script Tab & 脚本同步**：新增 `Script` Tab，可通过 `Fetch` 按钮从服务端异步拉取当前 `VbsScriptV2` 脚本；脚本 JSON 随会话 start payload 发送至服务端并在服务端反序列化恢复，实现客户端-服务端脚本状态双向同步。
+- **网络协议扩展**：`S2CSessionSyncPayload` / `C2SSessionActionPayload` 增加 `currentScriptJson` 字段，payload 最大长度由 8 KB 提升至 64 KB，支持完整脚本传输。
+- **会话持久化增强**：`SessionPersistence` 的 `SavedSession` record 新增 `currentScriptJson`，脚本随会话存盘/读盘自动保存与恢复。
+- **Info 浮层 (Overlay)**：消息区上方新增 `[i]` 按钮，点击弹出可滚动半透明浮层，集中显示 Action Required / Pending Patch / Structure Summary / Todo / Checkpoints 等信息段，取代之前占据固定空间的内联渲染方式，大幅释放消息区可用高度。
+- **长按选区快速附加上下文**：编辑器内鼠标拖选超过 400 ms 自动进入"长按上下文模式"，松手后直接将选区文本作为上下文添加到队列，选中高亮色由蓝色变为绿色以提供视觉反馈。
+- **Diff Tab 控件精简**：Diff 相关操作（Refresh / <D / D>）仅在 Diff Tab 内显示，其他 Tab 不再展示无关按钮；移除 `contextFileInput` 文本框与 `normalizeContextFileName` 方法。

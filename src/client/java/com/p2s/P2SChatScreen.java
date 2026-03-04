@@ -42,6 +42,7 @@ public class P2SChatScreen extends Screen {
     private static final int CONTEXT_MAX_SNIPPET_CHARS = 4000;
     private static final int CONTEXT_MAX_TOTAL_CHARS = 12000;
     private static final int CONTEXT_DEFAULT_RANGE = 30;
+    private static final long CONTEXT_LONG_PRESS_MS = 400;
     private static final int CONTEXT_DIFF_MAX_SOURCE_LINES = 1400;
     private static final int CONTEXT_DIFF_EQUAL_CONTEXT_LINES = 3;
 
@@ -60,6 +61,10 @@ public class P2SChatScreen extends Screen {
     private final List<Button> choiceButtons = new ArrayList<>();
     private double scrollOffset;
 
+    private boolean infoOverlayVisible = false;
+    private double infoOverlayScroll = 0;
+    private Button infoButton;
+
     private boolean discardReasonMode = false;
     private EditBox discardReasonInput;
     private Button discardOkButton;
@@ -68,17 +73,28 @@ public class P2SChatScreen extends Screen {
     // Left context editor
     private final List<String> contextJsonLines = new ArrayList<>();
     private final List<ContextSnippet> queuedContexts = new ArrayList<>();
-    private EditBox contextFileInput;
+    private Button contextTabStateButton;
+    private Button contextTabScriptButton;
+    private Button contextTabDiffButton;
     private EditBox contextStartInput;
     private EditBox contextEndInput;
     private Button contextLoadButton;
     private Button contextFormatButton;
     private Button contextClearJsonButton;
     private Button contextClearQueueButton;
-    private Button contextDiffButton;
     private Button contextDiffPrevButton;
     private Button contextDiffNextButton;
     private Button contextAddRangeButton;
+    private ContextTab activeContextTab = ContextTab.STATE;
+    private final List<String> stateJsonLines = new ArrayList<>();
+    private int stateCursorLine = 0;
+    private int stateCursorColumn = 0;
+    private int stateScroll = 0;
+    private final List<String> scriptJsonLines = new ArrayList<>();
+    private int scriptCursorLine = 0;
+    private int scriptCursorColumn = 0;
+    private int scriptScroll = 0;
+    private boolean scriptLoading = false;
     private int contextVisibleRows = 0;
     private int contextScroll = 0;
     private int contextEditorX = 0;
@@ -93,8 +109,9 @@ public class P2SChatScreen extends Screen {
     private int contextSelectionAnchorLine = 0;
     private int contextSelectionAnchorColumn = 0;
     private boolean contextMouseSelecting = false;
+    private long contextMousePressTime = 0;
+    private boolean contextLongPressCtxMode = false;
     private int contextQueueTopY = 0;
-    private String contextFileName = "workspace-state.json";
     private int contextRangeStart = 1;
     private int contextRangeEnd = CONTEXT_DEFAULT_RANGE;
     private boolean contextDiffMode = false;
@@ -156,6 +173,14 @@ public class P2SChatScreen extends Screen {
                 .bounds(panelX + PADDING + 64, PADDING, 40, INPUT_HEIGHT)
                 .build();
         addRenderableWidget(newButton);
+
+        infoButton = Button.builder(Component.literal("[i]"), btn -> {
+                    infoOverlayVisible = !infoOverlayVisible;
+                    infoOverlayScroll = 0;
+                })
+                .bounds(panelX + PADDING + 108, PADDING, 40, INPUT_HEIGHT)
+                .build();
+        addRenderableWidget(infoButton);
 
         int rowY = PADDING + TOP_BUTTON_HEIGHT + 4;
         int rowStart = panelX + panelWidth - PADDING - (SMALL_BUTTON_WIDTH * 4 + 6);
@@ -250,7 +275,7 @@ public class P2SChatScreen extends Screen {
     }
 
     private void initContextWidgets(int panelX) {
-        if (contextJsonLines.isEmpty()) {
+        if (activeContextTab == ContextTab.STATE && contextJsonLines.isEmpty()) {
             setContextJsonText(buildWorkspaceStateJson());
         }
         contextScroll = Math.max(0, contextScroll);
@@ -262,35 +287,69 @@ public class P2SChatScreen extends Screen {
         int row2Y = row1Y + INPUT_HEIGHT + rowGap;
         int row3Y = row2Y + INPUT_HEIGHT + rowGap;
 
-        contextFileInput = new EditBox(this.font, leftX, row1Y, leftWidth, INPUT_HEIGHT, Component.literal("context file"));
-        contextFileInput.setMaxLength(128);
-        contextFileInput.setValue(contextFileName == null || contextFileName.isBlank() ? "workspace-state.json" : contextFileName);
-        addRenderableWidget(contextFileInput);
+        // Row 1: Tab buttons
+        int tabGap = 2;
+        int tabWidth = Math.max(40, (leftWidth - tabGap * 2) / 3);
+        int tabX = leftX;
+        contextTabStateButton = addRenderableWidget(Button.builder(Component.literal("State"), btn -> switchContextTab(ContextTab.STATE))
+                .bounds(tabX, row1Y, tabWidth, INPUT_HEIGHT).build());
+        contextTabStateButton.active = activeContextTab != ContextTab.STATE;
+        tabX += tabWidth + tabGap;
+        contextTabScriptButton = addRenderableWidget(Button.builder(Component.literal("Script"), btn -> switchContextTab(ContextTab.SCRIPT))
+                .bounds(tabX, row1Y, tabWidth, INPUT_HEIGHT).build());
+        contextTabScriptButton.active = activeContextTab != ContextTab.SCRIPT;
+        tabX += tabWidth + tabGap;
+        contextTabDiffButton = addRenderableWidget(Button.builder(Component.literal("Diff"), btn -> switchContextTab(ContextTab.DIFF))
+                .bounds(tabX, row1Y, tabWidth, INPUT_HEIGHT).build());
+        contextTabDiffButton.active = activeContextTab != ContextTab.DIFF;
 
-        int row2ButtonCount = 7;
+        // Row 2: Action buttons (vary by tab)
+        int row2ButtonCount = 4;
         int row2BtnWidth = Math.max(46, (leftWidth - rowGap * (row2ButtonCount - 1)) / row2ButtonCount);
         int row2X = leftX;
-        contextLoadButton = addRenderableWidget(Button.builder(Component.literal("Load"), btn -> loadWorkspaceStateJson())
-                .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
-        row2X += row2BtnWidth + rowGap;
-        contextFormatButton = addRenderableWidget(Button.builder(Component.literal("Format"), btn -> formatContextJson())
-                .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
-        row2X += row2BtnWidth + rowGap;
-        contextClearJsonButton = addRenderableWidget(Button.builder(Component.literal("Clear"), btn -> clearContextJson())
-                .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
-        row2X += row2BtnWidth + rowGap;
-        contextClearQueueButton = addRenderableWidget(Button.builder(Component.literal("Clear Ctx"), btn -> clearContextQueue())
-                .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
-        row2X += row2BtnWidth + rowGap;
-        contextDiffButton = addRenderableWidget(Button.builder(Component.literal("Diff"), btn -> loadWorkspaceDiff())
-                .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
-        row2X += row2BtnWidth + rowGap;
-        contextDiffPrevButton = addRenderableWidget(Button.builder(Component.literal("<D"), btn -> navigateContextDiffChange(-1))
-                .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
-        row2X += row2BtnWidth + rowGap;
-        contextDiffNextButton = addRenderableWidget(Button.builder(Component.literal("D>"), btn -> navigateContextDiffChange(1))
-                .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
+        switch (activeContextTab) {
+            case STATE -> {
+                contextLoadButton = addRenderableWidget(Button.builder(Component.literal("Load"), btn -> loadWorkspaceStateJson())
+                        .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
+                row2X += row2BtnWidth + rowGap;
+                contextFormatButton = addRenderableWidget(Button.builder(Component.literal("Format"), btn -> formatContextJson())
+                        .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
+                row2X += row2BtnWidth + rowGap;
+                contextClearJsonButton = addRenderableWidget(Button.builder(Component.literal("Clear"), btn -> clearContextJson())
+                        .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
+                row2X += row2BtnWidth + rowGap;
+                contextClearQueueButton = addRenderableWidget(Button.builder(Component.literal("Clear Ctx"), btn -> clearContextQueue())
+                        .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
+            }
+            case SCRIPT -> {
+                contextLoadButton = addRenderableWidget(Button.builder(Component.literal("Fetch"), btn -> fetchWorkspaceScript())
+                        .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
+                row2X += row2BtnWidth + rowGap;
+                contextFormatButton = addRenderableWidget(Button.builder(Component.literal("Format"), btn -> formatContextJson())
+                        .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
+                row2X += row2BtnWidth + rowGap;
+                contextClearJsonButton = addRenderableWidget(Button.builder(Component.literal("Clear"), btn -> clearContextJson())
+                        .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
+                row2X += row2BtnWidth + rowGap;
+                contextClearQueueButton = addRenderableWidget(Button.builder(Component.literal("Clear Ctx"), btn -> clearContextQueue())
+                        .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
+            }
+            case DIFF -> {
+                contextLoadButton = addRenderableWidget(Button.builder(Component.literal("Refresh"), btn -> loadWorkspaceDiff())
+                        .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
+                row2X += row2BtnWidth + rowGap;
+                contextDiffPrevButton = addRenderableWidget(Button.builder(Component.literal("<D"), btn -> navigateContextDiffChange(-1))
+                        .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
+                row2X += row2BtnWidth + rowGap;
+                contextDiffNextButton = addRenderableWidget(Button.builder(Component.literal("D>"), btn -> navigateContextDiffChange(1))
+                        .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
+                row2X += row2BtnWidth + rowGap;
+                contextClearQueueButton = addRenderableWidget(Button.builder(Component.literal("Clear Ctx"), btn -> clearContextQueue())
+                        .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
+            }
+        }
 
+        // Row 3: Range inputs + Add Range button
         int startWidth = 52;
         int endWidth = 52;
         int addWidth = Math.max(80, leftWidth - startWidth - endWidth - rowGap * 2);
@@ -307,6 +366,12 @@ public class P2SChatScreen extends Screen {
 
         contextAddRangeButton = addRenderableWidget(Button.builder(Component.literal("Add Range -> Ctx"), btn -> addSelectedRangeAsContext())
                 .bounds(leftX + startWidth + endWidth + rowGap * 2, row3Y, addWidth, INPUT_HEIGHT).build());
+
+        if (activeContextTab == ContextTab.DIFF) {
+            contextStartInput.active = false;
+            contextEndInput.active = false;
+            contextAddRangeButton.active = false;
+        }
 
         if (contextRangeStart <= 0) {
             contextRangeStart = contextScroll + 1;
@@ -339,9 +404,7 @@ public class P2SChatScreen extends Screen {
     }
 
     private void captureContextControlState() {
-        if (contextFileInput != null) {
-            contextFileName = normalizeContextFileName(contextFileInput.getValue());
-        }
+        saveCurrentTabEditorState();
         if (contextStartInput != null) {
             contextRangeStart = parsePositiveInt(contextStartInput.getValue(), contextRangeStart <= 0 ? 1 : contextRangeStart);
         }
@@ -353,6 +416,135 @@ public class P2SChatScreen extends Screen {
     private void loadWorkspaceStateJson() {
         setContextJsonText(buildWorkspaceStateJson());
         setContextStatus("Loaded current workspace state", 0x55FF55);
+    }
+
+    private String activeContextFileName() {
+        return switch (activeContextTab) {
+            case STATE -> "workspace-state.json";
+            case SCRIPT -> "workspace-script.json";
+            case DIFF -> "workspace-diff";
+        };
+    }
+
+    private void saveCurrentTabEditorState() {
+        switch (activeContextTab) {
+            case STATE -> {
+                stateJsonLines.clear();
+                stateJsonLines.addAll(contextJsonLines);
+                stateCursorLine = contextCursorLine;
+                stateCursorColumn = contextCursorColumn;
+                stateScroll = contextScroll;
+            }
+            case SCRIPT -> {
+                scriptJsonLines.clear();
+                scriptJsonLines.addAll(contextJsonLines);
+                scriptCursorLine = contextCursorLine;
+                scriptCursorColumn = contextCursorColumn;
+                scriptScroll = contextScroll;
+            }
+            case DIFF -> {
+                // Diff view uses contextDiffLines, no editor state to save
+            }
+        }
+    }
+
+    private void restoreTabEditorState(ContextTab tab) {
+        switch (tab) {
+            case STATE -> {
+                contextDiffMode = false;
+                contextJsonLines.clear();
+                if (stateJsonLines.isEmpty()) {
+                    contextJsonLines.add("");
+                } else {
+                    contextJsonLines.addAll(stateJsonLines);
+                }
+                contextCursorLine = stateCursorLine;
+                contextCursorColumn = stateCursorColumn;
+                contextScroll = stateScroll;
+            }
+            case SCRIPT -> {
+                contextDiffMode = false;
+                contextJsonLines.clear();
+                if (scriptJsonLines.isEmpty()) {
+                    contextJsonLines.add("");
+                } else {
+                    contextJsonLines.addAll(scriptJsonLines);
+                }
+                contextCursorLine = scriptCursorLine;
+                contextCursorColumn = scriptCursorColumn;
+                contextScroll = scriptScroll;
+            }
+            case DIFF -> {
+                contextDiffMode = true;
+                contextScroll = 0;
+            }
+        }
+        contextPreferredColumn = -1;
+        clearContextSelection();
+        contextMouseSelecting = false;
+        contextLongPressCtxMode = false;
+    }
+
+    private void switchContextTab(ContextTab newTab) {
+        if (newTab == activeContextTab) {
+            return;
+        }
+        saveCurrentTabEditorState();
+        activeContextTab = newTab;
+        restoreTabEditorState(newTab);
+        createWidgets();
+    }
+
+    private void fetchWorkspaceScript() {
+        if (scriptLoading) {
+            setContextStatus("Already fetching script...", 0xFFAA55);
+            return;
+        }
+        scriptLoading = true;
+        setContextStatus("Fetching script...", 0xAAAAAA);
+
+        ClientToolBridge.call("read_workspace_state", new JsonObject())
+                .thenAccept(result -> {
+                    Minecraft mc = this.minecraft;
+                    if (mc != null) {
+                        mc.execute(() -> {
+                            scriptLoading = false;
+                            String scriptText = extractWorkspaceScriptText(result);
+                            if (scriptText.isBlank()) {
+                                scriptText = "{\n}\n";
+                                setContextStatus("No script data found in workspace state", 0xFFAA55);
+                            } else {
+                                setContextStatus("Script loaded", 0x55FF55);
+                            }
+                            if (activeContextTab == ContextTab.SCRIPT) {
+                                setContextJsonText(scriptText);
+                            } else {
+                                // Update cache only
+                                scriptJsonLines.clear();
+                                String[] lines = scriptText.replace("\r\n", "\n").replace('\r', '\n').split("\n", -1);
+                                for (String line : lines) {
+                                    scriptJsonLines.add(line == null ? "" : line);
+                                }
+                                if (scriptJsonLines.isEmpty()) {
+                                    scriptJsonLines.add("");
+                                }
+                                scriptCursorLine = 0;
+                                scriptCursorColumn = 0;
+                                scriptScroll = 0;
+                            }
+                        });
+                    }
+                })
+                .exceptionally(ex -> {
+                    Minecraft mc = this.minecraft;
+                    if (mc != null) {
+                        mc.execute(() -> {
+                            scriptLoading = false;
+                            setContextStatus("Script fetch failed: " + shortError(ex.getMessage()), 0xFF5555);
+                        });
+                    }
+                    return null;
+                });
     }
 
 
@@ -533,7 +725,15 @@ public class P2SChatScreen extends Screen {
     }
 
     private void clearContextDiffView() {
+        exitDiffViewMode();
+        clearDiffData();
+    }
+
+    private void exitDiffViewMode() {
         contextDiffMode = false;
+    }
+
+    private void clearDiffData() {
         contextDiffLines.clear();
         contextDiffChangeRows.clear();
         contextDiffNavIndex = -1;
@@ -556,6 +756,7 @@ public class P2SChatScreen extends Screen {
         contextPreferredColumn = -1;
         clearContextSelection();
         contextMouseSelecting = false;
+        contextLongPressCtxMode = false;
 
         if (!contextDiffChangeRows.isEmpty()) {
             int target = contextDiffChangeRows.get(contextDiffNavIndex);
@@ -645,7 +846,7 @@ public class P2SChatScreen extends Screen {
     }
 
     private void setContextJsonText(String text) {
-        clearContextDiffView();
+        exitDiffViewMode();
         contextJsonLines.clear();
         String[] lines = (text == null ? "" : text).replace("\r\n", "\n").replace('\r', '\n').split("\n", -1);
         if (lines.length == 0) {
@@ -664,6 +865,7 @@ public class P2SChatScreen extends Screen {
         contextPreferredColumn = -1;
         clearContextSelection();
         contextMouseSelecting = false;
+        contextLongPressCtxMode = false;
         clampContextScroll();
         clampContextCursor();
         ensureContextCursorVisible();
@@ -1069,10 +1271,21 @@ public class P2SChatScreen extends Screen {
             return;
         }
 
-        String fileName = normalizeContextFileName(contextFileInput == null ? contextFileName : contextFileInput.getValue());
+        String fileName = activeContextFileName();
         String label = fileName + ":" + start + "-" + end;
         queuedContexts.add(new ContextSnippet(label, snippetText));
         setContextStatus("Added context " + label, 0x55FF55);
+    }
+
+    private void addSelectionAsContext() {
+        ContextSelectionRange sel = getContextSelectionRange();
+        if (sel == null) return;
+        int startLine = sel.startLine() + 1; // 0-indexed to 1-indexed
+        int endLine = sel.endLine() + 1;
+        if (contextStartInput != null) contextStartInput.setValue(Integer.toString(startLine));
+        if (contextEndInput != null) contextEndInput.setValue(Integer.toString(endLine));
+        addSelectedRangeAsContext();
+        clearContextSelection();
     }
 
     private String buildContextRangeText(int startLine, int endLine) {
@@ -1248,17 +1461,6 @@ public class P2SChatScreen extends Screen {
         return trimmed.substring(0, max - 3) + "...";
     }
 
-    private String normalizeContextFileName(String raw) {
-        String value = raw == null ? "" : raw.trim();
-        if (value.isBlank()) {
-            return "workspace-state.json";
-        }
-        if (!value.endsWith(".json")) {
-            return value + ".json";
-        }
-        return value;
-    }
-
     private int parsePositiveInt(String raw, int fallback) {
         if (raw == null || raw.isBlank()) {
             return fallback;
@@ -1285,29 +1487,14 @@ public class P2SChatScreen extends Screen {
     }
 
     private void refreshContextDiffControls() {
-        boolean hasDiff = contextDiffMode;
-        boolean hasChanges = hasDiff && !contextDiffChangeRows.isEmpty();
-
-        if (contextDiffButton != null) {
-            contextDiffButton.setMessage(Component.literal(hasDiff ? "Diff*" : "Diff"));
-        }
-        if (contextDiffPrevButton != null) {
-            contextDiffPrevButton.active = hasChanges;
-        }
-        if (contextDiffNextButton != null) {
-            contextDiffNextButton.active = hasChanges;
-        }
-        if (contextFormatButton != null) {
-            contextFormatButton.active = !hasDiff;
-        }
-        if (contextAddRangeButton != null) {
-            contextAddRangeButton.active = !hasDiff;
-        }
-        if (contextStartInput != null) {
-            contextStartInput.active = !hasDiff;
-        }
-        if (contextEndInput != null) {
-            contextEndInput.active = !hasDiff;
+        if (activeContextTab == ContextTab.DIFF) {
+            boolean hasChanges = contextDiffMode && !contextDiffChangeRows.isEmpty();
+            if (contextDiffPrevButton != null) {
+                contextDiffPrevButton.active = hasChanges;
+            }
+            if (contextDiffNextButton != null) {
+                contextDiffNextButton.active = hasChanges;
+            }
         }
     }
 
@@ -1318,9 +1505,6 @@ public class P2SChatScreen extends Screen {
         }
         if (input != null) {
             input.setFocused(false);
-        }
-        if (contextFileInput != null) {
-            contextFileInput.setFocused(false);
         }
         if (contextStartInput != null) {
             contextStartInput.setFocused(false);
@@ -1562,8 +1746,36 @@ public class P2SChatScreen extends Screen {
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        // Handle info overlay clicks
+        if (button == 0 && infoOverlayVisible) {
+            int panelWidth = getPanelWidth();
+            int panelX = getPanelX(panelWidth);
+            int overlayLeft = panelX + PADDING;
+            int overlayTop = getMessageTop(panelWidth);
+            int overlayBottom = getMessageBottom();
+            int overlayRight = panelX + panelWidth - PADDING;
+
+            // Check close button [X]
+            int closeBtnX = overlayRight - PADDING - this.font.width("[X]");
+            int closeBtnY = overlayTop + 4;
+            if (mouseX >= closeBtnX && mouseX <= overlayRight - PADDING && mouseY >= closeBtnY && mouseY <= closeBtnY + this.font.lineHeight) {
+                infoOverlayVisible = false;
+                return true;
+            }
+
+            // Click inside overlay area -> consume event
+            if (mouseX >= overlayLeft && mouseX <= overlayRight && mouseY >= overlayTop && mouseY <= overlayBottom) {
+                return true;
+            }
+
+            // Click outside overlay -> close it
+            infoOverlayVisible = false;
+        }
+
         if (button == 0 && isInsideContextEditor(mouseX, mouseY)) {
             setContextEditorFocused(true);
+            contextMousePressTime = System.currentTimeMillis();
+            contextLongPressCtxMode = false;
             if (contextDiffMode) {
                 int rowStep = CONTEXT_ROW_HEIGHT + CONTEXT_ROW_GAP;
                 int row = (int) ((mouseY - (contextEditorY + CONTEXT_EDITOR_PADDING)) / rowStep);
@@ -1602,6 +1814,9 @@ public class P2SChatScreen extends Screen {
             return super.mouseDragged(mouseX, mouseY, button, dragX, dragY);
         }
         if (button == 0 && contextMouseSelecting && contextEditorFocused) {
+            if (!contextLongPressCtxMode && System.currentTimeMillis() - contextMousePressTime > CONTEXT_LONG_PRESS_MS) {
+                contextLongPressCtxMode = true;
+            }
             ensureSelectionAnchor();
             placeContextCursorFromMouse(mouseX, mouseY);
             return true;
@@ -1612,13 +1827,32 @@ public class P2SChatScreen extends Screen {
     @Override
     public boolean mouseReleased(double mouseX, double mouseY, int button) {
         if (button == 0) {
+            if (contextLongPressCtxMode && hasContextSelection()) {
+                addSelectionAsContext();
+            }
             contextMouseSelecting = false;
+            contextLongPressCtxMode = false;
         }
         return super.mouseReleased(mouseX, mouseY, button);
     }
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+        // Handle info overlay scrolling
+        if (infoOverlayVisible) {
+            int panelWidth = getPanelWidth();
+            int panelX = getPanelX(panelWidth);
+            int overlayLeft = panelX + PADDING;
+            int overlayTop = getMessageTop(panelWidth);
+            int overlayBottom = getMessageBottom();
+            int overlayRight = panelX + panelWidth - PADDING;
+            if (mouseX >= overlayLeft && mouseX <= overlayRight && mouseY >= overlayTop && mouseY <= overlayBottom) {
+                int step = (this.font.lineHeight + LINE_SPACING) * 3;
+                infoOverlayScroll -= verticalAmount * step;
+                return true;
+            }
+        }
+
         int panelWidth = getPanelWidth();
         int panelX = getPanelX(panelWidth);
         if (mouseX < panelX) {
@@ -1679,8 +1913,23 @@ public class P2SChatScreen extends Screen {
         gfx.fill(panelLeft, panelTop, panelRight, panelBottom, 0xAA000000);
 
         drawHeader(gfx, panelX, panelWidth);
-        drawMessages(gfx, panelX, panelWidth);
+        if (!infoOverlayVisible) {
+            drawMessages(gfx, panelX, panelWidth);
+        }
+        drawInfoOverlay(gfx, panelX, panelWidth);
         drawStatus(gfx, panelX);
+
+        // Update info button label
+        if (infoButton != null) {
+            int infoCount = countInfoSections(panelWidth - PADDING * 2);
+            if (infoCount > 0) {
+                infoButton.setMessage(Component.literal("[i " + infoCount + "]"));
+                infoButton.active = true;
+            } else {
+                infoButton.setMessage(Component.literal("[i]"));
+                infoButton.active = false;
+            }
+        }
 
         super.render(gfx, mouseX, mouseY, delta);
     }
@@ -1701,9 +1950,11 @@ public class P2SChatScreen extends Screen {
         int y = PADDING;
         gfx.drawString(this.font, "Context JSON", x, y, 0xE8F0FF, true);
         y += this.font.lineHeight + 2;
-        String modeHint = contextDiffMode
-                ? "Inline diff view (committed vs staged) [F7 nav]"
-                : "Multiline editor + range attach";
+        String modeHint = switch (activeContextTab) {
+            case STATE -> "workspace-state.json — session info";
+            case SCRIPT -> "workspace-script.json — VBS palette + structures";
+            case DIFF -> "Inline diff view (committed vs staged) [F7 nav]";
+        };
         gfx.drawString(this.font, modeHint, x, y, 0x9CAECC, false);
 
         int start = parsePositiveInt(contextStartInput == null ? "" : contextStartInput.getValue(), contextRangeStart);
@@ -1813,7 +2064,8 @@ public class P2SChatScreen extends Screen {
                         drawSelX2 = Math.min(maxTextX, drawSelX1 + 1);
                     }
                     if (drawSelX2 > drawSelX1) {
-                        gfx.fill(drawSelX1, rowY + 2, drawSelX2, rowBottom - 2, 0x665A8BFF);
+                        int selColor = contextLongPressCtxMode ? 0x6655CC55 : 0x665A8BFF;
+                        gfx.fill(drawSelX1, rowY + 2, drawSelX2, rowBottom - 2, selColor);
                     }
                 }
             }
@@ -1942,9 +2194,6 @@ public class P2SChatScreen extends Screen {
         if (input != null) {
             boxes.add(input);
         }
-        if (contextFileInput != null) {
-            boxes.add(contextFileInput);
-        }
         if (contextStartInput != null) {
             boxes.add(contextStartInput);
         }
@@ -1981,80 +2230,129 @@ public class P2SChatScreen extends Screen {
         } else {
             gfx.drawString(this.font, "No active session (send a message to start)", panelX + PADDING, y, 0xAAAAAA, true);
         }
+    }
 
-        List<FormattedCharSequence> choicePromptLines = getChoicePromptLines(panelWidth - PADDING * 2);
+    private int countInfoSections(int contentWidth) {
+        int count = 0;
+        if (!getChoicePromptLines(contentWidth).isEmpty()) count++;
+        if (!getPreviewLines(contentWidth).isEmpty()) count++;
+        if (!getSummaryLines(contentWidth).isEmpty()) count++;
+        if (!getTodoLines(contentWidth).isEmpty()) count++;
+        if (!getCheckpointLines(contentWidth).isEmpty()) count++;
+        return count;
+    }
+
+    private void drawInfoOverlay(GuiGraphics gfx, int panelX, int panelWidth) {
+        if (!infoOverlayVisible) return;
+
+        int contentWidth = panelWidth - PADDING * 4;
+        int overlayLeft = panelX + PADDING;
+        int overlayTop = getMessageTop(panelWidth);
+        int overlayBottom = getMessageBottom();
+        int overlayRight = panelX + panelWidth - PADDING;
+        int overlayHeight = overlayBottom - overlayTop;
+        if (overlayHeight <= 0) return;
+
+        // Semi-transparent background
+        gfx.fill(overlayLeft, overlayTop, overlayRight, overlayBottom, 0xDD000000);
+
+        // Close button [X] in top-right
+        int closeBtnX = overlayRight - PADDING - this.font.width("[X]");
+        int closeBtnY = overlayTop + 4;
+        gfx.drawString(this.font, "[X]", closeBtnX, closeBtnY, 0xFF6666, true);
+
+        // Build all overlay content lines
+        List<OverlayLine> allLines = new ArrayList<>();
+        int cw = contentWidth - PADDING;
+
+        List<FormattedCharSequence> choicePromptLines = getChoicePromptLines(cw);
         if (!choicePromptLines.isEmpty()) {
-            y += this.font.lineHeight + 4;
-            gfx.drawString(this.font, "Action Required", panelX + PADDING, y, 0xFFCC66, true);
-            y += this.font.lineHeight + 2;
+            allLines.add(new OverlayLine(null, 0xFFCC66, true, "Action Required"));
             for (FormattedCharSequence line : choicePromptLines) {
-                gfx.drawString(this.font, line, panelX + PADDING, y, 0xFFE6AA, true);
-                y += this.font.lineHeight + LINE_SPACING;
+                allLines.add(new OverlayLine(line, 0xFFE6AA, false, null));
             }
+            allLines.add(new OverlayLine(null, 0, false, null)); // spacer
         }
 
-        List<FormattedCharSequence> previewLines = getPreviewLines(panelWidth - PADDING * 2);
+        List<FormattedCharSequence> previewLines = getPreviewLines(cw);
         if (!previewLines.isEmpty()) {
-            y += this.font.lineHeight + 4;
             int color = 0xFFDD88;
             String risk = ClientSessionState.getPreviewRisk();
-            if (risk == null || risk.isBlank()) {
-                risk = ClientSessionState.getPendingRisk();
-            }
-            if (risk == null || risk.isBlank()) {
-                risk = "low";
-            }
-            if ("high".equalsIgnoreCase(risk)) {
-                color = 0xFF6666;
-            } else if ("medium".equalsIgnoreCase(risk)) {
-                color = 0xFFAA55;
-            }
+            if (risk == null || risk.isBlank()) risk = ClientSessionState.getPendingRisk();
+            if (risk == null || risk.isBlank()) risk = "low";
+            if ("high".equalsIgnoreCase(risk)) color = 0xFF6666;
+            else if ("medium".equalsIgnoreCase(risk)) color = 0xFFAA55;
             int changed = ClientSessionState.getPreviewChangedBlocks();
-            if (changed <= 0) {
-                changed = ClientSessionState.getPendingChangedBlocks();
-            }
-            String title = "Pending Patch (" + changed + " blocks, " + risk + ")";
-            gfx.drawString(this.font, title, panelX + PADDING, y, color, true);
-            y += this.font.lineHeight + 2;
+            if (changed <= 0) changed = ClientSessionState.getPendingChangedBlocks();
+            allLines.add(new OverlayLine(null, color, true, "Pending Patch (" + changed + " blocks, " + risk + ")"));
             for (FormattedCharSequence line : previewLines) {
-                gfx.drawString(this.font, line, panelX + PADDING, y, 0xE0E0E0, true);
-                y += this.font.lineHeight + LINE_SPACING;
+                allLines.add(new OverlayLine(line, 0xE0E0E0, false, null));
             }
+            allLines.add(new OverlayLine(null, 0, false, null));
         }
 
-        List<FormattedCharSequence> summaryLines = getSummaryLines(panelWidth - PADDING * 2);
+        List<FormattedCharSequence> summaryLines = getSummaryLines(cw);
         if (!summaryLines.isEmpty()) {
-            y += this.font.lineHeight + 4;
-            gfx.drawString(this.font, "Current Structure", panelX + PADDING, y, 0xAAAAAA, true);
-            y += this.font.lineHeight + 2;
+            allLines.add(new OverlayLine(null, 0xAAAAAA, true, "Current Structure"));
             for (FormattedCharSequence line : summaryLines) {
-                gfx.drawString(this.font, line, panelX + PADDING, y, 0xCCCCCC, true);
-                y += this.font.lineHeight + LINE_SPACING;
+                allLines.add(new OverlayLine(line, 0xCCCCCC, false, null));
             }
+            allLines.add(new OverlayLine(null, 0, false, null));
         }
 
-        List<FormattedCharSequence> todoLines = getTodoLines(panelWidth - PADDING * 2);
+        List<FormattedCharSequence> todoLines = getTodoLines(cw);
         if (!todoLines.isEmpty()) {
-            y += this.font.lineHeight + 4;
-            gfx.drawString(this.font, "Todo", panelX + PADDING, y, 0x99CCFF, true);
-            y += this.font.lineHeight + 2;
+            allLines.add(new OverlayLine(null, 0x99CCFF, true, "Todo"));
             for (FormattedCharSequence line : todoLines) {
-                gfx.drawString(this.font, line, panelX + PADDING, y, 0xCCDDEE, true);
-                y += this.font.lineHeight + LINE_SPACING;
+                allLines.add(new OverlayLine(line, 0xCCDDEE, false, null));
+            }
+            allLines.add(new OverlayLine(null, 0, false, null));
+        }
+
+        List<FormattedCharSequence> checkpointLines = getCheckpointLines(cw);
+        if (!checkpointLines.isEmpty()) {
+            allLines.add(new OverlayLine(null, 0x99FFCC, true, "Checkpoints [mode=" + modeLabel() + "]"));
+            for (FormattedCharSequence line : checkpointLines) {
+                allLines.add(new OverlayLine(line, 0xCCFFEE, false, null));
             }
         }
 
-        List<FormattedCharSequence> checkpointLines = getCheckpointLines(panelWidth - PADDING * 2);
-        if (!checkpointLines.isEmpty()) {
-            y += this.font.lineHeight + 4;
-            gfx.drawString(this.font, "Checkpoints [mode=" + modeLabel() + "]", panelX + PADDING, y, 0x99FFCC, true);
-            y += this.font.lineHeight + 2;
-            for (FormattedCharSequence line : checkpointLines) {
-                gfx.drawString(this.font, line, panelX + PADDING, y, 0xCCFFEE, true);
-                y += this.font.lineHeight + LINE_SPACING;
+        if (allLines.isEmpty()) {
+            gfx.drawString(this.font, "No info available", overlayLeft + PADDING, overlayTop + PADDING + this.font.lineHeight, 0x888888, true);
+            return;
+        }
+
+        // Compute total content height and clamp scroll
+        int lineH = this.font.lineHeight + LINE_SPACING;
+        int totalContentHeight = allLines.size() * lineH;
+        int maxScroll = Math.max(0, totalContentHeight - overlayHeight + PADDING * 2);
+        infoOverlayScroll = clamp(infoOverlayScroll, 0, maxScroll);
+
+        // Enable scissor to clip content within overlay
+        gfx.enableScissor(overlayLeft, overlayTop, overlayRight, overlayBottom);
+
+        int drawY = overlayTop + PADDING - (int) infoOverlayScroll;
+        for (OverlayLine ol : allLines) {
+            if (ol.title != null) {
+                gfx.drawString(this.font, ol.title, overlayLeft + PADDING, drawY, ol.color, true);
+            } else if (ol.formatted != null) {
+                gfx.drawString(this.font, ol.formatted, overlayLeft + PADDING, drawY, ol.color, true);
             }
+            drawY += lineH;
+        }
+
+        gfx.disableScissor();
+
+        // Scrollbar indicator if content overflows
+        if (totalContentHeight > overlayHeight - PADDING * 2) {
+            int barHeight = Math.max(10, (overlayHeight * overlayHeight) / totalContentHeight);
+            int barTrack = overlayHeight - barHeight;
+            int barY = overlayTop + (maxScroll > 0 ? (int) (infoOverlayScroll / maxScroll * barTrack) : 0);
+            gfx.fill(overlayRight - 3, barY, overlayRight - 1, barY + barHeight, 0x88FFFFFF);
         }
     }
+
+    private record OverlayLine(FormattedCharSequence formatted, int color, boolean isTitle, String title) {}
 
     private void drawStatus(GuiGraphics gfx, int panelX) {
         String status = ClientSessionState.getStatus();
@@ -2156,41 +2454,7 @@ public class P2SChatScreen extends Screen {
         int base = this.font.lineHeight * 5 + 12;
         base += TOP_BUTTON_HEIGHT + 6;
         base += TOP_BUTTON_HEIGHT + 2;
-
-        List<FormattedCharSequence> choiceLines = getChoicePromptLines(panelWidth - PADDING * 2);
-        if (!choiceLines.isEmpty()) {
-            base += this.font.lineHeight + 4;
-            base += choiceLines.size() * (this.font.lineHeight + LINE_SPACING);
-            base += LINE_SPACING;
-        }
-
-        List<FormattedCharSequence> previewLines = getPreviewLines(panelWidth - PADDING * 2);
-        if (!previewLines.isEmpty()) {
-            base += this.font.lineHeight + 4;
-            base += previewLines.size() * (this.font.lineHeight + LINE_SPACING);
-            base += LINE_SPACING;
-        }
-
-        int extra = 0;
-        List<FormattedCharSequence> summaryLines = getSummaryLines(panelWidth - PADDING * 2);
-        if (!summaryLines.isEmpty()) {
-            extra += this.font.lineHeight + 4;
-            extra += summaryLines.size() * (this.font.lineHeight + LINE_SPACING);
-            extra += LINE_SPACING;
-        }
-        List<FormattedCharSequence> todoLines = getTodoLines(panelWidth - PADDING * 2);
-        if (!todoLines.isEmpty()) {
-            extra += this.font.lineHeight + 4;
-            extra += todoLines.size() * (this.font.lineHeight + LINE_SPACING);
-            extra += LINE_SPACING;
-        }
-        List<FormattedCharSequence> checkpointLines = getCheckpointLines(panelWidth - PADDING * 2);
-        if (!checkpointLines.isEmpty()) {
-            extra += this.font.lineHeight + 4;
-            extra += checkpointLines.size() * (this.font.lineHeight + LINE_SPACING);
-            extra += LINE_SPACING;
-        }
-        return base + extra;
+        return base;
     }
 
     private int getInputY() {
@@ -2521,5 +2785,11 @@ public class P2SChatScreen extends Screen {
     }
 
     private record ContextSnippet(String label, String content) {
+    }
+
+    private enum ContextTab {
+        STATE,
+        SCRIPT,
+        DIFF
     }
 }

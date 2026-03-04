@@ -567,6 +567,25 @@ public final class SessionManager {
         } else {
             session = createSession(player);
         }
+
+        if (payload != null && !payload.isBlank()) {
+            try {
+                JsonObject json = JsonParser.parseString(payload).getAsJsonObject();
+                if (json.has("currentScriptJson")) {
+                    String scriptJson = json.get("currentScriptJson").getAsString();
+                    if (scriptJson != null && !scriptJson.isBlank()) {
+                        StructureBuilder.VbsScriptV2 restored = GSON.fromJson(scriptJson, StructureBuilder.VbsScriptV2.class);
+                        if (restored != null) {
+                            session.current = restored;
+                            session.revision = "rev-restored";
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                P2SMod.LOGGER.debug("Could not restore script from start payload: {}", e.getMessage());
+            }
+        }
+
         sessions.put(player.getUUID(), session);
         sendSessionSync(player, session);
         sendPatchPreview(player, null);
@@ -1865,6 +1884,15 @@ public final class SessionManager {
         int sy = hasSz ? session.size.getY() : 0;
         int sz = hasSz ? session.size.getZ() : 0;
 
+        String currentScriptJson = "";
+        if (active && session.current != null) {
+            try {
+                currentScriptJson = GSON.toJson(GSON.toJsonTree(session.current));
+            } catch (Exception e) {
+                P2SMod.LOGGER.debug("Failed to serialize current script for sync: {}", e.getMessage());
+            }
+        }
+
         ServerNetworkHandler.sendToClient(player, new S2CSessionSyncPayload(
                 active,
                 sessionId,
@@ -1882,7 +1910,8 @@ public final class SessionManager {
                 ox, oy, oz,
                 hasSz,
                 sx, sy, sz,
-                checkpointsJson(session)
+                checkpointsJson(session),
+                currentScriptJson
         ));
     }
 

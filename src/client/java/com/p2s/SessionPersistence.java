@@ -39,7 +39,8 @@ public final class SessionPersistence {
             String todoTitle,
             int originX, int originY, int originZ,
             boolean hasSize,
-            int sizeX, int sizeY, int sizeZ
+            int sizeX, int sizeY, int sizeZ,
+            String currentScriptJson
     ) {
     }
 
@@ -102,6 +103,7 @@ public final class SessionPersistence {
             sessionJson.addProperty("sizeX", session.sizeX());
             sessionJson.addProperty("sizeY", session.sizeY());
             sessionJson.addProperty("sizeZ", session.sizeZ());
+            sessionJson.addProperty("currentScriptJson", session.currentScriptJson() == null ? "" : session.currentScriptJson());
 
             Path sessionFile = SESSIONS_DIR.resolve(session.id() + ".json");
             Files.writeString(sessionFile, GSON.toJson(sessionJson));
@@ -206,7 +208,8 @@ public final class SessionPersistence {
                     getBool(root, "hasSize"),
                     getInt(root, "sizeX"),
                     getInt(root, "sizeY"),
-                    getInt(root, "sizeZ")
+                    getInt(root, "sizeZ"),
+                    getStr(root, "currentScriptJson")
             );
         } catch (Exception e) {
             P2SMod.LOGGER.warn("Failed loading session {}: {}", id, e.getMessage());

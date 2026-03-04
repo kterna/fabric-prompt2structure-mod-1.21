@@ -22,7 +22,8 @@ public record S2CSessionSyncPayload(
         int originX, int originY, int originZ,
         boolean hasSize,
         int sizeX, int sizeY, int sizeZ,
-        String checkpointsJson
+        String checkpointsJson,
+        String currentScriptJson
 ) implements CustomPacketPayload {
     public static final Type<S2CSessionSyncPayload> TYPE = new Type<>(P2SNetworkConstants.S2C_SESSION_SYNC_ID);
     public static final StreamCodec<FriendlyByteBuf, S2CSessionSyncPayload> CODEC = StreamCodec.of(
@@ -48,6 +49,7 @@ public record S2CSessionSyncPayload(
                 buf.writeInt(payload.sizeY);
                 buf.writeInt(payload.sizeZ);
                 buf.writeUtf(payload.checkpointsJson == null ? "" : payload.checkpointsJson, 16384);
+                buf.writeUtf(payload.currentScriptJson == null ? "" : payload.currentScriptJson, 65536);
             },
             buf -> new S2CSessionSyncPayload(
                     buf.readBoolean(),
@@ -70,7 +72,8 @@ public record S2CSessionSyncPayload(
                     buf.readInt(),
                     buf.readInt(),
                     buf.readInt(),
-                    buf.readUtf(16384)
+                    buf.readUtf(16384),
+                    buf.readUtf(65536)
             )
     );
 

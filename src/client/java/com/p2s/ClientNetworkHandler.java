@@ -52,7 +52,8 @@ public final class ClientNetworkHandler {
                     payload.sizeX(),
                     payload.sizeY(),
                     payload.sizeZ(),
-                    payload.checkpointsJson()
+                    payload.checkpointsJson(),
+                    payload.currentScriptJson()
             ));
         });
 

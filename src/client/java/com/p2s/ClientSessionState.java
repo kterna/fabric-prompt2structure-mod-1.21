@@ -45,6 +45,7 @@ public final class ClientSessionState {
     private static final List<ChatMessage> messages = new ArrayList<>();
     private static final StringBuilder streamingBuffer = new StringBuilder();
     private static volatile boolean streaming = false;
+    private static String currentScriptJson = "";
 
     private ClientSessionState() {
     }
@@ -66,7 +67,8 @@ public final class ClientSessionState {
             int ox, int oy, int oz,
             boolean hasSz,
             int sx, int sy, int sz,
-            String checkpointsJson
+            String checkpointsJson,
+            String scriptJson
     ) {
         active = activeFlag;
         sessionId = id == null ? "" : id;
@@ -88,6 +90,7 @@ public final class ClientSessionState {
         sizeX = sx;
         sizeY = sy;
         sizeZ = sz;
+        currentScriptJson = scriptJson == null ? "" : scriptJson;
         updateCheckpoints(checkpointsJson);
         if (!pending) {
             clearPreview();
@@ -107,6 +110,7 @@ public final class ClientSessionState {
             sizeX = 0;
             sizeY = 0;
             sizeZ = 0;
+            currentScriptJson = "";
         }
     }
 
@@ -430,6 +434,10 @@ public final class ClientSessionState {
 
     public static int getSizeZ() {
         return sizeZ;
+    }
+
+    public static String getCurrentScriptJson() {
+        return currentScriptJson;
     }
 
     private static synchronized void updateCheckpoints(String checkpointsJson) {

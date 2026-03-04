@@ -1040,7 +1040,9 @@ public final class ClientAgentManager {
     }
 
     private static String buildStartPayload(LocalSession session) {
-        if (session.originX == 0 && session.originY == 0 && session.originZ == 0 && !session.hasSize) {
+        boolean hasSpatial = session.originX != 0 || session.originY != 0 || session.originZ != 0 || session.hasSize;
+        boolean hasScript = session.currentScriptJson != null && !session.currentScriptJson.isBlank();
+        if (!hasSpatial && !hasScript) {
             return "";
         }
         JsonObject json = new JsonObject();
@@ -1051,6 +1053,9 @@ public final class ClientAgentManager {
         json.addProperty("sizeX", session.sizeX);
         json.addProperty("sizeY", session.sizeY);
         json.addProperty("sizeZ", session.sizeZ);
+        if (hasScript) {
+            json.addProperty("currentScriptJson", session.currentScriptJson);
+        }
         return GSON.toJson(json);
     }
 
@@ -1206,7 +1211,8 @@ public final class ClientAgentManager {
                     session.hasSize,
                     session.sizeX,
                     session.sizeY,
-                    session.sizeZ
+                    session.sizeZ,
+                    ClientSessionState.getCurrentScriptJson()
             );
 
             CompletableFuture.runAsync(() -> SessionPersistence.saveSession(saved));
@@ -1255,6 +1261,7 @@ public final class ClientAgentManager {
             session.sizeX = saved.sizeX();
             session.sizeY = saved.sizeY();
             session.sizeZ = saved.sizeZ();
+            session.currentScriptJson = saved.currentScriptJson() == null ? "" : saved.currentScriptJson();
             currentSession = session;
         }
 
@@ -1324,5 +1331,6 @@ public final class ClientAgentManager {
         int originX, originY, originZ;
         boolean hasSize;
         int sizeX, sizeY, sizeZ;
+        String currentScriptJson = "";
     }
 }
