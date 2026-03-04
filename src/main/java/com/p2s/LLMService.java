@@ -673,144 +673,87 @@ public final class LLMService {
             tools.add(searchSkillTool);
         }
 
-        if (includeSkillTools && allowsTool(allowedTools, "get_todo")) {
-            JsonObject getTodoTool = new JsonObject();
-            getTodoTool.addProperty("type", "function");
-            JsonObject getTodoFn = new JsonObject();
-            getTodoFn.addProperty("name", "get_todo");
-            getTodoFn.addProperty("description", "Read current explicit todo list maintained by the client agent.");
-            JsonObject getTodoParams = new JsonObject();
-            getTodoParams.addProperty("type", "object");
-            getTodoParams.add("properties", new JsonObject());
-            getTodoParams.addProperty("additionalProperties", false);
-            getTodoFn.add("parameters", getTodoParams);
-            getTodoTool.add("function", getTodoFn);
-            tools.add(getTodoTool);
-        }
+        if (includeSkillTools && allowsTool(allowedTools, "todo")) {
+            JsonObject todoTool = new JsonObject();
+            todoTool.addProperty("type", "function");
+            JsonObject todoFn = new JsonObject();
+            todoFn.addProperty("name", "todo");
+            todoFn.addProperty("description", "Manage explicit todo list. Supported actions: get, set, upsert, delete, clear.");
+            JsonObject todoParams = new JsonObject();
+            todoParams.addProperty("type", "object");
+            JsonObject todoProps = new JsonObject();
 
-        if (includeSkillTools && allowsTool(allowedTools, "set_todo")) {
-            JsonObject setTodoTool = new JsonObject();
-            setTodoTool.addProperty("type", "function");
-            JsonObject setTodoFn = new JsonObject();
-            setTodoFn.addProperty("name", "set_todo");
-            setTodoFn.addProperty("description", "Replace current todo list with an explicit plan.");
-            JsonObject setTodoParams = new JsonObject();
-            setTodoParams.addProperty("type", "object");
-            JsonObject setTodoProps = new JsonObject();
-            JsonObject todoTitle = new JsonObject();
-            todoTitle.addProperty("type", "string");
-            todoTitle.addProperty("description", "Optional todo title.");
-            setTodoProps.add("title", todoTitle);
-            JsonObject todoItems = new JsonObject();
-            todoItems.addProperty("type", "array");
-            JsonObject todoItem = new JsonObject();
-            todoItem.addProperty("type", "object");
-            JsonObject todoItemProps = new JsonObject();
-            JsonObject todoId = new JsonObject();
-            todoId.addProperty("type", "string");
-            todoId.addProperty("description", "Stable todo item id.");
-            todoItemProps.add("id", todoId);
-            JsonObject todoContent = new JsonObject();
-            todoContent.addProperty("type", "string");
-            todoContent.addProperty("description", "Todo text.");
-            todoItemProps.add("content", todoContent);
-            JsonObject todoStatus = new JsonObject();
-            todoStatus.addProperty("type", "string");
-            JsonArray todoStatusEnum = new JsonArray();
-            todoStatusEnum.add("pending");
-            todoStatusEnum.add("in_progress");
-            todoStatusEnum.add("done");
-            todoStatusEnum.add("blocked");
-            todoStatus.add("enum", todoStatusEnum);
-            todoItemProps.add("status", todoStatus);
-            todoItem.add("properties", todoItemProps);
-            JsonArray todoItemRequired = new JsonArray();
-            todoItemRequired.add("content");
-            todoItem.add("required", todoItemRequired);
-            todoItems.add("items", todoItem);
-            setTodoProps.add("items", todoItems);
-            setTodoParams.add("properties", setTodoProps);
-            JsonArray setTodoRequired = new JsonArray();
-            setTodoRequired.add("items");
-            setTodoParams.add("required", setTodoRequired);
-            setTodoParams.addProperty("additionalProperties", false);
-            setTodoFn.add("parameters", setTodoParams);
-            setTodoTool.add("function", setTodoFn);
-            tools.add(setTodoTool);
-        }
+            JsonObject action = new JsonObject();
+            action.addProperty("type", "string");
+            JsonArray actionEnum = new JsonArray();
+            actionEnum.add("get");
+            actionEnum.add("set");
+            actionEnum.add("upsert");
+            actionEnum.add("delete");
+            actionEnum.add("clear");
+            action.add("enum", actionEnum);
+            action.addProperty("description", "Todo operation.");
+            todoProps.add("action", action);
 
-        if (includeSkillTools && allowsTool(allowedTools, "edit_todo_item")) {
-            JsonObject editTodoTool = new JsonObject();
-            editTodoTool.addProperty("type", "function");
-            JsonObject editTodoFn = new JsonObject();
-            editTodoFn.addProperty("name", "edit_todo_item");
-            editTodoFn.addProperty("description", "Create or update one todo item.");
-            JsonObject editTodoParams = new JsonObject();
-            editTodoParams.addProperty("type", "object");
-            JsonObject editTodoProps = new JsonObject();
-            JsonObject editTodoId = new JsonObject();
-            editTodoId.addProperty("type", "string");
-            editTodoId.addProperty("description", "Todo item id.");
-            editTodoProps.add("id", editTodoId);
-            JsonObject editTodoContent = new JsonObject();
-            editTodoContent.addProperty("type", "string");
-            editTodoContent.addProperty("description", "Todo text.");
-            editTodoProps.add("content", editTodoContent);
-            JsonObject editTodoStatus = new JsonObject();
-            editTodoStatus.addProperty("type", "string");
-            JsonArray editTodoStatusEnum = new JsonArray();
-            editTodoStatusEnum.add("pending");
-            editTodoStatusEnum.add("in_progress");
-            editTodoStatusEnum.add("done");
-            editTodoStatusEnum.add("blocked");
-            editTodoStatus.add("enum", editTodoStatusEnum);
-            editTodoProps.add("status", editTodoStatus);
-            editTodoParams.add("properties", editTodoProps);
-            JsonArray editTodoRequired = new JsonArray();
-            editTodoRequired.add("id");
-            editTodoParams.add("required", editTodoRequired);
-            editTodoParams.addProperty("additionalProperties", false);
-            editTodoFn.add("parameters", editTodoParams);
-            editTodoTool.add("function", editTodoFn);
-            tools.add(editTodoTool);
-        }
+            JsonObject title = new JsonObject();
+            title.addProperty("type", "string");
+            title.addProperty("description", "Optional todo title (used by action=set).");
+            todoProps.add("title", title);
 
-        if (includeSkillTools && allowsTool(allowedTools, "delete_todo_item")) {
-            JsonObject deleteTodoTool = new JsonObject();
-            deleteTodoTool.addProperty("type", "function");
-            JsonObject deleteTodoFn = new JsonObject();
-            deleteTodoFn.addProperty("name", "delete_todo_item");
-            deleteTodoFn.addProperty("description", "Delete one todo item by id.");
-            JsonObject deleteTodoParams = new JsonObject();
-            deleteTodoParams.addProperty("type", "object");
-            JsonObject deleteTodoProps = new JsonObject();
-            JsonObject deleteTodoId = new JsonObject();
-            deleteTodoId.addProperty("type", "string");
-            deleteTodoId.addProperty("description", "Todo item id.");
-            deleteTodoProps.add("id", deleteTodoId);
-            deleteTodoParams.add("properties", deleteTodoProps);
-            JsonArray deleteTodoRequired = new JsonArray();
-            deleteTodoRequired.add("id");
-            deleteTodoParams.add("required", deleteTodoRequired);
-            deleteTodoParams.addProperty("additionalProperties", false);
-            deleteTodoFn.add("parameters", deleteTodoParams);
-            deleteTodoTool.add("function", deleteTodoFn);
-            tools.add(deleteTodoTool);
-        }
+            JsonObject id = new JsonObject();
+            id.addProperty("type", "string");
+            id.addProperty("description", "Todo item id (used by action=upsert/delete).");
+            todoProps.add("id", id);
 
-        if (includeSkillTools && allowsTool(allowedTools, "clear_todo")) {
-            JsonObject clearTodoTool = new JsonObject();
-            clearTodoTool.addProperty("type", "function");
-            JsonObject clearTodoFn = new JsonObject();
-            clearTodoFn.addProperty("name", "clear_todo");
-            clearTodoFn.addProperty("description", "Clear all todo items.");
-            JsonObject clearTodoParams = new JsonObject();
-            clearTodoParams.addProperty("type", "object");
-            clearTodoParams.add("properties", new JsonObject());
-            clearTodoParams.addProperty("additionalProperties", false);
-            clearTodoFn.add("parameters", clearTodoParams);
-            clearTodoTool.add("function", clearTodoFn);
-            tools.add(clearTodoTool);
+            JsonObject content = new JsonObject();
+            content.addProperty("type", "string");
+            content.addProperty("description", "Todo text (used by action=upsert). Optional when updating only status.");
+            todoProps.add("content", content);
+
+            JsonObject status = new JsonObject();
+            status.addProperty("type", "string");
+            JsonArray statusEnum = new JsonArray();
+            statusEnum.add("pending");
+            statusEnum.add("in_progress");
+            statusEnum.add("done");
+            statusEnum.add("blocked");
+            status.add("enum", statusEnum);
+            status.addProperty("description", "Todo status (used by action=set/upsert).");
+            todoProps.add("status", status);
+
+            JsonObject items = new JsonObject();
+            items.addProperty("type", "array");
+            JsonObject item = new JsonObject();
+            item.addProperty("type", "object");
+            JsonObject itemProps = new JsonObject();
+            JsonObject itemId = new JsonObject();
+            itemId.addProperty("type", "string");
+            itemId.addProperty("description", "Stable todo item id.");
+            itemProps.add("id", itemId);
+            JsonObject itemContent = new JsonObject();
+            itemContent.addProperty("type", "string");
+            itemContent.addProperty("description", "Todo text.");
+            itemProps.add("content", itemContent);
+            JsonObject itemStatus = new JsonObject();
+            itemStatus.addProperty("type", "string");
+            itemStatus.add("enum", statusEnum.deepCopy());
+            itemProps.add("status", itemStatus);
+            item.add("properties", itemProps);
+            JsonArray itemRequired = new JsonArray();
+            itemRequired.add("content");
+            item.add("required", itemRequired);
+            items.add("items", item);
+            items.addProperty("description", "Todo items array (used by action=set).");
+            todoProps.add("items", items);
+
+            todoParams.add("properties", todoProps);
+            JsonArray todoRequired = new JsonArray();
+            todoRequired.add("action");
+            todoParams.add("required", todoRequired);
+            todoParams.addProperty("additionalProperties", false);
+            todoFn.add("parameters", todoParams);
+            todoTool.add("function", todoFn);
+            tools.add(todoTool);
         }
 
         if (includeSkillTools && allowsTool(allowedTools, "request_user_choice")) {
@@ -907,6 +850,11 @@ public final class LLMService {
             lineEndProp.addProperty("type", "integer");
             lineEndProp.addProperty("description", "End line number (1-based, inclusive) of pretty-printed script JSON to read.");
             readProps.add("line_end", lineEndProp);
+
+            JsonObject committedProp = new JsonObject();
+            committedProp.addProperty("type", "boolean");
+            committedProp.addProperty("description", "When true, force reading committed revision even if a patch is staged.");
+            readProps.add("committed", committedProp);
 
             readParams.add("properties", readProps);
             readParams.addProperty("additionalProperties", false);

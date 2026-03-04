@@ -17,6 +17,7 @@ import net.minecraft.util.FormattedCharSequence;
 import org.lwjgl.glfw.GLFW;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 public class P2SChatScreen extends Screen {
@@ -34,12 +35,15 @@ public class P2SChatScreen extends Screen {
     private static final int CONTEXT_ROW_HEIGHT = 18;
     private static final int CONTEXT_ROW_GAP = 2;
     private static final int CONTEXT_EDITOR_GUTTER = 38;
+    private static final int CONTEXT_DIFF_GUTTER = 84;
     private static final int CONTEXT_EDITOR_PADDING = 4;
     private static final int CONTEXT_FOOTER_HEIGHT = 110;
     private static final int CONTEXT_MAX_SNIPPETS = 8;
     private static final int CONTEXT_MAX_SNIPPET_CHARS = 4000;
     private static final int CONTEXT_MAX_TOTAL_CHARS = 12000;
     private static final int CONTEXT_DEFAULT_RANGE = 30;
+    private static final int CONTEXT_DIFF_MAX_SOURCE_LINES = 1400;
+    private static final int CONTEXT_DIFF_EQUAL_CONTEXT_LINES = 3;
 
     private EditBox input;
     private Button sendButton;
@@ -48,6 +52,11 @@ public class P2SChatScreen extends Screen {
     private Button discardButton;
     private Button undoButton;
     private Button redoButton;
+    private Button checkpointCreateButton;
+    private Button checkpointPrevButton;
+    private Button checkpointNextButton;
+    private Button checkpointRollbackButton;
+    private Button checkpointModeButton;
     private final List<Button> choiceButtons = new ArrayList<>();
     private double scrollOffset;
 
@@ -66,6 +75,9 @@ public class P2SChatScreen extends Screen {
     private Button contextFormatButton;
     private Button contextClearJsonButton;
     private Button contextClearQueueButton;
+    private Button contextDiffButton;
+    private Button contextDiffPrevButton;
+    private Button contextDiffNextButton;
     private Button contextAddRangeButton;
     private int contextVisibleRows = 0;
     private int contextScroll = 0;
@@ -85,6 +97,10 @@ public class P2SChatScreen extends Screen {
     private String contextFileName = "workspace-state.json";
     private int contextRangeStart = 1;
     private int contextRangeEnd = CONTEXT_DEFAULT_RANGE;
+    private boolean contextDiffMode = false;
+    private final List<DiffViewLine> contextDiffLines = new ArrayList<>();
+    private final List<Integer> contextDiffChangeRows = new ArrayList<>();
+    private int contextDiffNavIndex = -1;
     private String contextStatus = "";
     private int contextStatusColor = 0xAAAAAA;
 
@@ -164,9 +180,41 @@ public class P2SChatScreen extends Screen {
                 .build();
         addRenderableWidget(redoButton);
 
+        int cpY = rowY + TOP_BUTTON_HEIGHT + 2;
+        int cpX = panelX + PADDING;
+        checkpointCreateButton = Button.builder(Component.literal("CP+"), btn -> createCheckpoint())
+                .bounds(cpX, cpY, 36, TOP_BUTTON_HEIGHT)
+                .build();
+        addRenderableWidget(checkpointCreateButton);
+
+        checkpointPrevButton = Button.builder(Component.literal("<"), btn -> ClientSessionState.selectPreviousCheckpoint())
+                .bounds(cpX + 38, cpY, 20, TOP_BUTTON_HEIGHT)
+                .build();
+        addRenderableWidget(checkpointPrevButton);
+
+        checkpointNextButton = Button.builder(Component.literal(">"), btn -> ClientSessionState.selectNextCheckpoint())
+                .bounds(cpX + 60, cpY, 20, TOP_BUTTON_HEIGHT)
+                .build();
+        addRenderableWidget(checkpointNextButton);
+
+        checkpointRollbackButton = Button.builder(Component.literal("RB"), btn -> rollbackSelectedCheckpoint())
+                .bounds(cpX + 82, cpY, 30, TOP_BUTTON_HEIGHT)
+                .build();
+        addRenderableWidget(checkpointRollbackButton);
+
+        checkpointModeButton = Button.builder(Component.literal(modeLabel()), btn -> {
+                    ClientSessionState.toggleRollbackMode();
+                    if (checkpointModeButton != null) {
+                        checkpointModeButton.setMessage(Component.literal(modeLabel()));
+                    }
+                })
+                .bounds(cpX + 114, cpY, 54, TOP_BUTTON_HEIGHT)
+                .build();
+        addRenderableWidget(checkpointModeButton);
+
         choiceButtons.clear();
         int actionWidth = SMALL_BUTTON_WIDTH * 4 + 6;
-        int choiceY = rowY + TOP_BUTTON_HEIGHT + 2;
+        int choiceY = cpY + TOP_BUTTON_HEIGHT + 2;
         int choiceGap = 2;
         int choiceWidth = (actionWidth - choiceGap * (CHOICE_BUTTON_COUNT - 1)) / CHOICE_BUTTON_COUNT;
         for (int i = 0; i < CHOICE_BUTTON_COUNT; i++) {
@@ -219,7 +267,7 @@ public class P2SChatScreen extends Screen {
         contextFileInput.setValue(contextFileName == null || contextFileName.isBlank() ? "workspace-state.json" : contextFileName);
         addRenderableWidget(contextFileInput);
 
-        int row2ButtonCount = 4;
+        int row2ButtonCount = 7;
         int row2BtnWidth = Math.max(46, (leftWidth - rowGap * (row2ButtonCount - 1)) / row2ButtonCount);
         int row2X = leftX;
         contextLoadButton = addRenderableWidget(Button.builder(Component.literal("Load"), btn -> loadWorkspaceStateJson())
@@ -232,6 +280,15 @@ public class P2SChatScreen extends Screen {
                 .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
         row2X += row2BtnWidth + rowGap;
         contextClearQueueButton = addRenderableWidget(Button.builder(Component.literal("Clear Ctx"), btn -> clearContextQueue())
+                .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
+        row2X += row2BtnWidth + rowGap;
+        contextDiffButton = addRenderableWidget(Button.builder(Component.literal("Diff"), btn -> loadWorkspaceDiff())
+                .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
+        row2X += row2BtnWidth + rowGap;
+        contextDiffPrevButton = addRenderableWidget(Button.builder(Component.literal("<D"), btn -> navigateContextDiffChange(-1))
+                .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
+        row2X += row2BtnWidth + rowGap;
+        contextDiffNextButton = addRenderableWidget(Button.builder(Component.literal("D>"), btn -> navigateContextDiffChange(1))
                 .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
 
         int startWidth = 52;
@@ -272,9 +329,13 @@ public class P2SChatScreen extends Screen {
         contextEditorHeight = renderedRows * rowStep - CONTEXT_ROW_GAP + CONTEXT_EDITOR_PADDING * 2;
         contextQueueTopY = contextEditorY + contextEditorHeight + 6;
 
-        clampContextCursor();
-        clampContextScroll();
-        ensureContextCursorVisible();
+        if (contextDiffMode) {
+            clampContextScroll();
+        } else {
+            clampContextCursor();
+            clampContextScroll();
+            ensureContextCursorVisible();
+        }
     }
 
     private void captureContextControlState() {
@@ -294,7 +355,271 @@ public class P2SChatScreen extends Screen {
         setContextStatus("Loaded current workspace state", 0x55FF55);
     }
 
+
+    private void loadWorkspaceDiff() {
+        setContextStatus("Loading workspace diff...", 0xAAAAAA);
+
+        JsonObject committedArgs = new JsonObject();
+        committedArgs.addProperty("committed", true);
+        JsonObject stagedArgs = new JsonObject();
+
+        ClientToolBridge.call("read_workspace_state", committedArgs)
+                .thenCombine(ClientToolBridge.call("read_workspace_state", stagedArgs), (committed, staged) -> {
+                    String committedText = extractWorkspaceScriptText(committed);
+                    String stagedText = extractWorkspaceScriptText(staged);
+                    return buildContextDiffView(committedText, stagedText);
+                })
+                .thenAccept(diff -> {
+                    Minecraft mc = this.minecraft;
+                    if (mc != null) {
+                        mc.execute(() -> {
+                            applyContextDiffView(diff);
+                        });
+                    }
+                })
+                .exceptionally(ex -> {
+                    Minecraft mc = this.minecraft;
+                    if (mc != null) {
+                        mc.execute(() -> setContextStatus("Diff failed: " + shortError(ex.getMessage()), 0xFF5555));
+                    }
+                    return null;
+                });
+    }
+
+    private String extractWorkspaceScriptText(JsonObject toolPayload) {
+        if (toolPayload == null || !toolPayload.has("state") || !toolPayload.get("state").isJsonObject()) {
+            return "";
+        }
+        JsonObject state = toolPayload.getAsJsonObject("state");
+        if (state.has("script") && state.get("script").isJsonObject()) {
+            return CONTEXT_GSON.toJson(state.get("script"));
+        }
+        if (state.has("script_json") && state.get("script_json").isJsonPrimitive()) {
+            return state.get("script_json").getAsString();
+        }
+        return "";
+    }
+
+    private String[] normalizeLines(String text) {
+        if (text == null) {
+            return new String[0];
+        }
+        return text.replace("\r\n", "\n").replace('\r', '\n').split("\n", -1);
+    }
+
+    private DiffBuildResult buildContextDiffView(String committedText, String stagedText) {
+        String[] committedAll = normalizeLines(committedText);
+        String[] stagedAll = normalizeLines(stagedText);
+        int committedTotal = committedAll.length;
+        int stagedTotal = stagedAll.length;
+
+        boolean truncated = false;
+        String[] committed = committedAll;
+        String[] staged = stagedAll;
+        if (committed.length > CONTEXT_DIFF_MAX_SOURCE_LINES) {
+            committed = Arrays.copyOf(committed, CONTEXT_DIFF_MAX_SOURCE_LINES);
+            truncated = true;
+        }
+        if (staged.length > CONTEXT_DIFF_MAX_SOURCE_LINES) {
+            staged = Arrays.copyOf(staged, CONTEXT_DIFF_MAX_SOURCE_LINES);
+            truncated = true;
+        }
+
+        List<DiffOp> ops = buildDiffOps(committed, staged);
+        List<DiffViewLine> lines = new ArrayList<>();
+        List<Integer> changeRows = new ArrayList<>();
+
+        int oldLineNo = 1;
+        int newLineNo = 1;
+        int i = 0;
+        while (i < ops.size()) {
+            DiffOp op = ops.get(i);
+            if (op.type() == DiffOpType.SAME) {
+                int runStart = i;
+                while (i < ops.size() && ops.get(i).type() == DiffOpType.SAME) {
+                    i++;
+                }
+                int runLength = i - runStart;
+                int collapseThreshold = CONTEXT_DIFF_EQUAL_CONTEXT_LINES * 2 + 2;
+                if (runLength <= collapseThreshold) {
+                    for (int j = runStart; j < i; j++) {
+                        lines.add(new DiffViewLine(DiffLineType.SAME, oldLineNo, newLineNo, ops.get(j).text()));
+                        oldLineNo++;
+                        newLineNo++;
+                    }
+                } else {
+                    int context = CONTEXT_DIFF_EQUAL_CONTEXT_LINES;
+                    for (int j = 0; j < context; j++) {
+                        lines.add(new DiffViewLine(DiffLineType.SAME, oldLineNo, newLineNo, ops.get(runStart + j).text()));
+                        oldLineNo++;
+                        newLineNo++;
+                    }
+
+                    int hidden = runLength - context * 2;
+                    lines.add(new DiffViewLine(DiffLineType.SKIP, -1, -1, "... " + hidden + " unchanged lines ..."));
+                    oldLineNo += hidden;
+                    newLineNo += hidden;
+
+                    for (int j = i - context; j < i; j++) {
+                        lines.add(new DiffViewLine(DiffLineType.SAME, oldLineNo, newLineNo, ops.get(j).text()));
+                        oldLineNo++;
+                        newLineNo++;
+                    }
+                }
+                continue;
+            }
+
+            if (op.type() == DiffOpType.REMOVE) {
+                lines.add(new DiffViewLine(DiffLineType.REMOVED, oldLineNo, -1, op.text()));
+                changeRows.add(lines.size() - 1);
+                oldLineNo++;
+                i++;
+                continue;
+            }
+
+            lines.add(new DiffViewLine(DiffLineType.ADDED, -1, newLineNo, op.text()));
+            changeRows.add(lines.size() - 1);
+            newLineNo++;
+            i++;
+        }
+
+        if (truncated) {
+            lines.add(new DiffViewLine(
+                    DiffLineType.SKIP,
+                    -1,
+                    -1,
+                    "... diff source truncated at " + CONTEXT_DIFF_MAX_SOURCE_LINES + " lines per side ..."
+            ));
+        }
+
+        return new DiffBuildResult(lines, changeRows, committedTotal, stagedTotal, truncated);
+    }
+
+    private List<DiffOp> buildDiffOps(String[] committed, String[] staged) {
+        int n = committed.length;
+        int m = staged.length;
+        int[][] lcs = new int[n + 1][m + 1];
+        for (int i = n - 1; i >= 0; i--) {
+            for (int j = m - 1; j >= 0; j--) {
+                if (committed[i].equals(staged[j])) {
+                    lcs[i][j] = lcs[i + 1][j + 1] + 1;
+                } else {
+                    lcs[i][j] = Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+                }
+            }
+        }
+
+        List<DiffOp> ops = new ArrayList<>();
+        int i = 0;
+        int j = 0;
+        while (i < n || j < m) {
+            if (i < n && j < m && committed[i].equals(staged[j])) {
+                ops.add(new DiffOp(DiffOpType.SAME, committed[i]));
+                i++;
+                j++;
+                continue;
+            }
+            if (j < m && (i == n || lcs[i][j + 1] >= lcs[i + 1][j])) {
+                ops.add(new DiffOp(DiffOpType.ADD, staged[j]));
+                j++;
+                continue;
+            }
+            if (i < n) {
+                ops.add(new DiffOp(DiffOpType.REMOVE, committed[i]));
+                i++;
+            }
+        }
+        return ops;
+    }
+
+    private void clearContextDiffView() {
+        contextDiffMode = false;
+        contextDiffLines.clear();
+        contextDiffChangeRows.clear();
+        contextDiffNavIndex = -1;
+    }
+
+    private void applyContextDiffView(DiffBuildResult diff) {
+        if (diff == null) {
+            setContextStatus("Diff failed: empty result", 0xFF5555);
+            return;
+        }
+        contextDiffMode = true;
+        contextDiffLines.clear();
+        contextDiffLines.addAll(diff.lines());
+        contextDiffChangeRows.clear();
+        contextDiffChangeRows.addAll(diff.changeRows());
+        contextDiffNavIndex = contextDiffChangeRows.isEmpty() ? -1 : 0;
+
+        contextCursorLine = 0;
+        contextCursorColumn = 0;
+        contextPreferredColumn = -1;
+        clearContextSelection();
+        contextMouseSelecting = false;
+
+        if (!contextDiffChangeRows.isEmpty()) {
+            int target = contextDiffChangeRows.get(contextDiffNavIndex);
+            contextScroll = Math.max(0, target - Math.max(1, contextVisibleRows) / 2);
+        } else {
+            contextScroll = 0;
+        }
+        clampContextScroll();
+        setContextEditorFocused(true);
+
+        String status = "Diff loaded: " + diff.committedLineCount() + " -> " + diff.stagedLineCount()
+                + " lines, " + diff.changeRows().size() + " changed rows";
+        if (diff.truncated()) {
+            status += " (truncated)";
+        }
+        status += " [F7/Shift+F7]";
+        setContextStatus(status, 0x55FF55);
+    }
+
+    private void navigateContextDiffChange(int direction) {
+        if (!contextDiffMode) {
+            setContextStatus("Diff mode is not active", 0xFFAA55);
+            return;
+        }
+        if (contextDiffChangeRows.isEmpty()) {
+            setContextStatus("No changed rows in current diff", 0xFFAA55);
+            return;
+        }
+        int size = contextDiffChangeRows.size();
+        if (contextDiffNavIndex < 0 || contextDiffNavIndex >= size) {
+            contextDiffNavIndex = direction >= 0 ? 0 : size - 1;
+        } else {
+            contextDiffNavIndex = (contextDiffNavIndex + (direction >= 0 ? 1 : -1) + size) % size;
+        }
+        int row = contextDiffChangeRows.get(contextDiffNavIndex);
+        contextScroll = Math.max(0, row - Math.max(1, contextVisibleRows) / 2);
+        clampContextScroll();
+        setContextStatus("Diff change " + (contextDiffNavIndex + 1) + "/" + size, 0xAAD5FF);
+    }
+
+    private void focusNearestDiffChange(int rowIndex) {
+        if (!contextDiffMode || contextDiffChangeRows.isEmpty()) {
+            return;
+        }
+        int bestIndex = 0;
+        int bestDist = Integer.MAX_VALUE;
+        for (int i = 0; i < contextDiffChangeRows.size(); i++) {
+            int dist = Math.abs(contextDiffChangeRows.get(i) - rowIndex);
+            if (dist < bestDist) {
+                bestDist = dist;
+                bestIndex = i;
+            }
+        }
+        contextDiffNavIndex = bestIndex;
+        int row = contextDiffChangeRows.get(bestIndex);
+        contextScroll = Math.max(0, row - Math.max(1, contextVisibleRows) / 2);
+        clampContextScroll();
+    }
+
     private void formatContextJson() {
+        if (contextDiffMode) {
+            setContextStatus("Diff view is read-only. Load/Clear to edit JSON.", 0xFFAA55);
+            return;
+        }
         String raw = contextLinesToText();
         if (raw.isBlank()) {
             setContextStatus("Nothing to format", 0xFFAA55);
@@ -320,6 +645,7 @@ public class P2SChatScreen extends Screen {
     }
 
     private void setContextJsonText(String text) {
+        clearContextDiffView();
         contextJsonLines.clear();
         String[] lines = (text == null ? "" : text).replace("\r\n", "\n").replace('\r', '\n').split("\n", -1);
         if (lines.length == 0) {
@@ -376,6 +702,10 @@ public class P2SChatScreen extends Screen {
     }
 
     private void ensureContextCursorVisible() {
+        if (contextDiffMode) {
+            clampContextScroll();
+            return;
+        }
         clampContextCursor();
         int visibleRows = Math.max(1, contextVisibleRows);
         if (contextCursorLine < contextScroll) {
@@ -387,6 +717,9 @@ public class P2SChatScreen extends Screen {
     }
 
     private void setContextCursor(int line, int column, boolean keepPreferredColumn) {
+        if (contextDiffMode) {
+            return;
+        }
         contextCursorLine = line;
         contextCursorColumn = column;
         if (!keepPreferredColumn) {
@@ -676,7 +1009,8 @@ public class P2SChatScreen extends Screen {
     }
 
     private void clampContextScroll() {
-        int max = Math.max(0, contextJsonLines.size() - Math.max(1, contextVisibleRows));
+        int totalLines = contextDiffMode ? contextDiffLines.size() : contextJsonLines.size();
+        int max = Math.max(0, totalLines - Math.max(1, contextVisibleRows));
         contextScroll = Math.max(0, Math.min(contextScroll, max));
     }
 
@@ -689,6 +1023,10 @@ public class P2SChatScreen extends Screen {
     }
 
     private void addSelectedRangeAsContext() {
+        if (contextDiffMode) {
+            setContextStatus("Range attach is disabled in diff view", 0xFFAA55);
+            return;
+        }
         if (queuedContexts.size() >= CONTEXT_MAX_SNIPPETS) {
             setContextStatus("Too many snippets queued (" + CONTEXT_MAX_SNIPPETS + " max)", 0xFF5555);
             return;
@@ -946,6 +1284,33 @@ public class P2SChatScreen extends Screen {
         contextStatusColor = color;
     }
 
+    private void refreshContextDiffControls() {
+        boolean hasDiff = contextDiffMode;
+        boolean hasChanges = hasDiff && !contextDiffChangeRows.isEmpty();
+
+        if (contextDiffButton != null) {
+            contextDiffButton.setMessage(Component.literal(hasDiff ? "Diff*" : "Diff"));
+        }
+        if (contextDiffPrevButton != null) {
+            contextDiffPrevButton.active = hasChanges;
+        }
+        if (contextDiffNextButton != null) {
+            contextDiffNextButton.active = hasChanges;
+        }
+        if (contextFormatButton != null) {
+            contextFormatButton.active = !hasDiff;
+        }
+        if (contextAddRangeButton != null) {
+            contextAddRangeButton.active = !hasDiff;
+        }
+        if (contextStartInput != null) {
+            contextStartInput.active = !hasDiff;
+        }
+        if (contextEndInput != null) {
+            contextEndInput.active = !hasDiff;
+        }
+    }
+
     private void setContextEditorFocused(boolean focused) {
         contextEditorFocused = focused;
         if (!focused) {
@@ -1004,6 +1369,49 @@ public class P2SChatScreen extends Screen {
     private boolean handleContextEditorKeyPressed(int keyCode, int modifiers) {
         if (!contextEditorFocused) {
             return false;
+        }
+        if (contextDiffMode) {
+            return switch (keyCode) {
+                case GLFW.GLFW_KEY_UP -> {
+                    scrollContextEditor(-1);
+                    yield true;
+                }
+                case GLFW.GLFW_KEY_DOWN -> {
+                    scrollContextEditor(1);
+                    yield true;
+                }
+                case GLFW.GLFW_KEY_PAGE_UP -> {
+                    scrollContextEditor(-Math.max(1, contextVisibleRows - 1));
+                    yield true;
+                }
+                case GLFW.GLFW_KEY_PAGE_DOWN -> {
+                    scrollContextEditor(Math.max(1, contextVisibleRows - 1));
+                    yield true;
+                }
+                case GLFW.GLFW_KEY_HOME -> {
+                    contextScroll = 0;
+                    clampContextScroll();
+                    yield true;
+                }
+                case GLFW.GLFW_KEY_END -> {
+                    contextScroll = Integer.MAX_VALUE;
+                    clampContextScroll();
+                    yield true;
+                }
+                case GLFW.GLFW_KEY_F7 -> {
+                    navigateContextDiffChange(hasShiftDown() ? -1 : 1);
+                    yield true;
+                }
+                case GLFW.GLFW_KEY_LEFT -> {
+                    navigateContextDiffChange(-1);
+                    yield true;
+                }
+                case GLFW.GLFW_KEY_RIGHT, GLFW.GLFW_KEY_ENTER, GLFW.GLFW_KEY_KP_ENTER -> {
+                    navigateContextDiffChange(1);
+                    yield true;
+                }
+                default -> false;
+            };
         }
         if (hasControlDown()) {
             if (keyCode == GLFW.GLFW_KEY_A) {
@@ -1082,7 +1490,7 @@ public class P2SChatScreen extends Screen {
     }
 
     private boolean handleContextEditorCharTyped(char codePoint, int modifiers) {
-        if (!contextEditorFocused || hasControlDown()) {
+        if (!contextEditorFocused || hasControlDown() || contextDiffMode) {
             return false;
         }
         if (Character.isISOControl(codePoint)) {
@@ -1156,6 +1564,15 @@ public class P2SChatScreen extends Screen {
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (button == 0 && isInsideContextEditor(mouseX, mouseY)) {
             setContextEditorFocused(true);
+            if (contextDiffMode) {
+                int rowStep = CONTEXT_ROW_HEIGHT + CONTEXT_ROW_GAP;
+                int row = (int) ((mouseY - (contextEditorY + CONTEXT_EDITOR_PADDING)) / rowStep);
+                row = Math.max(0, Math.min(row, Math.max(0, contextVisibleRows - 1)));
+                int line = Math.max(0, Math.min(contextScroll + row, Math.max(0, contextDiffLines.size() - 1)));
+                focusNearestDiffChange(line);
+                contextMouseSelecting = false;
+                return true;
+            }
             if (hasShiftDown()) {
                 ensureSelectionAnchor();
             } else {
@@ -1181,6 +1598,9 @@ public class P2SChatScreen extends Screen {
 
     @Override
     public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
+        if (contextDiffMode) {
+            return super.mouseDragged(mouseX, mouseY, button, dragX, dragY);
+        }
         if (button == 0 && contextMouseSelecting && contextEditorFocused) {
             ensureSelectionAnchor();
             placeContextCursorFromMouse(mouseX, mouseY);
@@ -1225,6 +1645,7 @@ public class P2SChatScreen extends Screen {
     @Override
     public void render(GuiGraphics gfx, int mouseX, int mouseY, float delta) {
         refreshChoiceButtons();
+        if (checkpointModeButton != null) { checkpointModeButton.setMessage(Component.literal(modeLabel())); }
         if (discardReasonMode && !ClientSessionState.hasPendingPatch()) {
             exitDiscardReasonMode();
         }
@@ -1245,6 +1666,7 @@ public class P2SChatScreen extends Screen {
             undoButton.active = active;
             redoButton.active = active;
         }
+        refreshContextDiffControls();
 
         int panelWidth = getPanelWidth();
         int panelX = getPanelX(panelWidth);
@@ -1279,7 +1701,10 @@ public class P2SChatScreen extends Screen {
         int y = PADDING;
         gfx.drawString(this.font, "Context JSON", x, y, 0xE8F0FF, true);
         y += this.font.lineHeight + 2;
-        gfx.drawString(this.font, "Multiline editor + range attach", x, y, 0x9CAECC, false);
+        String modeHint = contextDiffMode
+                ? "Inline diff view (committed vs staged) [F7 nav]"
+                : "Multiline editor + range attach";
+        gfx.drawString(this.font, modeHint, x, y, 0x9CAECC, false);
 
         int start = parsePositiveInt(contextStartInput == null ? "" : contextStartInput.getValue(), contextRangeStart);
         int end = parsePositiveInt(contextEndInput == null ? "" : contextEndInput.getValue(), contextRangeEnd);
@@ -1324,6 +1749,14 @@ public class P2SChatScreen extends Screen {
     }
 
     private void drawContextEditor(GuiGraphics gfx, int startLine, int endLine) {
+        if (contextDiffMode) {
+            drawContextDiffEditor(gfx);
+            return;
+        }
+        drawContextTextEditor(gfx, startLine, endLine);
+    }
+
+    private void drawContextTextEditor(GuiGraphics gfx, int startLine, int endLine) {
         if (contextJsonLines.isEmpty()) {
             contextJsonLines.add("");
         }
@@ -1402,6 +1835,82 @@ public class P2SChatScreen extends Screen {
                 caretX = Math.max(minCaretX, Math.min(caretX, maxCaretX));
                 gfx.fill(caretX, caretY, caretX + 1, caretY + caretHeight, 0xFFE8F0FF);
             }
+        }
+    }
+
+    private void drawContextDiffEditor(GuiGraphics gfx) {
+        int left = contextEditorX;
+        int top = contextEditorY;
+        int right = contextEditorX + contextEditorWidth;
+        int bottom = contextEditorY + contextEditorHeight;
+        int bg = contextEditorFocused ? 0xAA0B111A : 0xAA080E16;
+        gfx.fill(left, top, right, bottom, bg);
+        gfx.fill(left, top, right, top + 1, 0xFF2F3A4D);
+        gfx.fill(left, bottom - 1, right, bottom, 0xFF2F3A4D);
+        gfx.fill(left, top, left + 1, bottom, 0xFF2F3A4D);
+        gfx.fill(right - 1, top, right, bottom, 0xFF2F3A4D);
+
+        int rowStep = CONTEXT_ROW_HEIGHT + CONTEXT_ROW_GAP;
+        int baseY = top + CONTEXT_EDITOR_PADDING;
+        int gutter = CONTEXT_DIFF_GUTTER;
+        int oldNoX = left + 4;
+        int newNoX = left + 36;
+        int markerX = left + gutter - 14;
+        int textX = left + gutter;
+        int textWidth = Math.max(24, right - textX - CONTEXT_EDITOR_PADDING);
+
+        int firstLine = contextScroll;
+        int visibleRows = Math.max(1, contextVisibleRows);
+        int lastLineExclusive = Math.min(contextDiffLines.size(), firstLine + visibleRows);
+        for (int lineIndex = firstLine; lineIndex < lastLineExclusive; lineIndex++) {
+            int row = lineIndex - firstLine;
+            int rowY = baseY + row * rowStep;
+            int rowBottom = rowY + CONTEXT_ROW_HEIGHT;
+            DiffViewLine diffLine = contextDiffLines.get(lineIndex);
+
+            int textColor = 0xD6E0F5;
+            int markerColor = 0x7A8CAA;
+            switch (diffLine.type()) {
+                case ADDED -> {
+                    gfx.fill(left + 1, rowY, right - 1, rowBottom, 0x22306A2A);
+                    textColor = 0xBFFFC9;
+                    markerColor = 0x66DD88;
+                }
+                case REMOVED -> {
+                    gfx.fill(left + 1, rowY, right - 1, rowBottom, 0x224D2323);
+                    textColor = 0xFFBFC0;
+                    markerColor = 0xFF7C7C;
+                }
+                case SKIP -> {
+                    gfx.fill(left + 1, rowY, right - 1, rowBottom, 0x22262C36);
+                    textColor = 0x8FA2C4;
+                    markerColor = 0x8FA2C4;
+                }
+                case SAME -> {
+                }
+            }
+
+            if (contextDiffNavIndex >= 0
+                    && contextDiffNavIndex < contextDiffChangeRows.size()
+                    && contextDiffChangeRows.get(contextDiffNavIndex) == lineIndex) {
+                gfx.fill(left + 1, rowY, right - 1, rowY + 1, 0xFFD3A65E);
+                gfx.fill(left + 1, rowBottom - 1, right - 1, rowBottom, 0xFFD3A65E);
+            }
+
+            if (diffLine.oldLineNo() > 0) {
+                gfx.drawString(this.font, Integer.toString(diffLine.oldLineNo()), oldNoX, rowY + 5, 0x8A99B8, false);
+            }
+            if (diffLine.newLineNo() > 0) {
+                gfx.drawString(this.font, Integer.toString(diffLine.newLineNo()), newNoX, rowY + 5, 0x8A99B8, false);
+            }
+            String marker = switch (diffLine.type()) {
+                case ADDED -> "+";
+                case REMOVED -> "-";
+                case SKIP -> "~";
+                default -> " ";
+            };
+            gfx.drawString(this.font, marker, markerX, rowY + 5, markerColor, false);
+            gfx.drawString(this.font, clipTextToWidth(diffLine.text(), textWidth), textX, rowY + 5, textColor, false);
         }
     }
 
@@ -1531,6 +2040,17 @@ public class P2SChatScreen extends Screen {
             y += this.font.lineHeight + 2;
             for (FormattedCharSequence line : todoLines) {
                 gfx.drawString(this.font, line, panelX + PADDING, y, 0xCCDDEE, true);
+                y += this.font.lineHeight + LINE_SPACING;
+            }
+        }
+
+        List<FormattedCharSequence> checkpointLines = getCheckpointLines(panelWidth - PADDING * 2);
+        if (!checkpointLines.isEmpty()) {
+            y += this.font.lineHeight + 4;
+            gfx.drawString(this.font, "Checkpoints [mode=" + modeLabel() + "]", panelX + PADDING, y, 0x99FFCC, true);
+            y += this.font.lineHeight + 2;
+            for (FormattedCharSequence line : checkpointLines) {
+                gfx.drawString(this.font, line, panelX + PADDING, y, 0xCCFFEE, true);
                 y += this.font.lineHeight + LINE_SPACING;
             }
         }
@@ -1664,6 +2184,12 @@ public class P2SChatScreen extends Screen {
             extra += todoLines.size() * (this.font.lineHeight + LINE_SPACING);
             extra += LINE_SPACING;
         }
+        List<FormattedCharSequence> checkpointLines = getCheckpointLines(panelWidth - PADDING * 2);
+        if (!checkpointLines.isEmpty()) {
+            extra += this.font.lineHeight + 4;
+            extra += checkpointLines.size() * (this.font.lineHeight + LINE_SPACING);
+            extra += LINE_SPACING;
+        }
         return base + extra;
     }
 
@@ -1763,6 +2289,55 @@ public class P2SChatScreen extends Screen {
             lines.add(Component.literal("... +" + more + " more").getVisualOrderText());
         }
         return lines;
+    }
+
+
+    private List<FormattedCharSequence> getCheckpointLines(int contentWidth) {
+        List<ClientSessionState.CheckpointInfo> checkpoints = ClientSessionState.getCheckpoints();
+        if (checkpoints.isEmpty()) {
+            return List.of();
+        }
+        ClientSessionState.CheckpointInfo selected = ClientSessionState.getSelectedCheckpoint();
+        List<FormattedCharSequence> lines = new ArrayList<>();
+        int start = Math.max(0, checkpoints.size() - 6);
+        for (int i = start; i < checkpoints.size(); i++) {
+            ClientSessionState.CheckpointInfo cp = checkpoints.get(i);
+            boolean isSelected = selected != null && cp.id().equals(selected.id());
+            String marker = isSelected ? ">" : "-";
+            String text = marker + " " + shortId(cp.id()) + " " + (cp.label() == null ? "" : cp.label()) +
+                    (cp.revision() == null || cp.revision().isBlank() ? "" : " [" + cp.revision() + "]");
+            lines.addAll(this.font.split(Component.literal(text), contentWidth));
+        }
+        return lines;
+    }
+
+    private String shortId(String id) {
+        if (id == null) {
+            return "";
+        }
+        String v = id.trim();
+        return v.length() <= 8 ? v : v.substring(0, 8);
+    }
+
+    private String modeLabel() {
+        return "session_only".equals(ClientSessionState.getRollbackMode()) ? "Chat" : "All";
+    }
+
+    private void createCheckpoint() {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("label", "manual-" + ClientSessionState.getTurnCount());
+        sendSessionAction("create_checkpoint", payload.toString());
+    }
+
+    private void rollbackSelectedCheckpoint() {
+        ClientSessionState.CheckpointInfo cp = ClientSessionState.getSelectedCheckpoint();
+        if (cp == null || cp.id() == null || cp.id().isBlank()) {
+            return;
+        }
+        JsonObject payload = new JsonObject();
+        payload.addProperty("id", cp.id());
+        payload.addProperty("mode", ClientSessionState.getRollbackMode());
+        sendSessionAction("rollback_checkpoint", payload.toString());
     }
 
     private void refreshChoiceButtons() {
@@ -1915,6 +2490,34 @@ public class P2SChatScreen extends Screen {
     }
 
     private record ContextSelectionRange(int startLine, int startColumn, int endLine, int endColumn) {
+    }
+
+    private enum DiffOpType {
+        SAME,
+        ADD,
+        REMOVE
+    }
+
+    private enum DiffLineType {
+        SAME,
+        ADDED,
+        REMOVED,
+        SKIP
+    }
+
+    private record DiffOp(DiffOpType type, String text) {
+    }
+
+    private record DiffViewLine(DiffLineType type, int oldLineNo, int newLineNo, String text) {
+    }
+
+    private record DiffBuildResult(
+            List<DiffViewLine> lines,
+            List<Integer> changeRows,
+            int committedLineCount,
+            int stagedLineCount,
+            boolean truncated
+    ) {
     }
 
     private record ContextSnippet(String label, String content) {

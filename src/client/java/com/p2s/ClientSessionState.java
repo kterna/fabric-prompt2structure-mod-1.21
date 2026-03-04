@@ -1,5 +1,10 @@
 package com.p2s;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -34,6 +39,9 @@ public final class ClientSessionState {
     private static String todoTitle = "";
     private static final List<TodoItem> todoItems = new ArrayList<>();
     private static ChoiceRequest pendingChoice = null;
+    private static final List<CheckpointInfo> checkpoints = new ArrayList<>();
+    private static int selectedCheckpointIndex = -1;
+    private static String rollbackMode = "workspace_and_session";
     private static final List<ChatMessage> messages = new ArrayList<>();
     private static final StringBuilder streamingBuffer = new StringBuilder();
     private static volatile boolean streaming = false;
@@ -57,7 +65,8 @@ public final class ClientSessionState {
             int changed,
             int ox, int oy, int oz,
             boolean hasSz,
-            int sx, int sy, int sz
+            int sx, int sy, int sz,
+            String checkpointsJson
     ) {
         active = activeFlag;
         sessionId = id == null ? "" : id;
@@ -79,6 +88,7 @@ public final class ClientSessionState {
         sizeX = sx;
         sizeY = sy;
         sizeZ = sz;
+        updateCheckpoints(checkpointsJson);
         if (!pending) {
             clearPreview();
         }
@@ -88,6 +98,8 @@ public final class ClientSessionState {
             clearPreview();
             clearTodo();
             clearPendingChoice();
+            checkpoints.clear();
+            selectedCheckpointIndex = -1;
             originX = 0;
             originY = 0;
             originZ = 0;
@@ -420,6 +432,84 @@ public final class ClientSessionState {
         return sizeZ;
     }
 
+    private static synchronized void updateCheckpoints(String checkpointsJson) {
+        checkpoints.clear();
+        if (checkpointsJson != null && !checkpointsJson.isBlank()) {
+            try {
+                JsonElement root = JsonParser.parseString(checkpointsJson);
+                if (root.isJsonArray()) {
+                    JsonArray arr = root.getAsJsonArray();
+                    for (JsonElement el : arr) {
+                        if (el == null || !el.isJsonObject()) {
+                            continue;
+                        }
+                        JsonObject obj = el.getAsJsonObject();
+                        String id = obj.has("id") && obj.get("id").isJsonPrimitive() ? obj.get("id").getAsString().trim() : "";
+                        if (id.isBlank()) {
+                            continue;
+                        }
+                        String label = obj.has("label") && obj.get("label").isJsonPrimitive() ? obj.get("label").getAsString().trim() : "";
+                        String revisionLabel = obj.has("revision") && obj.get("revision").isJsonPrimitive() ? obj.get("revision").getAsString().trim() : "";
+                        checkpoints.add(new CheckpointInfo(id, label, revisionLabel));
+                    }
+                }
+            } catch (Exception ignored) {
+            }
+        }
+
+        if (checkpoints.isEmpty()) {
+            selectedCheckpointIndex = -1;
+            return;
+        }
+        if (selectedCheckpointIndex < 0 || selectedCheckpointIndex >= checkpoints.size()) {
+            selectedCheckpointIndex = checkpoints.size() - 1;
+        }
+    }
+
+    public static synchronized List<CheckpointInfo> getCheckpoints() {
+        return List.copyOf(checkpoints);
+    }
+
+    public static synchronized CheckpointInfo getSelectedCheckpoint() {
+        if (selectedCheckpointIndex < 0 || selectedCheckpointIndex >= checkpoints.size()) {
+            return null;
+        }
+        return checkpoints.get(selectedCheckpointIndex);
+    }
+
+    public static synchronized void selectPreviousCheckpoint() {
+        if (checkpoints.isEmpty()) {
+            selectedCheckpointIndex = -1;
+            return;
+        }
+        if (selectedCheckpointIndex < 0) {
+            selectedCheckpointIndex = checkpoints.size() - 1;
+            return;
+        }
+        selectedCheckpointIndex = (selectedCheckpointIndex - 1 + checkpoints.size()) % checkpoints.size();
+    }
+
+    public static synchronized void selectNextCheckpoint() {
+        if (checkpoints.isEmpty()) {
+            selectedCheckpointIndex = -1;
+            return;
+        }
+        if (selectedCheckpointIndex < 0) {
+            selectedCheckpointIndex = 0;
+            return;
+        }
+        selectedCheckpointIndex = (selectedCheckpointIndex + 1) % checkpoints.size();
+    }
+
+    public static synchronized String getRollbackMode() {
+        return rollbackMode;
+    }
+
+    public static synchronized String toggleRollbackMode() {
+        rollbackMode = "workspace_and_session".equals(rollbackMode) ? "session_only" : "workspace_and_session";
+        return rollbackMode;
+    }
+
     private static void clearPreview() {
         previewSummary = "";
         previewDetail = "";
@@ -445,5 +535,8 @@ public final class ClientSessionState {
     }
 
     public record ChoiceRequest(String requestId, String prompt, List<ChoiceOption> options) {
+    }
+
+    public record CheckpointInfo(String id, String label, String revision) {
     }
 }
