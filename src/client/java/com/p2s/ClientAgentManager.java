@@ -36,6 +36,7 @@ public final class ClientAgentManager {
             ## Client Agent Contract
             - Use list_skills to inspect available player skills by name/description.
             - Read full skill text only when needed via read_skill.
+            - Read focused skill sub-documents via read_subdoc when read_skill exposes subdocs.
             - Use search_skill to locate relevant snippets quickly before reading full body.
             - Keep an explicit todo list with set_todo/edit_todo_item/delete_todo_item/clear_todo.
             - Before asking the user to choose among alternatives, call request_user_choice.
@@ -56,7 +57,7 @@ public final class ClientAgentManager {
         return t;
     });
     private static final Set<String> PARALLEL_SAFE_TOOLS = Set.of(
-            "list_skills", "read_skill", "search_skill", "get_todo",
+            "list_skills", "read_skill", "read_subdoc", "search_skill", "get_todo",
             "read_workspace_state", "search_block_ids", "explain_plan",
             "list_subagents", "get_subagent", "list_profiles", "get_profile"
     );
@@ -470,6 +471,7 @@ public final class ClientAgentManager {
         return switch (toolName) {
             case "list_skills" -> listSkillsPayload();
             case "read_skill" -> readSkillPayload(call.arguments());
+            case "read_subdoc" -> readSubdocPayload(call.arguments());
             case "search_skill" -> searchSkillPayload(call.arguments());
             case "get_todo" -> getTodoPayload();
             case "set_todo" -> setTodoPayload(call.arguments());
@@ -578,6 +580,40 @@ public final class ClientAgentManager {
         payload.addProperty("name", doc.meta().name());
         payload.addProperty("description", doc.meta().description());
         payload.addProperty("body", doc.body() == null ? "" : doc.body());
+        JsonArray subdocs = new JsonArray();
+        for (SkillStore.SubdocMeta subdoc : SkillStore.listSubdocs(doc.meta().id())) {
+            JsonObject item = new JsonObject();
+            item.addProperty("path", subdoc.path());
+            item.addProperty("updated_at", subdoc.updatedAt());
+            subdocs.add(item);
+        }
+        payload.add("subdocs", subdocs);
+        payload.addProperty("subdoc_count", subdocs.size());
+        return payload;
+    }
+
+    private static JsonObject readSubdocPayload(JsonElement arguments) {
+        JsonObject args = normalizeArgsObject(arguments);
+        String id = asString(args, "id");
+        String path = asString(args, "path");
+        if (id.isBlank()) {
+            id = SkillStore.activeSkillId();
+        }
+        if (id.isBlank()) {
+            return toolError("read_subdoc", "No skill id and no active skill");
+        }
+        if (path.isBlank()) {
+            return toolError("read_subdoc", "Missing path");
+        }
+        SkillStore.SubdocDocument doc = SkillStore.readSubdoc(id, path);
+        if (doc == null) {
+            return toolError("read_subdoc", "Subdoc not found: " + id + "/" + path);
+        }
+        JsonObject payload = toolOk("read_subdoc");
+        payload.addProperty("id", doc.skillId());
+        payload.addProperty("path", doc.path());
+        payload.addProperty("body", doc.body() == null ? "" : doc.body());
+        payload.addProperty("updated_at", doc.updatedAt());
         return payload;
     }
 

@@ -55,7 +55,7 @@ public final class SubagentManager {
         return t;
     });
     private static final Set<String> PARALLEL_SAFE_TOOLS = Set.of(
-            "list_skills", "read_skill", "search_skill",
+            "list_skills", "read_skill", "read_subdoc", "search_skill",
             "read_workspace_state", "search_block_ids"
     );
 
@@ -578,6 +578,7 @@ public final class SubagentManager {
         return switch (toolName) {
             case "list_skills" -> listSkillsPayload(task);
             case "read_skill" -> readSkillPayload(task, call.arguments());
+            case "read_subdoc" -> readSubdocPayload(task, call.arguments());
             case "search_skill" -> searchSkillPayload(task, call.arguments());
             case "read_workspace_state", "propose_patch", "search_block_ids" ->
                     callServerTool(toolName, normalizeArgsObject(call.arguments()));
@@ -637,6 +638,50 @@ public final class SubagentManager {
         payload.addProperty("name", doc.meta().name());
         payload.addProperty("description", doc.meta().description());
         payload.addProperty("body", doc.body() == null ? "" : doc.body());
+        JsonArray subdocs = new JsonArray();
+        for (SkillStore.SubdocMeta subdoc : SkillStore.listSubdocs(doc.meta().id())) {
+            JsonObject item = new JsonObject();
+            item.addProperty("path", subdoc.path());
+            item.addProperty("updated_at", subdoc.updatedAt());
+            subdocs.add(item);
+        }
+        payload.add("subdocs", subdocs);
+        payload.addProperty("subdoc_count", subdocs.size());
+        return payload;
+    }
+
+    private static JsonObject readSubdocPayload(SubagentTask task, JsonElement arguments) {
+        JsonObject args = normalizeArgsObject(arguments);
+        String id = asString(args, "id");
+        String path = asString(args, "path");
+        Set<String> scope = scopedSkillSet(task);
+
+        if (id.isBlank()) {
+            if (!task.skillIds.isEmpty()) {
+                id = task.skillIds.get(0);
+            } else {
+                id = SkillStore.activeSkillId();
+            }
+        }
+        if (id.isBlank()) {
+            return toolError("read_subdoc", "No skill id available");
+        }
+        if (!scope.isEmpty() && !scope.contains(id)) {
+            return toolError("read_subdoc", "Skill not allowed for this subagent: " + id);
+        }
+        if (path.isBlank()) {
+            return toolError("read_subdoc", "Missing path");
+        }
+
+        SkillStore.SubdocDocument doc = SkillStore.readSubdoc(id, path);
+        if (doc == null) {
+            return toolError("read_subdoc", "Subdoc not found: " + id + "/" + path);
+        }
+        JsonObject payload = toolOk("read_subdoc");
+        payload.addProperty("id", doc.skillId());
+        payload.addProperty("path", doc.path());
+        payload.addProperty("body", doc.body() == null ? "" : doc.body());
+        payload.addProperty("updated_at", doc.updatedAt());
         return payload;
     }
 

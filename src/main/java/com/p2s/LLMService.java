@@ -615,6 +615,33 @@ public final class LLMService {
             tools.add(readSkillTool);
         }
 
+        if (includeSkillTools && allowsTool(allowedTools, "read_subdoc")) {
+            JsonObject readSubdocTool = new JsonObject();
+            readSubdocTool.addProperty("type", "function");
+            JsonObject readSubdocFn = new JsonObject();
+            readSubdocFn.addProperty("name", "read_subdoc");
+            readSubdocFn.addProperty("description", "Read one markdown sub-document inside a skill directory by relative path.");
+            JsonObject readSubdocParams = new JsonObject();
+            readSubdocParams.addProperty("type", "object");
+            JsonObject readSubdocProps = new JsonObject();
+            JsonObject readSubdocId = new JsonObject();
+            readSubdocId.addProperty("type", "string");
+            readSubdocId.addProperty("description", "Optional skill id from list_skills. Defaults to active skill.");
+            readSubdocProps.add("id", readSubdocId);
+            JsonObject readSubdocPath = new JsonObject();
+            readSubdocPath.addProperty("type", "string");
+            readSubdocPath.addProperty("description", "Relative markdown path, for example subdocs/roof-gable.md.");
+            readSubdocProps.add("path", readSubdocPath);
+            readSubdocParams.add("properties", readSubdocProps);
+            JsonArray readSubdocRequired = new JsonArray();
+            readSubdocRequired.add("path");
+            readSubdocParams.add("required", readSubdocRequired);
+            readSubdocParams.addProperty("additionalProperties", false);
+            readSubdocFn.add("parameters", readSubdocParams);
+            readSubdocTool.add("function", readSubdocFn);
+            tools.add(readSubdocTool);
+        }
+
         if (includeSkillTools && allowsTool(allowedTools, "search_skill")) {
             JsonObject searchSkillTool = new JsonObject();
             searchSkillTool.addProperty("type", "function");

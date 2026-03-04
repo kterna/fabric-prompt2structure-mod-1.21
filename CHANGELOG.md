@@ -40,3 +40,7 @@
 - 新增基础几何表达：`box.mode=solid|shell|walls`、`plane.axis=x|y|z` + `plane.mode=solid|outline`。
 - Builder / LLM schema / PatchValidator / PatchEngine / Session 统计与摘要全链路同步到新动作协议。
 - 旧动作类型在执行与校验阶段均强制报错并给出迁移提示，不再兼容旧脚本。
+- 默认 `default-builder` skill 吸收并转换了外部项目的组件化思路：加入 `墙/空心墙/线/线框/实心框架` 等可组合模板，并统一到本项目单文件 `SKILL.md` 格式与新动作协议。
+- 默认 skill 体系拆分为“总控 + 专项”：`default-builder` 负责协议与分流，新增 `size-planner`、`style-knowledge`、`interior-furniture` 分别承载尺寸、风格、内饰桌椅规则，并注册到 `SkillStore` 默认模板。
+- 新增 `read_subdoc` 工具：支持按 skill 内相对路径读取子文档；`read_skill` 现返回可读 `subdocs` 列表，`search_skill` 也会检索子文档内容。
+- 新增默认技能 `component-library`，并移植外部项目的核心组件示例到 `subdocs`（墙体、框架、门窗、屋顶、楼梯、曲线、几何体、散布）且统一为 `box/plane/line/points` 模式。

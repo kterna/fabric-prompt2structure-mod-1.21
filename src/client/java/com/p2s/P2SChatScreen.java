@@ -33,6 +33,8 @@ public class P2SChatScreen extends Screen {
 
     private static final int CONTEXT_ROW_HEIGHT = 18;
     private static final int CONTEXT_ROW_GAP = 2;
+    private static final int CONTEXT_EDITOR_GUTTER = 38;
+    private static final int CONTEXT_EDITOR_PADDING = 4;
     private static final int CONTEXT_FOOTER_HEIGHT = 110;
     private static final int CONTEXT_MAX_SNIPPETS = 8;
     private static final int CONTEXT_MAX_SNIPPET_CHARS = 4000;
@@ -56,7 +58,6 @@ public class P2SChatScreen extends Screen {
 
     // Left context editor
     private final List<String> contextJsonLines = new ArrayList<>();
-    private final List<EditBox> contextLineInputs = new ArrayList<>();
     private final List<ContextSnippet> queuedContexts = new ArrayList<>();
     private EditBox contextFileInput;
     private EditBox contextStartInput;
@@ -66,10 +67,20 @@ public class P2SChatScreen extends Screen {
     private Button contextClearJsonButton;
     private Button contextClearQueueButton;
     private Button contextAddRangeButton;
-    private Button contextUpButton;
-    private Button contextDownButton;
     private int contextVisibleRows = 0;
     private int contextScroll = 0;
+    private int contextEditorX = 0;
+    private int contextEditorY = 0;
+    private int contextEditorWidth = 0;
+    private int contextEditorHeight = 0;
+    private boolean contextEditorFocused = false;
+    private int contextCursorLine = 0;
+    private int contextCursorColumn = 0;
+    private int contextPreferredColumn = -1;
+    private boolean contextSelectionActive = false;
+    private int contextSelectionAnchorLine = 0;
+    private int contextSelectionAnchorColumn = 0;
+    private boolean contextMouseSelecting = false;
     private int contextQueueTopY = 0;
     private String contextFileName = "workspace-state.json";
     private int contextRangeStart = 1;
@@ -95,7 +106,6 @@ public class P2SChatScreen extends Screen {
     }
 
     private void createWidgets() {
-        saveContextPage();
         captureContextControlState();
         clearWidgets();
 
@@ -108,7 +118,7 @@ public class P2SChatScreen extends Screen {
 
         input = new EditBox(this.font, panelX + PADDING, inputY, inputWidth, INPUT_HEIGHT, Component.literal(""));
         input.setMaxLength(512);
-        input.setFocused(true);
+        input.setFocused(!contextEditorFocused);
         addRenderableWidget(input);
 
         sendButton = Button.builder(Component.literal(">"), btn -> sendMessage())
@@ -253,29 +263,18 @@ public class P2SChatScreen extends Screen {
         int editorTop = row3Y + INPUT_HEIGHT + 4;
         int editorBottom = this.height - CONTEXT_FOOTER_HEIGHT;
         int available = Math.max(0, editorBottom - editorTop);
-        contextVisibleRows = Math.max(4, Math.min(22, available / (CONTEXT_ROW_HEIGHT + CONTEXT_ROW_GAP)));
+        int rowStep = CONTEXT_ROW_HEIGHT + CONTEXT_ROW_GAP;
+        contextVisibleRows = Math.max(4, Math.min(40, available / rowStep));
+        int renderedRows = Math.max(1, contextVisibleRows);
+        contextEditorX = leftX;
+        contextEditorY = editorTop;
+        contextEditorWidth = leftWidth;
+        contextEditorHeight = renderedRows * rowStep - CONTEXT_ROW_GAP + CONTEXT_EDITOR_PADDING * 2;
+        contextQueueTopY = contextEditorY + contextEditorHeight + 6;
 
-        contextLineInputs.clear();
-        int lineNumberGutter = 36;
-        int inputWidth = Math.max(60, leftWidth - lineNumberGutter);
-        for (int i = 0; i < contextVisibleRows; i++) {
-            int y = editorTop + i * (CONTEXT_ROW_HEIGHT + CONTEXT_ROW_GAP);
-            EditBox rowInput = new EditBox(this.font, leftX + lineNumberGutter, y, inputWidth, CONTEXT_ROW_HEIGHT, Component.literal("json line"));
-            rowInput.setMaxLength(4096);
-            contextLineInputs.add(rowInput);
-            addRenderableWidget(rowInput);
-        }
-
-        int navY = editorTop + contextVisibleRows * (CONTEXT_ROW_HEIGHT + CONTEXT_ROW_GAP) + 4;
-        contextUpButton = addRenderableWidget(Button.builder(Component.literal("Up"), btn -> scrollContextEditor(-1))
-                .bounds(leftX, navY, 52, INPUT_HEIGHT).build());
-        contextDownButton = addRenderableWidget(Button.builder(Component.literal("Down"), btn -> scrollContextEditor(1))
-                .bounds(leftX + 54, navY, 64, INPUT_HEIGHT).build());
-        contextQueueTopY = navY + INPUT_HEIGHT + 6;
-
+        clampContextCursor();
         clampContextScroll();
-        loadContextPage();
-        refreshContextNavButtons();
+        ensureContextCursorVisible();
     }
 
     private void captureContextControlState() {
@@ -296,7 +295,6 @@ public class P2SChatScreen extends Screen {
     }
 
     private void formatContextJson() {
-        saveContextPage();
         String raw = contextLinesToText();
         if (raw.isBlank()) {
             setContextStatus("Nothing to format", 0xFFAA55);
@@ -335,8 +333,14 @@ public class P2SChatScreen extends Screen {
             contextJsonLines.add("");
         }
         contextScroll = 0;
+        contextCursorLine = 0;
+        contextCursorColumn = 0;
+        contextPreferredColumn = -1;
+        clearContextSelection();
+        contextMouseSelecting = false;
         clampContextScroll();
-        loadContextPage();
+        clampContextCursor();
+        ensureContextCursorVisible();
         contextRangeStart = 1;
         contextRangeEnd = Math.min(contextJsonLines.size(), CONTEXT_DEFAULT_RANGE);
         if (contextStartInput != null) {
@@ -347,35 +351,328 @@ public class P2SChatScreen extends Screen {
         }
     }
 
-    private void ensureContextCapacity(int size) {
-        int target = Math.max(1, size);
-        while (contextJsonLines.size() < target) {
+    private void clampContextCursor() {
+        if (contextJsonLines.isEmpty()) {
             contextJsonLines.add("");
         }
+        contextCursorLine = Math.max(0, Math.min(contextCursorLine, contextJsonLines.size() - 1));
+        String line = contextJsonLines.get(contextCursorLine);
+        int maxColumn = line == null ? 0 : line.length();
+        contextCursorColumn = Math.max(0, Math.min(contextCursorColumn, maxColumn));
+        clampContextSelectionAnchor();
     }
 
-    private void saveContextPage() {
-        if (contextLineInputs.isEmpty()) {
+    private void clampContextSelectionAnchor() {
+        if (!contextSelectionActive) {
             return;
         }
-        ensureContextCapacity(contextScroll + contextLineInputs.size());
-        for (int i = 0; i < contextLineInputs.size(); i++) {
-            int idx = contextScroll + i;
-            contextJsonLines.set(idx, contextLineInputs.get(i).getValue());
+        if (contextJsonLines.isEmpty()) {
+            clearContextSelection();
+            return;
+        }
+        contextSelectionAnchorLine = Math.max(0, Math.min(contextSelectionAnchorLine, contextJsonLines.size() - 1));
+        String line = getContextLine(contextSelectionAnchorLine);
+        contextSelectionAnchorColumn = Math.max(0, Math.min(contextSelectionAnchorColumn, line.length()));
+    }
+
+    private void ensureContextCursorVisible() {
+        clampContextCursor();
+        int visibleRows = Math.max(1, contextVisibleRows);
+        if (contextCursorLine < contextScroll) {
+            contextScroll = contextCursorLine;
+        } else if (contextCursorLine >= contextScroll + visibleRows) {
+            contextScroll = contextCursorLine - visibleRows + 1;
+        }
+        clampContextScroll();
+    }
+
+    private void setContextCursor(int line, int column, boolean keepPreferredColumn) {
+        contextCursorLine = line;
+        contextCursorColumn = column;
+        if (!keepPreferredColumn) {
+            contextPreferredColumn = -1;
+        }
+        ensureContextCursorVisible();
+    }
+
+    private String getContextLine(int lineIndex) {
+        if (lineIndex < 0 || lineIndex >= contextJsonLines.size()) {
+            return "";
+        }
+        String value = contextJsonLines.get(lineIndex);
+        return value == null ? "" : value;
+    }
+
+    private void setContextLine(int lineIndex, String value) {
+        if (lineIndex < 0 || lineIndex >= contextJsonLines.size()) {
+            return;
+        }
+        contextJsonLines.set(lineIndex, value == null ? "" : value);
+    }
+
+    private void clearContextSelection() {
+        contextSelectionActive = false;
+    }
+
+    private boolean hasContextSelection() {
+        if (!contextSelectionActive) {
+            return false;
+        }
+        clampContextSelectionAnchor();
+        return contextSelectionAnchorLine != contextCursorLine || contextSelectionAnchorColumn != contextCursorColumn;
+    }
+
+    private void ensureSelectionAnchor() {
+        if (contextSelectionActive) {
+            return;
+        }
+        contextSelectionActive = true;
+        contextSelectionAnchorLine = contextCursorLine;
+        contextSelectionAnchorColumn = contextCursorColumn;
+    }
+
+    private void updateContextSelectionForCursorMove(boolean selecting) {
+        if (selecting) {
+            ensureSelectionAnchor();
+            return;
+        }
+        clearContextSelection();
+    }
+
+    private int compareContextPosition(int line1, int col1, int line2, int col2) {
+        if (line1 != line2) {
+            return Integer.compare(line1, line2);
+        }
+        return Integer.compare(col1, col2);
+    }
+
+    private ContextSelectionRange getContextSelectionRange() {
+        if (!hasContextSelection()) {
+            return null;
+        }
+        int anchorLine = contextSelectionAnchorLine;
+        int anchorColumn = contextSelectionAnchorColumn;
+        int cursorLine = contextCursorLine;
+        int cursorColumn = contextCursorColumn;
+        if (compareContextPosition(anchorLine, anchorColumn, cursorLine, cursorColumn) <= 0) {
+            return new ContextSelectionRange(anchorLine, anchorColumn, cursorLine, cursorColumn);
+        }
+        return new ContextSelectionRange(cursorLine, cursorColumn, anchorLine, anchorColumn);
+    }
+
+    private boolean deleteContextSelection() {
+        ContextSelectionRange range = getContextSelectionRange();
+        if (range == null) {
+            return false;
+        }
+        String startLineText = getContextLine(range.startLine());
+        String endLineText = getContextLine(range.endLine());
+        int startColumn = Math.min(range.startColumn(), startLineText.length());
+        int endColumn = Math.min(range.endColumn(), endLineText.length());
+
+        if (range.startLine() == range.endLine()) {
+            String merged = startLineText.substring(0, startColumn) + startLineText.substring(endColumn);
+            setContextLine(range.startLine(), merged);
+        } else {
+            String merged = startLineText.substring(0, startColumn) + endLineText.substring(endColumn);
+            setContextLine(range.startLine(), merged);
+            for (int line = range.endLine(); line > range.startLine(); line--) {
+                contextJsonLines.remove(line);
+            }
+        }
+
+        setContextCursor(range.startLine(), startColumn, false);
+        clearContextSelection();
+        return true;
+    }
+
+    private String getContextSelectionText() {
+        ContextSelectionRange range = getContextSelectionRange();
+        if (range == null) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int lineIndex = range.startLine(); lineIndex <= range.endLine(); lineIndex++) {
+            String line = getContextLine(lineIndex);
+            int from = 0;
+            int to = line.length();
+            if (lineIndex == range.startLine()) {
+                from = Math.min(range.startColumn(), line.length());
+            }
+            if (lineIndex == range.endLine()) {
+                to = Math.min(range.endColumn(), line.length());
+            }
+            if (lineIndex > range.startLine()) {
+                sb.append('\n');
+            }
+            sb.append(line, from, Math.max(from, to));
+        }
+        return sb.toString();
+    }
+
+    private void copyContextSelectionToClipboard() {
+        if (this.minecraft == null) {
+            return;
+        }
+        String text = getContextSelectionText();
+        if (!text.isEmpty()) {
+            this.minecraft.keyboardHandler.setClipboard(text);
         }
     }
 
-    private void loadContextPage() {
-        if (contextLineInputs.isEmpty()) {
+    private void selectAllContextText() {
+        if (contextJsonLines.isEmpty()) {
+            contextJsonLines.add("");
+        }
+        contextSelectionActive = true;
+        contextSelectionAnchorLine = 0;
+        contextSelectionAnchorColumn = 0;
+        int lastLine = contextJsonLines.size() - 1;
+        setContextCursor(lastLine, getContextLine(lastLine).length(), false);
+    }
+
+    private void insertContextText(String text) {
+        if (text == null || text.isEmpty()) {
             return;
         }
-        ensureContextCapacity(contextScroll + contextLineInputs.size());
-        for (int i = 0; i < contextLineInputs.size(); i++) {
-            int idx = contextScroll + i;
-            String value = idx >= 0 && idx < contextJsonLines.size() ? contextJsonLines.get(idx) : "";
-            contextLineInputs.get(i).setValue(value == null ? "" : value);
+        if (contextJsonLines.isEmpty()) {
+            contextJsonLines.add("");
         }
-        refreshContextNavButtons();
+        deleteContextSelection();
+        String normalized = text.replace("\r\n", "\n").replace('\r', '\n');
+        String current = getContextLine(contextCursorLine);
+        String before = current.substring(0, Math.min(contextCursorColumn, current.length()));
+        String after = current.substring(Math.min(contextCursorColumn, current.length()));
+        String[] parts = normalized.split("\n", -1);
+
+        if (parts.length == 1) {
+            setContextLine(contextCursorLine, before + parts[0] + after);
+            setContextCursor(contextCursorLine, before.length() + parts[0].length(), false);
+            return;
+        }
+
+        setContextLine(contextCursorLine, before + parts[0]);
+        int insertAt = contextCursorLine + 1;
+        for (int i = 1; i < parts.length; i++) {
+            contextJsonLines.add(insertAt, parts[i]);
+            insertAt++;
+        }
+
+        int lastLine = contextCursorLine + parts.length - 1;
+        setContextLine(lastLine, getContextLine(lastLine) + after);
+        setContextCursor(lastLine, parts[parts.length - 1].length(), false);
+    }
+
+    private void backspaceContextChar() {
+        if (deleteContextSelection()) {
+            return;
+        }
+        if (contextJsonLines.isEmpty()) {
+            contextJsonLines.add("");
+            setContextCursor(0, 0, false);
+            return;
+        }
+        String line = getContextLine(contextCursorLine);
+        if (contextCursorColumn > 0) {
+            int removeIndex = contextCursorColumn - 1;
+            setContextLine(contextCursorLine, line.substring(0, removeIndex) + line.substring(contextCursorColumn));
+            setContextCursor(contextCursorLine, removeIndex, false);
+            return;
+        }
+
+        if (contextCursorLine <= 0) {
+            return;
+        }
+
+        String prevLine = getContextLine(contextCursorLine - 1);
+        String currentLine = getContextLine(contextCursorLine);
+        int newColumn = prevLine.length();
+        setContextLine(contextCursorLine - 1, prevLine + currentLine);
+        contextJsonLines.remove(contextCursorLine);
+        setContextCursor(contextCursorLine - 1, newColumn, false);
+    }
+
+    private void deleteContextChar() {
+        if (deleteContextSelection()) {
+            return;
+        }
+        if (contextJsonLines.isEmpty()) {
+            contextJsonLines.add("");
+            setContextCursor(0, 0, false);
+            return;
+        }
+        String line = getContextLine(contextCursorLine);
+        if (contextCursorColumn < line.length()) {
+            setContextLine(contextCursorLine, line.substring(0, contextCursorColumn) + line.substring(contextCursorColumn + 1));
+            return;
+        }
+
+        if (contextCursorLine >= contextJsonLines.size() - 1) {
+            return;
+        }
+
+        String nextLine = getContextLine(contextCursorLine + 1);
+        setContextLine(contextCursorLine, line + nextLine);
+        contextJsonLines.remove(contextCursorLine + 1);
+        setContextCursor(contextCursorLine, contextCursorColumn, false);
+    }
+
+    private void moveContextCursorHorizontal(int delta, boolean selecting) {
+        if (delta == 0 || contextJsonLines.isEmpty()) {
+            return;
+        }
+        if (!selecting && hasContextSelection()) {
+            ContextSelectionRange range = getContextSelectionRange();
+            if (range != null) {
+                if (delta < 0) {
+                    setContextCursor(range.startLine(), range.startColumn(), false);
+                } else {
+                    setContextCursor(range.endLine(), range.endColumn(), false);
+                }
+                clearContextSelection();
+                return;
+            }
+        }
+        int line = contextCursorLine;
+        int column = contextCursorColumn;
+        updateContextSelectionForCursorMove(selecting);
+        if (delta < 0) {
+            if (column > 0) {
+                setContextCursor(line, column - 1, false);
+            } else if (line > 0) {
+                setContextCursor(line - 1, getContextLine(line - 1).length(), false);
+            }
+            return;
+        }
+
+        String current = getContextLine(line);
+        if (column < current.length()) {
+            setContextCursor(line, column + 1, false);
+        } else if (line < contextJsonLines.size() - 1) {
+            setContextCursor(line + 1, 0, false);
+        }
+    }
+
+    private void moveContextCursorVertical(int deltaRows, boolean selecting) {
+        if (deltaRows == 0 || contextJsonLines.isEmpty()) {
+            return;
+        }
+        updateContextSelectionForCursorMove(selecting);
+        int preferred = contextPreferredColumn >= 0 ? contextPreferredColumn : contextCursorColumn;
+        int targetLine = Math.max(0, Math.min(contextCursorLine + deltaRows, contextJsonLines.size() - 1));
+        int targetColumn = Math.min(preferred, getContextLine(targetLine).length());
+        contextPreferredColumn = preferred;
+        setContextCursor(targetLine, targetColumn, true);
+    }
+
+    private void moveContextCursorToLineStart(boolean selecting) {
+        updateContextSelectionForCursorMove(selecting);
+        setContextCursor(contextCursorLine, 0, false);
+    }
+
+    private void moveContextCursorToLineEnd(boolean selecting) {
+        updateContextSelectionForCursorMove(selecting);
+        setContextCursor(contextCursorLine, getContextLine(contextCursorLine).length(), false);
     }
 
     private void clampContextScroll() {
@@ -387,24 +684,11 @@ public class P2SChatScreen extends Screen {
         if (deltaRows == 0) {
             return;
         }
-        saveContextPage();
         contextScroll += deltaRows;
         clampContextScroll();
-        loadContextPage();
-    }
-
-    private void refreshContextNavButtons() {
-        int max = Math.max(0, contextJsonLines.size() - Math.max(1, contextVisibleRows));
-        if (contextUpButton != null) {
-            contextUpButton.active = contextScroll > 0;
-        }
-        if (contextDownButton != null) {
-            contextDownButton.active = contextScroll < max;
-        }
     }
 
     private void addSelectedRangeAsContext() {
-        saveContextPage();
         if (queuedContexts.size() >= CONTEXT_MAX_SNIPPETS) {
             setContextStatus("Too many snippets queued (" + CONTEXT_MAX_SNIPPETS + " max)", 0xFF5555);
             return;
@@ -662,6 +946,152 @@ public class P2SChatScreen extends Screen {
         contextStatusColor = color;
     }
 
+    private void setContextEditorFocused(boolean focused) {
+        contextEditorFocused = focused;
+        if (!focused) {
+            return;
+        }
+        if (input != null) {
+            input.setFocused(false);
+        }
+        if (contextFileInput != null) {
+            contextFileInput.setFocused(false);
+        }
+        if (contextStartInput != null) {
+            contextStartInput.setFocused(false);
+        }
+        if (contextEndInput != null) {
+            contextEndInput.setFocused(false);
+        }
+    }
+
+    private boolean isInsideContextEditor(double mouseX, double mouseY) {
+        return mouseX >= contextEditorX && mouseX < contextEditorX + contextEditorWidth
+                && mouseY >= contextEditorY && mouseY < contextEditorY + contextEditorHeight;
+    }
+
+    private void placeContextCursorFromMouse(double mouseX, double mouseY) {
+        if (contextJsonLines.isEmpty()) {
+            contextJsonLines.add("");
+        }
+        int rowStep = CONTEXT_ROW_HEIGHT + CONTEXT_ROW_GAP;
+        int row = (int) ((mouseY - (contextEditorY + CONTEXT_EDITOR_PADDING)) / rowStep);
+        row = Math.max(0, Math.min(row, Math.max(0, contextVisibleRows - 1)));
+        int line = Math.max(0, Math.min(contextScroll + row, contextJsonLines.size() - 1));
+
+        int textX = contextEditorX + CONTEXT_EDITOR_GUTTER;
+        int targetX = (int) (mouseX - textX);
+        int column = columnAtPixel(getContextLine(line), targetX);
+        setContextCursor(line, column, false);
+    }
+
+    private int columnAtPixel(String text, int pixelX) {
+        if (text == null || text.isEmpty() || pixelX <= 0) {
+            return 0;
+        }
+        int width = 0;
+        for (int i = 0; i < text.length(); i++) {
+            int charWidth = this.font.width(String.valueOf(text.charAt(i)));
+            int mid = width + charWidth / 2;
+            if (pixelX <= mid) {
+                return i;
+            }
+            width += charWidth;
+        }
+        return text.length();
+    }
+
+    private boolean handleContextEditorKeyPressed(int keyCode, int modifiers) {
+        if (!contextEditorFocused) {
+            return false;
+        }
+        if (hasControlDown()) {
+            if (keyCode == GLFW.GLFW_KEY_A) {
+                selectAllContextText();
+                return true;
+            }
+            if (keyCode == GLFW.GLFW_KEY_C) {
+                copyContextSelectionToClipboard();
+                return true;
+            }
+            if (keyCode == GLFW.GLFW_KEY_X) {
+                copyContextSelectionToClipboard();
+                deleteContextSelection();
+                return true;
+            }
+            if (keyCode == GLFW.GLFW_KEY_V) {
+                String clipboard = this.minecraft == null ? "" : this.minecraft.keyboardHandler.getClipboard();
+                if (clipboard != null && !clipboard.isEmpty()) {
+                    insertContextText(clipboard);
+                }
+                return true;
+            }
+        }
+        boolean selecting = hasShiftDown();
+        return switch (keyCode) {
+            case GLFW.GLFW_KEY_ENTER, GLFW.GLFW_KEY_KP_ENTER -> {
+                insertContextText("\n");
+                yield true;
+            }
+            case GLFW.GLFW_KEY_BACKSPACE -> {
+                backspaceContextChar();
+                yield true;
+            }
+            case GLFW.GLFW_KEY_DELETE -> {
+                deleteContextChar();
+                yield true;
+            }
+            case GLFW.GLFW_KEY_LEFT -> {
+                moveContextCursorHorizontal(-1, selecting);
+                yield true;
+            }
+            case GLFW.GLFW_KEY_RIGHT -> {
+                moveContextCursorHorizontal(1, selecting);
+                yield true;
+            }
+            case GLFW.GLFW_KEY_UP -> {
+                moveContextCursorVertical(-1, selecting);
+                yield true;
+            }
+            case GLFW.GLFW_KEY_DOWN -> {
+                moveContextCursorVertical(1, selecting);
+                yield true;
+            }
+            case GLFW.GLFW_KEY_HOME -> {
+                moveContextCursorToLineStart(selecting);
+                yield true;
+            }
+            case GLFW.GLFW_KEY_END -> {
+                moveContextCursorToLineEnd(selecting);
+                yield true;
+            }
+            case GLFW.GLFW_KEY_PAGE_UP -> {
+                moveContextCursorVertical(-Math.max(1, contextVisibleRows - 1), selecting);
+                yield true;
+            }
+            case GLFW.GLFW_KEY_PAGE_DOWN -> {
+                moveContextCursorVertical(Math.max(1, contextVisibleRows - 1), selecting);
+                yield true;
+            }
+            case GLFW.GLFW_KEY_TAB -> {
+                insertContextText("    ");
+                yield true;
+            }
+            default -> false;
+        };
+    }
+
+    private boolean handleContextEditorCharTyped(char codePoint, int modifiers) {
+        if (!contextEditorFocused || hasControlDown()) {
+            return false;
+        }
+        if (Character.isISOControl(codePoint)) {
+            return false;
+        }
+        insertContextText(Character.toString(codePoint));
+        return true;
+    }
+
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
         if (discardReasonMode) {
@@ -690,6 +1120,10 @@ public class P2SChatScreen extends Screen {
             return true;
         }
 
+        if (handleContextEditorKeyPressed(keyCode, modifiers)) {
+            return true;
+        }
+
         for (EditBox box : collectEditableBoxes()) {
             if (box != null && box.keyPressed(keyCode, scanCode, modifiers)) {
                 return true;
@@ -707,6 +1141,9 @@ public class P2SChatScreen extends Screen {
             }
             return super.charTyped(codePoint, modifiers);
         }
+        if (handleContextEditorCharTyped(codePoint, modifiers)) {
+            return true;
+        }
         for (EditBox box : collectEditableBoxes()) {
             if (box != null && box.charTyped(codePoint, modifiers)) {
                 return true;
@@ -717,7 +1154,47 @@ public class P2SChatScreen extends Screen {
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        if (button == 0 && isInsideContextEditor(mouseX, mouseY)) {
+            setContextEditorFocused(true);
+            if (hasShiftDown()) {
+                ensureSelectionAnchor();
+            } else {
+                clearContextSelection();
+            }
+            placeContextCursorFromMouse(mouseX, mouseY);
+            if (!hasShiftDown()) {
+                contextSelectionActive = true;
+                contextSelectionAnchorLine = contextCursorLine;
+                contextSelectionAnchorColumn = contextCursorColumn;
+            }
+            contextMouseSelecting = true;
+            return true;
+        }
+        if (button == 0) {
+            contextMouseSelecting = false;
+        }
+        if (contextEditorFocused) {
+            contextEditorFocused = false;
+        }
         return super.mouseClicked(mouseX, mouseY, button);
+    }
+
+    @Override
+    public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
+        if (button == 0 && contextMouseSelecting && contextEditorFocused) {
+            ensureSelectionAnchor();
+            placeContextCursorFromMouse(mouseX, mouseY);
+            return true;
+        }
+        return super.mouseDragged(mouseX, mouseY, button, dragX, dragY);
+    }
+
+    @Override
+    public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        if (button == 0) {
+            contextMouseSelecting = false;
+        }
+        return super.mouseReleased(mouseX, mouseY, button);
     }
 
     @Override
@@ -725,14 +1202,12 @@ public class P2SChatScreen extends Screen {
         int panelWidth = getPanelWidth();
         int panelX = getPanelX(panelWidth);
         if (mouseX < panelX) {
-            if (!contextLineInputs.isEmpty()) {
-                int delta = verticalAmount > 0 ? -3 : 3;
-                if (delta != 0) {
-                    int before = contextScroll;
-                    scrollContextEditor(delta);
-                    if (before != contextScroll) {
-                        return true;
-                    }
+            int delta = verticalAmount > 0 ? -3 : 3;
+            if (delta != 0) {
+                int before = contextScroll;
+                scrollContextEditor(delta);
+                if (before != contextScroll) {
+                    return true;
                 }
             }
             return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
@@ -804,7 +1279,7 @@ public class P2SChatScreen extends Screen {
         int y = PADDING;
         gfx.drawString(this.font, "Context JSON", x, y, 0xE8F0FF, true);
         y += this.font.lineHeight + 2;
-        gfx.drawString(this.font, "Editable lines + range attach", x, y, 0x9CAECC, false);
+        gfx.drawString(this.font, "Multiline editor + range attach", x, y, 0x9CAECC, false);
 
         int start = parsePositiveInt(contextStartInput == null ? "" : contextStartInput.getValue(), contextRangeStart);
         int end = parsePositiveInt(contextEndInput == null ? "" : contextEndInput.getValue(), contextRangeEnd);
@@ -814,17 +1289,7 @@ public class P2SChatScreen extends Screen {
             end = t;
         }
 
-        for (int i = 0; i < contextLineInputs.size(); i++) {
-            EditBox row = contextLineInputs.get(i);
-            int lineNo = contextScroll + i + 1;
-            int lineY = row.getY() + 5;
-            int color = 0x8A99B8;
-            if (lineNo >= start && lineNo <= end) {
-                gfx.fill(row.getX() - 34, row.getY(), row.getX() + row.getWidth(), row.getY() + row.getHeight(), 0x33335522);
-                color = 0xFFD27D;
-            }
-            gfx.drawString(this.font, Integer.toString(lineNo), row.getX() - 30, lineY, color, false);
-        }
+        drawContextEditor(gfx, start, end);
 
         int infoY = contextQueueTopY;
         gfx.drawString(this.font, "Next message context (" + queuedContexts.size() + "/" + CONTEXT_MAX_SNIPPETS + ")", x, infoY, 0xE8F0FF, true);
@@ -858,6 +1323,111 @@ public class P2SChatScreen extends Screen {
         }
     }
 
+    private void drawContextEditor(GuiGraphics gfx, int startLine, int endLine) {
+        if (contextJsonLines.isEmpty()) {
+            contextJsonLines.add("");
+        }
+        clampContextCursor();
+        clampContextScroll();
+
+        int left = contextEditorX;
+        int top = contextEditorY;
+        int right = contextEditorX + contextEditorWidth;
+        int bottom = contextEditorY + contextEditorHeight;
+        int bg = contextEditorFocused ? 0xAA0B111A : 0xAA080E16;
+        gfx.fill(left, top, right, bottom, bg);
+        gfx.fill(left, top, right, top + 1, 0xFF2F3A4D);
+        gfx.fill(left, bottom - 1, right, bottom, 0xFF2F3A4D);
+        gfx.fill(left, top, left + 1, bottom, 0xFF2F3A4D);
+        gfx.fill(right - 1, top, right, bottom, 0xFF2F3A4D);
+
+        int rowStep = CONTEXT_ROW_HEIGHT + CONTEXT_ROW_GAP;
+        int baseY = top + CONTEXT_EDITOR_PADDING;
+        int textX = left + CONTEXT_EDITOR_GUTTER;
+        int textWidth = Math.max(24, right - textX - CONTEXT_EDITOR_PADDING);
+        int maxTextX = right - CONTEXT_EDITOR_PADDING - 1;
+        ContextSelectionRange selection = getContextSelectionRange();
+
+        int firstLine = contextScroll;
+        int visibleRows = Math.max(1, contextVisibleRows);
+        int lastLineExclusive = Math.min(contextJsonLines.size(), firstLine + visibleRows);
+        for (int lineIndex = firstLine; lineIndex < lastLineExclusive; lineIndex++) {
+            int row = lineIndex - firstLine;
+            int rowY = baseY + row * rowStep;
+            int rowBottom = rowY + CONTEXT_ROW_HEIGHT;
+            int lineNo = lineIndex + 1;
+            int lineNoColor = 0x8A99B8;
+            if (lineNo >= startLine && lineNo <= endLine) {
+                gfx.fill(left + 1, rowY, right - 1, rowBottom, 0x33335522);
+                lineNoColor = 0xFFD27D;
+            }
+            String fullLine = getContextLine(lineIndex);
+            if (selection != null && lineIndex >= selection.startLine() && lineIndex <= selection.endLine()) {
+                int selStart = 0;
+                int selEnd = fullLine.length();
+                if (lineIndex == selection.startLine()) {
+                    selStart = Math.min(selection.startColumn(), fullLine.length());
+                }
+                if (lineIndex == selection.endLine()) {
+                    selEnd = Math.min(selection.endColumn(), fullLine.length());
+                }
+                if (selEnd > selStart) {
+                    int selX1 = textX + this.font.width(fullLine.substring(0, selStart));
+                    int selX2 = textX + this.font.width(fullLine.substring(0, selEnd));
+                    int drawSelX1 = Math.max(textX, Math.min(selX1, maxTextX));
+                    int drawSelX2 = Math.max(textX, Math.min(selX2, maxTextX));
+                    if (drawSelX2 <= drawSelX1) {
+                        drawSelX2 = Math.min(maxTextX, drawSelX1 + 1);
+                    }
+                    if (drawSelX2 > drawSelX1) {
+                        gfx.fill(drawSelX1, rowY + 2, drawSelX2, rowBottom - 2, 0x665A8BFF);
+                    }
+                }
+            }
+            gfx.drawString(this.font, Integer.toString(lineNo), left + 4, rowY + 5, lineNoColor, false);
+            String lineText = clipTextToWidth(fullLine, textWidth);
+            gfx.drawString(this.font, lineText, textX, rowY + 5, 0xD6E0F5, false);
+        }
+
+        if (contextEditorFocused && (System.currentTimeMillis() / 500L) % 2L == 0L) {
+            if (contextCursorLine >= firstLine && contextCursorLine < lastLineExclusive) {
+                int row = contextCursorLine - firstLine;
+                int caretY = baseY + row * rowStep + 3;
+                int caretHeight = Math.max(4, CONTEXT_ROW_HEIGHT - 6);
+                String line = getContextLine(contextCursorLine);
+                int cursor = Math.min(contextCursorColumn, line.length());
+                int caretX = textX + this.font.width(line.substring(0, cursor));
+                int minCaretX = textX;
+                int maxCaretX = maxTextX;
+                caretX = Math.max(minCaretX, Math.min(caretX, maxCaretX));
+                gfx.fill(caretX, caretY, caretX + 1, caretY + caretHeight, 0xFFE8F0FF);
+            }
+        }
+    }
+
+    private String clipTextToWidth(String text, int maxWidth) {
+        if (text == null || text.isEmpty() || maxWidth <= 0) {
+            return "";
+        }
+        if (this.font.width(text) <= maxWidth) {
+            return text;
+        }
+        String ellipsis = "...";
+        int ellipsisWidth = this.font.width(ellipsis);
+        int widthLimit = Math.max(0, maxWidth - ellipsisWidth);
+        int width = 0;
+        int end = 0;
+        while (end < text.length()) {
+            int charWidth = this.font.width(String.valueOf(text.charAt(end)));
+            if (width + charWidth > widthLimit) {
+                break;
+            }
+            width += charWidth;
+            end++;
+        }
+        return text.substring(0, end) + ellipsis;
+    }
+
     private List<EditBox> collectEditableBoxes() {
         List<EditBox> boxes = new ArrayList<>();
         if (input != null) {
@@ -872,7 +1442,6 @@ public class P2SChatScreen extends Screen {
         if (contextEndInput != null) {
             boxes.add(contextEndInput);
         }
-        boxes.addAll(contextLineInputs);
         return boxes;
     }
 
@@ -1302,7 +1871,6 @@ public class P2SChatScreen extends Screen {
         if (input == null) {
             return;
         }
-        saveContextPage();
         String text = input.getValue();
         if (text == null || text.trim().isEmpty()) {
             return;
@@ -1344,6 +1912,9 @@ public class P2SChatScreen extends Screen {
     @Override
     public boolean isPauseScreen() {
         return false;
+    }
+
+    private record ContextSelectionRange(int startLine, int startColumn, int endLine, int endColumn) {
     }
 
     private record ContextSnippet(String label, String content) {

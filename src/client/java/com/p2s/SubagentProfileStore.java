@@ -32,6 +32,7 @@ public final class SubagentProfileStore {
     private static final Set<String> SUPPORTED_TOOLS = Set.of(
             "list_skills",
             "read_skill",
+            "read_subdoc",
             "search_skill",
             "read_workspace_state",
             "propose_patch",
@@ -141,6 +142,12 @@ public final class SubagentProfileStore {
             if (filteredAllowedTools.isEmpty()) {
                 filteredAllowedTools = defaultAllowedTools(id);
             }
+            if (!filteredAllowedTools.contains("read_subdoc")
+                    && (filteredAllowedTools.contains("list_skills")
+                    || filteredAllowedTools.contains("read_skill")
+                    || filteredAllowedTools.contains("search_skill"))) {
+                filteredAllowedTools.add("read_subdoc");
+            }
 
             return new SubagentProfile(
                     id,
@@ -192,12 +199,12 @@ public final class SubagentProfileStore {
     private static List<String> defaultAllowedTools(String profileId) {
         String id = normalizeId(profileId);
         if ("block-id-searcher".equals(id)) {
-            return new ArrayList<>(List.of("search_block_ids", "list_skills", "read_skill", "search_skill"));
+            return new ArrayList<>(List.of("search_block_ids", "list_skills", "read_skill", "read_subdoc", "search_skill"));
         }
         if ("patch-planner".equals(id)) {
-            return new ArrayList<>(List.of("read_workspace_state", "search_block_ids", "propose_patch", "list_skills", "read_skill", "search_skill"));
+            return new ArrayList<>(List.of("read_workspace_state", "search_block_ids", "propose_patch", "list_skills", "read_skill", "read_subdoc", "search_skill"));
         }
-        return new ArrayList<>(List.of("list_skills", "read_skill", "search_skill", "read_workspace_state", "search_block_ids"));
+        return new ArrayList<>(List.of("list_skills", "read_skill", "read_subdoc", "search_skill", "read_workspace_state", "search_block_ids"));
     }
 
     private static List<String> readStringArray(JsonElement element) {

@@ -6,6 +6,7 @@
   "allowed_tools": [
     "list_skills",
     "read_skill",
+    "read_subdoc",
     "search_skill",
     "read_workspace_state",
     "search_block_ids"
