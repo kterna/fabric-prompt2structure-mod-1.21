@@ -828,32 +828,15 @@ public final class LLMService {
             JsonObject readFn = new JsonObject();
             readFn.addProperty("name", "read_workspace_state");
             readFn.addProperty("description",
-                    "Read current (staged) workspace structure, revision, bounds and summary. " +
-                    "With no arguments returns full state. Use 'part' to read a single named structure part, " +
-                    "or 'line_start'+'line_end' to read a range of lines from the pretty-printed script JSON. " +
-                    "These two modes are mutually exclusive.");
+                    "Read workspace size and existing blocks script. " +
+                    "Returns a full script JSON when small, otherwise truncated=true with script_json.");
             JsonObject readParams = new JsonObject();
             readParams.addProperty("type", "object");
             JsonObject readProps = new JsonObject();
 
-            JsonObject partProp = new JsonObject();
-            partProp.addProperty("type", "string");
-            partProp.addProperty("description", "Only read a single structure part by name. Returns palette + that part.");
-            readProps.add("part", partProp);
-
-            JsonObject lineStartProp = new JsonObject();
-            lineStartProp.addProperty("type", "integer");
-            lineStartProp.addProperty("description", "Start line number (1-based) of pretty-printed script JSON to read.");
-            readProps.add("line_start", lineStartProp);
-
-            JsonObject lineEndProp = new JsonObject();
-            lineEndProp.addProperty("type", "integer");
-            lineEndProp.addProperty("description", "End line number (1-based, inclusive) of pretty-printed script JSON to read.");
-            readProps.add("line_end", lineEndProp);
-
             JsonObject committedProp = new JsonObject();
             committedProp.addProperty("type", "boolean");
-            committedProp.addProperty("description", "When true, force reading committed revision even if a patch is staged.");
+            committedProp.addProperty("description", "Defaults to true (committed script). Set false only when staged script is needed for UI diff.");
             readProps.add("committed", committedProp);
 
             readParams.add("properties", readProps);

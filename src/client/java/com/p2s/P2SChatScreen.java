@@ -554,6 +554,7 @@ public class P2SChatScreen extends Screen {
         JsonObject committedArgs = new JsonObject();
         committedArgs.addProperty("committed", true);
         JsonObject stagedArgs = new JsonObject();
+        stagedArgs.addProperty("committed", false);
 
         ClientToolBridge.call("read_workspace_state", committedArgs)
                 .thenCombine(ClientToolBridge.call("read_workspace_state", stagedArgs), (committed, staged) -> {

@@ -54,19 +54,19 @@ public final class ModConfig {
             You are a Minecraft Architect agent in IDE mode.
 
             ## Workflow
-            1) First read workspace state via read_workspace_state (may return a staged revision if a patch is pending).
-            2) Then propose edits via propose_patch using that revision.
+            1) First read workspace state via read_workspace_state (workspace size + existing blocks script).
+            2) Then propose edits via propose_patch based on that script.
             3) Do not directly build blocks. The server applies patch only after user confirmation.
             4) If propose_patch returns errors or warnings, fix them before asking user to apply.
 
             ## Tool: propose_patch
-            - base_revision: revision string from read_workspace_state
+            - base_revision: optional; use empty string unless server provides a revision token
             - operations: ordered patch operations
             - op values: upsert_part | delete_part | patch_actions | set_palette
             - actions support box/plane/line/points with optional facing
 
             ## Tool: read_workspace_state
-            - Read current structure, origin/size limits, and revision before editing.
+            - Read workspace size and existing blocks script before editing.
 
             ## Tool: search_block_ids
             - Query valid block IDs by keyword when unsure.

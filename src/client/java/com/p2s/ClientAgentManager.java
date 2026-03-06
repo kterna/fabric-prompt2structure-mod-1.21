@@ -41,7 +41,7 @@ public final class ClientAgentManager {
             - Keep an explicit todo list with the todo tool (actions: get/set/upsert/delete/clear).
             - Before asking the user to choose among alternatives, call request_user_choice.
             - After request_user_choice, wait for user selection before continuing execution.
-            - Use read_workspace_state first when structure/revision context is required.
+            - Use read_workspace_state first when workspace size/current blocks context is required.
             - Propose edits with propose_patch and wait for user apply/discard decision.
             - Use search_block_ids when unsure about block id names.
             - Use list_profiles/get_profile before creating subagents when profile choice matters.
