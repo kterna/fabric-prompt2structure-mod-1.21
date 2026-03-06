@@ -43,24 +43,29 @@ public final class SessionManager {
     private static final String DOC_ROOT = "workspace";
     private static final String DEFAULT_DOC_ID = "doc-main";
     private static final String DEFAULT_DOC_NAME = DOC_ROOT + "/main.json";
+    private static final String DEFAULT_PROJECT_NAME = "Current Project";
 
     private static final String SESSION_TOOL_CONTRACT = """
             ## IDE Session Contract
-            - Workspace contains multiple files (documents). Use read_workspace_state first when you need file size and existing blocks.
-              - Optional doc_id selects file; if omitted, reads current active file.
+            - Each session owns one current project containing multiple workspace files.
+            - Start with get_project_state when you need the project overview or file list.
+            - Use read_workspace_file first when you need file size and existing blocks.
+              - workspace_id explicitly selects the target file.
+              - read_workspace_state remains available as a compatibility alias.
               - Returns only size + current script (or truncated script_json).
               - Default reads committed script; committed=false can include staged script for UI diff.
+            - Use create_workspace_file / rename_workspace_file / delete_workspace_file for file management.
             - Propose all edits with propose_patch; do not directly build blocks.
-              - Optional doc_id selects file; if omitted, patch current active file.
-            - The user reviews a preview and confirms apply/discard for the active file.
+              - Always pass workspace_id explicitly.
+            - The user reviews a preview and confirms apply/discard for the proposed workspace file.
             - Use search_block_ids when unsure about a block id.
             - If propose_patch returns errors or warnings, adjust the patch before asking user to apply.
             - Keep patches minimal and focused on requested changes.
-            - Only call read_workspace_state/propose_patch/explain_plan/search_block_ids in session mode.
+            - Only call get_project_state/read_workspace_file/create_workspace_file/rename_workspace_file/delete_workspace_file/propose_patch/explain_plan/search_block_ids in session mode.
             ## Verification Model
             - propose_patch uses strict verification: for modify/delete operations you MUST provide old_actions
               matching the current state exactly. If verification fails, you get verification_failed with the
-              actual state — call read_workspace_state then retry with corrected old_actions.
+              actual state — call read_workspace_file (or read_workspace_state alias) then retry with corrected old_actions.
             - Operations: insert_part, delete_part, replace_part, insert_actions, delete_actions,
               replace_actions, move_actions, update_palette.
             - For update_palette, each entry requires old_value for modify/delete, old_value=null for add-new.
@@ -289,20 +294,49 @@ public final class SessionManager {
                 P2SMod.LOGGER.info("[DEBUG] processToolCalls -> tool={}, id={}, args={}", toolName, call.id(), call.arguments());
             }
             switch (toolName) {
+                case "get_project_state" -> {
+                    JsonObject payload = handleGetProjectState(session, toolName);
+                    result.toolMessages.add(buildToolMessage(call, payload));
+                    P2SMod.LOGGER.info("AgentLoop tool get_project_state -> player={}, session={}", playerName, sessionId);
+                }
+                case "read_workspace_file" -> {
+                    ReadWorkspaceArgs wsArgs = parseReadWorkspaceArgs(call.arguments());
+                    JsonObject payload = handleReadWorkspaceFile(session, toolName, wsArgs);
+                    result.toolMessages.add(buildToolMessage(call, payload));
+                    P2SMod.LOGGER.info("AgentLoop tool read_workspace_file -> player={}, session={}", playerName, sessionId);
+                    if (P2SMod.DEBUG) {
+                        P2SMod.LOGGER.info("[DEBUG] read_workspace_file result: {}", GSON.toJson(payload));
+                    }
+                }
                 case "read_workspace_state" -> {
                     ReadWorkspaceArgs wsArgs = parseReadWorkspaceArgs(call.arguments());
-                    JsonObject payload = handleReadWorkspaceState(session, toolName, wsArgs);
+                    JsonObject payload = handleReadWorkspaceFile(session, toolName, wsArgs);
                     result.toolMessages.add(buildToolMessage(call, payload));
                     P2SMod.LOGGER.info("AgentLoop tool read_workspace_state -> player={}, session={}", playerName, sessionId);
                     if (P2SMod.DEBUG) {
                         P2SMod.LOGGER.info("[DEBUG] read_workspace_state result: {}", GSON.toJson(payload));
                     }
                 }
+                case "create_workspace_file" -> {
+                    JsonObject payload = handleCreateWorkspaceFile(session, toolName, call.arguments());
+                    result.toolMessages.add(buildToolMessage(call, payload));
+                }
+                case "rename_workspace_file" -> {
+                    JsonObject payload = handleRenameWorkspaceFile(session, toolName, call.arguments());
+                    result.toolMessages.add(buildToolMessage(call, payload));
+                }
+                case "delete_workspace_file" -> {
+                    JsonObject payload = handleDeleteWorkspaceFile(session, toolName, call.arguments());
+                    result.toolMessages.add(buildToolMessage(call, payload));
+                    if (payload.has("deleted") && payload.get("deleted").isJsonPrimitive() && payload.get("deleted").getAsBoolean()) {
+                        result.previewUpdated = true;
+                    }
+                }
                 case "propose_patch" -> {
-                    String targetDocId = parseOptionalDocId(call.arguments());
+                    String targetDocId = parseOptionalWorkspaceId(call.arguments());
                     if (!targetDocId.isBlank() && !targetDocId.equals(session.activeDocId)) {
                         if (!switchActiveDocument(session, targetDocId)) {
-                            result.toolMessages.add(buildToolMessage(call, buildToolError(toolName, "Unknown doc_id: " + targetDocId)));
+                            result.toolMessages.add(buildToolMessage(call, buildToolError(toolName, "Unknown workspace_id: " + targetDocId)));
                             session.runtimeState = RuntimeState.FAILED;
                             break;
                         }
@@ -410,6 +444,7 @@ public final class SessionManager {
                     session.runtimeState = RuntimeState.PATCH_GENERATED;
 
                     JsonObject payload = buildToolSuccess(toolName);
+                    payload.addProperty("workspace_id", session.activeDocId == null ? "" : session.activeDocId);
                     payload.addProperty("doc_id", session.activeDocId == null ? "" : session.activeDocId);
                     payload.addProperty("preview", pending.preview.summary);
                     payload.addProperty("changed", pending.preview.changedBlocks);
@@ -491,6 +526,9 @@ public final class SessionManager {
             case "save" -> save(player, payload);
             case "apply" -> applyPendingPatch(player);
             case "discard" -> discardPendingPatch(player, payload);
+            case "workspace_file_create" -> createDocument(player, payload);
+            case "workspace_file_rename" -> renameDocument(player, payload);
+            case "workspace_file_delete" -> deleteDocument(player, payload);
             case "doc_create" -> createDocument(player, payload);
             case "doc_switch" -> switchDocument(player, payload);
             case "doc_rename" -> renameDocument(player, payload);
@@ -597,6 +635,19 @@ public final class SessionManager {
 
         if (startJson != null) {
             try {
+                if (startJson.has("projectId") || startJson.has("projectName") || startJson.has("projectDescription")) {
+                    ensureProject(session);
+                    String restoredProjectId = getString(startJson, "projectId");
+                    String restoredProjectName = getString(startJson, "projectName");
+                    String restoredProjectDescription = getString(startJson, "projectDescription");
+                    if (!restoredProjectId.isBlank()) {
+                        session.currentProject.id = restoredProjectId;
+                    }
+                    if (!restoredProjectName.isBlank()) {
+                        session.currentProject.name = restoredProjectName;
+                    }
+                    session.currentProject.description = restoredProjectDescription;
+                }
                 if (startJson.has("workspaceDocs") && startJson.get("workspaceDocs").isJsonArray()) {
                     Map<String, DocumentState> restoredDocs = new LinkedHashMap<>();
                     for (JsonElement docElem : startJson.getAsJsonArray("workspaceDocs")) {
@@ -654,6 +705,12 @@ public final class SessionManager {
                             normalizedName = buildDefaultDocName(restoredDocs.size() + 1);
                         }
                         DocumentState doc = newDocumentState(normalizedId, normalizedName, docOrigin, docSize, restoredScript, docRevision);
+                        String path = getString(docJson, "path");
+                        doc.path = path.isBlank() ? doc.name : normalizeDocName(path);
+                        doc.type = normalizeWorkspaceType(getString(docJson, "type"));
+                        doc.areaTag = getString(docJson, "areaTag");
+                        doc.summary = getString(docJson, "summary");
+                        doc.generatedFrom = getString(docJson, "generatedFrom");
                         restoredDocs.put(doc.id, doc);
                     }
 
@@ -686,6 +743,7 @@ public final class SessionManager {
         }
 
         persistActiveDocument(session);
+        ensureProject(session);
         sessions.put(player.getUUID(), session);
         sendSessionSync(player, session);
         sendPatchPreview(player, null);
@@ -817,12 +875,18 @@ public final class SessionManager {
 
         String requestedName = "";
         String requestedId = "";
+        String requestedPath = "";
+        String requestedType = "";
+        String copyFromWorkspaceId = "";
         boolean switchToNew = true;
         if (payload != null && !payload.isBlank()) {
             try {
                 JsonObject obj = JsonParser.parseString(payload).getAsJsonObject();
                 requestedName = getString(obj, "name");
                 requestedId = getString(obj, "id");
+                requestedPath = getString(obj, "path");
+                requestedType = getString(obj, "type");
+                copyFromWorkspaceId = getString(obj, "copy_from_workspace_id");
                 if (obj.has("switchToNew") && obj.get("switchToNew").isJsonPrimitive()) {
                     switchToNew = obj.get("switchToNew").getAsBoolean();
                 }
@@ -843,22 +907,48 @@ public final class SessionManager {
             docId = normalizeDocId("doc-" + (session.nextDocIndex++), session.docs);
         }
         String normalizedName = normalizeDocName(requestedName);
+        String normalizedPath = normalizeDocName(requestedPath);
         if (normalizedName.isBlank()) {
-            normalizedName = buildDefaultDocName(session.nextDocIndex++);
+            normalizedName = normalizedPath.isBlank() ? buildDefaultDocName(session.nextDocIndex++) : normalizedPath;
         }
         normalizedName = ensureUniqueDocName(session, normalizedName, null);
+        if (normalizedPath.isBlank()) {
+            normalizedPath = normalizedName;
+        }
 
-        BlockPos origin = activeDoc == null ? session.origin : activeDoc.origin;
-        Vec3i size = activeDoc == null ? session.size : activeDoc.size;
-        DocumentState doc = newDocumentState(docId, normalizedName, origin, size, null, "rev-0");
+        DocumentState sourceDoc = null;
+        if (!copyFromWorkspaceId.isBlank()) {
+            sourceDoc = session.docs.get(copyFromWorkspaceId);
+            if (sourceDoc == null) {
+                player.displayClientMessage(Component.literal("Workspace file not found: " + copyFromWorkspaceId), false);
+                return;
+            }
+        }
+
+        BlockPos origin = sourceDoc != null
+                ? sourceDoc.origin
+                : (activeDoc == null ? session.origin : activeDoc.origin);
+        Vec3i size = sourceDoc != null
+                ? sourceDoc.size
+                : (activeDoc == null ? session.size : activeDoc.size);
+        StructureBuilder.VbsScriptV2 initialScript = sourceDoc == null ? null : sourceDoc.current;
+        DocumentState doc = newDocumentState(docId, normalizedName, origin, size, initialScript, sourceDoc == null ? "rev-0" : sourceDoc.revision);
+        doc.path = normalizedPath;
+        doc.type = normalizeWorkspaceType(requestedType);
+        doc.summary = sourceDoc == null ? "" : sourceDoc.summary;
+        doc.areaTag = sourceDoc == null ? "" : sourceDoc.areaTag;
+        doc.generatedFrom = sourceDoc == null ? "" : sourceDoc.generatedFrom;
+        doc.dependsOn = sourceDoc == null || sourceDoc.dependsOn == null ? new ArrayList<>() : new ArrayList<>(sourceDoc.dependsOn);
+        doc.metadata = sourceDoc == null || sourceDoc.metadata == null ? new JsonObject() : sourceDoc.metadata.deepCopy();
         session.docs.put(doc.id, doc);
+        touchProject(session);
 
         if (switchToNew) {
             switchActiveDocument(session, doc.id);
         }
         sendPatchPreview(player, session.pendingPatch == null ? null : session.pendingPatch.preview);
         sendSessionSync(player, session);
-        player.displayClientMessage(Component.literal("Document created: " + doc.name), false);
+        player.displayClientMessage(Component.literal("Workspace file created: " + doc.name), false);
     }
 
     private static void switchDocument(ServerPlayer player, String payload) {
@@ -926,10 +1016,15 @@ public final class SessionManager {
 
         String docId = "";
         String name = "";
+        String path = "";
         try {
             JsonObject obj = JsonParser.parseString(payload).getAsJsonObject();
-            docId = getString(obj, "id");
+            docId = getString(obj, "workspace_id");
+            if (docId.isBlank()) {
+                docId = getString(obj, "id");
+            }
             name = getString(obj, "name");
+            path = getString(obj, "path");
         } catch (Exception ignored) {
             player.displayClientMessage(Component.literal("Invalid rename payload"), false);
             return;
@@ -953,12 +1048,74 @@ public final class SessionManager {
         }
         normalized = ensureUniqueDocName(session, normalized, doc.id);
         doc.name = normalized;
+        if (path != null && !path.isBlank()) {
+            doc.path = normalizeDocName(path);
+        } else if (doc.path == null || doc.path.isBlank()) {
+            doc.path = normalized;
+        }
+        touchProject(session);
 
         if (doc.id.equals(session.activeDocId)) {
             loadActiveDocument(session, doc.id);
         }
         sendSessionSync(player, session);
-        player.displayClientMessage(Component.literal("Renamed document: " + normalized), false);
+        player.displayClientMessage(Component.literal("Renamed workspace file: " + normalized), false);
+    }
+
+    private static void deleteDocument(ServerPlayer player, String payload) {
+        if (player == null) {
+            return;
+        }
+        Session session = sessions.get(player.getUUID());
+        if (session == null) {
+            player.displayClientMessage(Component.literal("No active session"), false);
+            return;
+        }
+        if (session.inFlight) {
+            player.displayClientMessage(Component.literal("Busy with current request"), false);
+            return;
+        }
+
+        String docId = "";
+        if (payload != null && !payload.isBlank()) {
+            try {
+                JsonObject obj = JsonParser.parseString(payload).getAsJsonObject();
+                docId = getString(obj, "workspace_id");
+                if (docId.isBlank()) {
+                    docId = getString(obj, "id");
+                }
+            } catch (Exception ignored) {
+                docId = payload.trim();
+            }
+        }
+        if (docId.isBlank()) {
+            player.displayClientMessage(Component.literal("Missing workspace file id"), false);
+            return;
+        }
+        if (session.docs == null || session.docs.size() <= 1) {
+            player.displayClientMessage(Component.literal("Cannot delete the last remaining workspace file"), false);
+            return;
+        }
+        persistActiveDocument(session);
+        DocumentState doc = session.docs.get(docId.trim());
+        if (doc == null) {
+            player.displayClientMessage(Component.literal("Workspace file not found: " + docId), false);
+            return;
+        }
+        if (doc.pendingPatch != null) {
+            player.displayClientMessage(Component.literal("Cannot delete workspace file with pending patch"), false);
+            return;
+        }
+
+        session.docs.remove(doc.id);
+        if (doc.id.equals(session.activeDocId) && !session.docs.isEmpty()) {
+            session.activeDocId = session.docs.keySet().iterator().next();
+            loadActiveDocument(session, session.activeDocId);
+        }
+        touchProject(session);
+        sendPatchPreview(player, session.pendingPatch == null ? null : session.pendingPatch.preview);
+        sendSessionSync(player, session);
+        player.displayClientMessage(Component.literal("Deleted workspace file: " + doc.name), false);
     }
 
     private static DocumentState getActiveDocument(Session session) {
@@ -1059,6 +1216,9 @@ public final class SessionManager {
         if (doc.name.isBlank()) {
             doc.name = DEFAULT_DOC_NAME;
         }
+        doc.path = doc.name;
+        doc.type = "manual";
+        doc.areaTag = "";
         doc.origin = origin;
         doc.size = size;
         doc.current = copyScript(script);
@@ -1067,7 +1227,65 @@ public final class SessionManager {
         doc.undoStack = new ArrayDeque<>();
         doc.redoStack = new ArrayDeque<>();
         doc.checkpoints = new ArrayList<>();
+        doc.summary = "";
+        doc.dependsOn = new ArrayList<>();
+        doc.generatedFrom = "";
+        doc.metadata = new JsonObject();
         return doc;
+    }
+
+    private static void ensureProject(Session session) {
+        if (session == null) {
+            return;
+        }
+        if (session.currentProject != null) {
+            if (session.currentProject.name == null || session.currentProject.name.isBlank()) {
+                session.currentProject.name = DEFAULT_PROJECT_NAME;
+            }
+            if (session.currentProject.metadata == null) {
+                session.currentProject.metadata = new JsonObject();
+            }
+            if (session.currentProject.tags == null) {
+                session.currentProject.tags = new ArrayList<>();
+            }
+            if (session.currentProject.updatedAt <= 0) {
+                session.currentProject.updatedAt = System.currentTimeMillis();
+            }
+            if (session.currentProject.createdAt <= 0) {
+                session.currentProject.createdAt = session.currentProject.updatedAt;
+            }
+            return;
+        }
+
+        ProjectState project = new ProjectState();
+        project.id = "project-" + session.id.substring(0, Math.min(8, session.id.length()));
+        project.name = DEFAULT_PROJECT_NAME;
+        project.description = "";
+        project.createdAt = System.currentTimeMillis();
+        project.updatedAt = project.createdAt;
+        project.defaultOrigin = session.origin;
+        project.tags = new ArrayList<>();
+        project.metadata = new JsonObject();
+        session.currentProject = project;
+    }
+
+    private static void touchProject(Session session) {
+        if (session == null) {
+            return;
+        }
+        ensureProject(session);
+        session.currentProject.updatedAt = System.currentTimeMillis();
+        if (session.currentProject.defaultOrigin == null) {
+            session.currentProject.defaultOrigin = session.origin;
+        }
+    }
+
+    private static String normalizeWorkspaceType(String type) {
+        String normalized = type == null ? "" : type.trim().toLowerCase();
+        return switch (normalized) {
+            case "layout", "floor", "facade", "component", "semantic", "generated", "manual", "shared" -> normalized;
+            default -> "manual";
+        };
     }
 
     private static String normalizeDocName(String name) {
@@ -1324,6 +1542,10 @@ public final class SessionManager {
         session.history = new ArrayList<>();
         session.history.add(systemMsg);
         session.docs = new LinkedHashMap<>();
+        session.origin = origin;
+        session.size = size;
+        ensureProject(session);
+        session.currentProject.defaultOrigin = origin;
         session.nextDocIndex = 2;
         DocumentState doc = newDocumentState(DEFAULT_DOC_ID, DEFAULT_DOC_NAME, origin, size, null, "rev-0");
         session.docs.put(doc.id, doc);
@@ -1443,6 +1665,24 @@ public final class SessionManager {
             return payload;
         }
 
+        payload.addProperty("workspace_id", doc.id == null ? "" : doc.id);
+        payload.addProperty("name", doc.name == null ? "" : doc.name);
+        payload.addProperty("path", doc.path == null ? "" : doc.path);
+        payload.addProperty("type", doc.type == null ? "" : doc.type);
+        payload.addProperty("area_tag", doc.areaTag == null ? "" : doc.areaTag);
+        payload.addProperty("summary", doc.summary == null ? "" : doc.summary);
+        payload.addProperty("generated_from", doc.generatedFrom == null ? "" : doc.generatedFrom);
+        payload.addProperty("revision", doc.revision == null ? "" : doc.revision);
+        payload.addProperty("has_pending_patch", doc.pendingPatch != null);
+        JsonArray dependsOn = new JsonArray();
+        if (doc.dependsOn != null) {
+            for (String dependency : doc.dependsOn) {
+                if (dependency != null && !dependency.isBlank()) {
+                    dependsOn.add(dependency);
+                }
+            }
+        }
+        payload.add("depends_on", dependsOn);
         payload.addProperty("doc_id", doc.id == null ? "" : doc.id);
         payload.addProperty("doc_name", doc.name == null ? "" : doc.name);
 
@@ -1480,14 +1720,119 @@ public final class SessionManager {
         return payload;
     }
 
-    private static JsonObject handleReadWorkspaceState(Session session, String toolName, ReadWorkspaceArgs args) {
+    private static JsonObject buildWorkspaceSummaryItem(DocumentState doc, boolean active) {
+        JsonObject item = new JsonObject();
+        if (doc == null) {
+            return item;
+        }
+        item.addProperty("id", doc.id == null ? "" : doc.id);
+        item.addProperty("name", doc.name == null ? "" : doc.name);
+        item.addProperty("path", doc.path == null ? "" : doc.path);
+        item.addProperty("type", doc.type == null ? "" : doc.type);
+        item.addProperty("areaTag", doc.areaTag == null ? "" : doc.areaTag);
+        item.addProperty("summary", doc.summary == null ? "" : doc.summary);
+        item.addProperty("active", active);
+        item.addProperty("revision", doc.revision == null ? "" : doc.revision);
+        boolean hasPending = doc.pendingPatch != null;
+        item.addProperty("hasPendingPatch", hasPending);
+        int pendingChanged = hasPending && doc.pendingPatch.preview != null ? doc.pendingPatch.preview.changedBlocks : 0;
+        item.addProperty("pendingChangedBlocks", pendingChanged);
+        boolean hasSize = doc.size != null;
+        item.addProperty("hasSize", hasSize);
+        item.addProperty("sizeX", hasSize ? doc.size.getX() : 0);
+        item.addProperty("sizeY", hasSize ? doc.size.getY() : 0);
+        item.addProperty("sizeZ", hasSize ? doc.size.getZ() : 0);
+        if (doc.origin != null) {
+            item.addProperty("originX", doc.origin.getX());
+            item.addProperty("originY", doc.origin.getY());
+            item.addProperty("originZ", doc.origin.getZ());
+        } else {
+            item.addProperty("originX", 0);
+            item.addProperty("originY", 0);
+            item.addProperty("originZ", 0);
+        }
+        return item;
+    }
+
+    private static String buildProjectSummaryText(Session session) {
+        if (session == null) {
+            return "";
+        }
+        ensureProject(session);
+        int workspaceCount = session.docs == null ? 0 : session.docs.size();
+        int pendingCount = 0;
+        if (session.docs != null) {
+            for (DocumentState doc : session.docs.values()) {
+                if (doc != null && doc.pendingPatch != null) {
+                    pendingCount++;
+                }
+            }
+        }
+        return "Project " + session.currentProject.name + " with " + workspaceCount + " workspace files"
+                + (pendingCount > 0 ? (", " + pendingCount + " pending patches") : "");
+    }
+
+    private static JsonObject handleGetProjectState(Session session, String toolName) {
+        JsonObject payload = buildToolSuccess(toolName);
+        if (session == null) {
+            return buildToolError(toolName, "No active project");
+        }
+        persistActiveDocument(session);
+        ensureProject(session);
+
+        JsonObject project = new JsonObject();
+        project.addProperty("id", session.currentProject.id == null ? "" : session.currentProject.id);
+        project.addProperty("name", session.currentProject.name == null ? "" : session.currentProject.name);
+        project.addProperty("description", session.currentProject.description == null ? "" : session.currentProject.description);
+        project.addProperty("created_at", session.currentProject.createdAt);
+        project.addProperty("updated_at", session.currentProject.updatedAt);
+        if (session.currentProject.defaultOrigin != null) {
+            JsonObject defaultOrigin = new JsonObject();
+            defaultOrigin.addProperty("x", session.currentProject.defaultOrigin.getX());
+            defaultOrigin.addProperty("y", session.currentProject.defaultOrigin.getY());
+            defaultOrigin.addProperty("z", session.currentProject.defaultOrigin.getZ());
+            project.add("default_origin", defaultOrigin);
+        }
+        JsonArray tags = new JsonArray();
+        if (session.currentProject.tags != null) {
+            for (String tag : session.currentProject.tags) {
+                if (tag != null && !tag.isBlank()) {
+                    tags.add(tag);
+                }
+            }
+        }
+        project.add("tags", tags);
+        project.add("metadata", session.currentProject.metadata == null ? new JsonObject() : session.currentProject.metadata.deepCopy());
+
+        JsonArray workspaceFiles = new JsonArray();
+        JsonArray pendingWorkspaceIds = new JsonArray();
+        if (session.docs != null) {
+            for (DocumentState doc : session.docs.values()) {
+                if (doc == null) {
+                    continue;
+                }
+                workspaceFiles.add(buildWorkspaceSummaryItem(doc, session.activeDocId != null && session.activeDocId.equals(doc.id)));
+                if (doc.pendingPatch != null) {
+                    pendingWorkspaceIds.add(doc.id == null ? "" : doc.id);
+                }
+            }
+        }
+
+        payload.add("project", project);
+        payload.add("workspace_files", workspaceFiles);
+        payload.add("pending_workspace_ids", pendingWorkspaceIds);
+        payload.addProperty("summary", buildProjectSummaryText(session));
+        return payload;
+    }
+
+    private static JsonObject handleReadWorkspaceFile(Session session, String toolName, ReadWorkspaceArgs args) {
         JsonObject payload = buildToolSuccess(toolName);
         persistActiveDocument(session);
         DocumentState target = null;
-        if (args != null && args.docId != null && !args.docId.isBlank()) {
-            target = session.docs == null ? null : session.docs.get(args.docId.trim());
+        if (args != null && args.workspaceId != null && !args.workspaceId.isBlank()) {
+            target = session.docs == null ? null : session.docs.get(args.workspaceId.trim());
             if (target == null) {
-                return buildToolError(toolName, "Unknown doc_id: " + args.docId);
+                return buildToolError(toolName, "Unknown workspace_id: " + args.workspaceId);
             }
         }
         if (target == null) {
@@ -1496,9 +1841,187 @@ public final class SessionManager {
         if (target == null) {
             return buildToolError(toolName, "No document available");
         }
+        payload.addProperty("workspace_id", target.id == null ? "" : target.id);
+        payload.addProperty("name", target.name == null ? "" : target.name);
+        payload.addProperty("path", target.path == null ? "" : target.path);
+        payload.addProperty("type", target.type == null ? "" : target.type);
+        payload.addProperty("revision", target.revision == null ? "" : target.revision);
         payload.addProperty("doc_id", target.id == null ? "" : target.id);
         payload.addProperty("doc_name", target.name == null ? "" : target.name);
         payload.add("state", buildWorkspaceStatePayload(target, args == null || args.committed));
+        return payload;
+    }
+
+    private static JsonObject handleReadWorkspaceState(Session session, String toolName, ReadWorkspaceArgs args) {
+        return handleReadWorkspaceFile(session, toolName, args);
+    }
+
+    private static JsonObject normalizeArgsObject(JsonElement argsElem) {
+        if (argsElem == null || argsElem.isJsonNull()) {
+            return new JsonObject();
+        }
+        try {
+            JsonElement parsed = argsElem;
+            if (argsElem.isJsonPrimitive() && argsElem.getAsJsonPrimitive().isString()) {
+                String raw = argsElem.getAsString();
+                if (raw == null || raw.isBlank()) {
+                    return new JsonObject();
+                }
+                parsed = JsonParser.parseString(raw);
+            }
+            return parsed != null && parsed.isJsonObject() ? parsed.getAsJsonObject() : new JsonObject();
+        } catch (Exception ignored) {
+            return new JsonObject();
+        }
+    }
+
+    private static JsonObject handleCreateWorkspaceFile(Session session, String toolName, JsonElement argsElem) {
+        if (session == null) {
+            return buildToolError(toolName, "No active session");
+        }
+        persistActiveDocument(session);
+        if (session.docs.size() >= MAX_DOCS_PER_SESSION) {
+            return buildToolError(toolName, "Maximum workspace files reached: " + MAX_DOCS_PER_SESSION);
+        }
+
+        JsonObject args = normalizeArgsObject(argsElem);
+        String requestedName = getString(args, "name");
+        String requestedPath = getString(args, "path");
+        String requestedType = getString(args, "type");
+        String requestedId = getString(args, "workspace_id");
+        if (requestedId.isBlank()) {
+            requestedId = getString(args, "id");
+        }
+        String copyFromWorkspaceId = getString(args, "copy_from_workspace_id");
+        boolean switchToNew = !args.has("switchToNew") || !args.get("switchToNew").isJsonPrimitive() || args.get("switchToNew").getAsBoolean();
+
+        String docId = normalizeDocId(requestedId, session.docs);
+        if (docId.isBlank()) {
+            docId = normalizeDocId("doc-" + (session.nextDocIndex++), session.docs);
+        }
+        String normalizedPath = normalizeDocName(requestedPath);
+        String normalizedName = normalizeDocName(requestedName);
+        if (normalizedName.isBlank()) {
+            normalizedName = normalizedPath.isBlank() ? buildDefaultDocName(session.nextDocIndex++) : normalizedPath;
+        }
+        normalizedName = ensureUniqueDocName(session, normalizedName, null);
+        if (normalizedPath.isBlank()) {
+            normalizedPath = normalizedName;
+        }
+
+        DocumentState sourceDoc = null;
+        if (!copyFromWorkspaceId.isBlank()) {
+            sourceDoc = session.docs.get(copyFromWorkspaceId);
+            if (sourceDoc == null) {
+                return buildToolError(toolName, "Unknown copy_from_workspace_id: " + copyFromWorkspaceId);
+            }
+        }
+        DocumentState activeDoc = getActiveDocument(session);
+        BlockPos origin = sourceDoc != null ? sourceDoc.origin : (activeDoc == null ? session.origin : activeDoc.origin);
+        Vec3i size = sourceDoc != null ? sourceDoc.size : (activeDoc == null ? session.size : activeDoc.size);
+        StructureBuilder.VbsScriptV2 initialScript = sourceDoc == null ? null : sourceDoc.current;
+
+        DocumentState doc = newDocumentState(docId, normalizedName, origin, size, initialScript, sourceDoc == null ? "rev-0" : sourceDoc.revision);
+        doc.path = normalizedPath;
+        doc.type = normalizeWorkspaceType(requestedType);
+        doc.summary = sourceDoc == null ? "" : sourceDoc.summary;
+        doc.areaTag = sourceDoc == null ? "" : sourceDoc.areaTag;
+        doc.generatedFrom = sourceDoc == null ? "" : sourceDoc.generatedFrom;
+        doc.dependsOn = sourceDoc == null || sourceDoc.dependsOn == null ? new ArrayList<>() : new ArrayList<>(sourceDoc.dependsOn);
+        doc.metadata = sourceDoc == null || sourceDoc.metadata == null ? new JsonObject() : sourceDoc.metadata.deepCopy();
+        session.docs.put(doc.id, doc);
+        touchProject(session);
+
+        if (switchToNew) {
+            switchActiveDocument(session, doc.id);
+        }
+
+        JsonObject payload = buildToolSuccess(toolName);
+        payload.addProperty("workspace_id", doc.id);
+        payload.addProperty("created", true);
+        payload.addProperty("name", doc.name == null ? "" : doc.name);
+        payload.addProperty("path", doc.path == null ? "" : doc.path);
+        payload.addProperty("type", doc.type == null ? "" : doc.type);
+        return payload;
+    }
+
+    private static JsonObject handleRenameWorkspaceFile(Session session, String toolName, JsonElement argsElem) {
+        if (session == null) {
+            return buildToolError(toolName, "No active session");
+        }
+        persistActiveDocument(session);
+        JsonObject args = normalizeArgsObject(argsElem);
+        String workspaceId = getString(args, "workspace_id");
+        if (workspaceId.isBlank()) {
+            workspaceId = getString(args, "id");
+        }
+        String name = getString(args, "name");
+        String path = getString(args, "path");
+        if (workspaceId.isBlank() || name.isBlank()) {
+            return buildToolError(toolName, "Rename requires workspace_id and name");
+        }
+        DocumentState doc = session.docs == null ? null : session.docs.get(workspaceId);
+        if (doc == null) {
+            return buildToolError(toolName, "Unknown workspace_id: " + workspaceId);
+        }
+
+        String normalized = normalizeDocName(name);
+        if (normalized.isBlank()) {
+            return buildToolError(toolName, "Invalid workspace file name");
+        }
+        normalized = ensureUniqueDocName(session, normalized, doc.id);
+        doc.name = normalized;
+        if (path != null && !path.isBlank()) {
+            doc.path = normalizeDocName(path);
+        } else if (doc.path == null || doc.path.isBlank()) {
+            doc.path = normalized;
+        }
+        touchProject(session);
+        if (doc.id.equals(session.activeDocId)) {
+            loadActiveDocument(session, doc.id);
+        }
+
+        JsonObject payload = buildToolSuccess(toolName);
+        payload.addProperty("workspace_id", doc.id);
+        payload.addProperty("name", doc.name == null ? "" : doc.name);
+        payload.addProperty("path", doc.path == null ? "" : doc.path);
+        return payload;
+    }
+
+    private static JsonObject handleDeleteWorkspaceFile(Session session, String toolName, JsonElement argsElem) {
+        if (session == null) {
+            return buildToolError(toolName, "No active session");
+        }
+        persistActiveDocument(session);
+        JsonObject args = normalizeArgsObject(argsElem);
+        String workspaceId = getString(args, "workspace_id");
+        if (workspaceId.isBlank()) {
+            workspaceId = getString(args, "id");
+        }
+        if (workspaceId.isBlank()) {
+            return buildToolError(toolName, "Delete requires workspace_id");
+        }
+        if (session.docs == null || session.docs.size() <= 1) {
+            return buildToolError(toolName, "Cannot delete the last remaining workspace file");
+        }
+        DocumentState doc = session.docs.get(workspaceId);
+        if (doc == null) {
+            return buildToolError(toolName, "Unknown workspace_id: " + workspaceId);
+        }
+        if (doc.pendingPatch != null) {
+            return buildToolError(toolName, "Cannot delete workspace file with pending patch");
+        }
+
+        session.docs.remove(workspaceId);
+        if (workspaceId.equals(session.activeDocId) && !session.docs.isEmpty()) {
+            session.activeDocId = session.docs.keySet().iterator().next();
+            loadActiveDocument(session, session.activeDocId);
+        }
+        touchProject(session);
+
+        JsonObject payload = buildToolSuccess(toolName);
+        payload.addProperty("workspace_id", workspaceId);
+        payload.addProperty("deleted", true);
         return payload;
     }
 
@@ -1581,15 +2104,18 @@ public final class SessionManager {
             boolean committed = !obj.has("committed")
                     || !obj.get("committed").isJsonPrimitive()
                     || obj.get("committed").getAsBoolean();
-            String docId = getString(obj, "doc_id");
-            return new ReadWorkspaceArgs(committed, docId);
+            String workspaceId = getString(obj, "workspace_id");
+            if (workspaceId.isBlank()) {
+                workspaceId = getString(obj, "doc_id");
+            }
+            return new ReadWorkspaceArgs(committed, workspaceId);
         } catch (Exception e) {
             P2SMod.LOGGER.warn("Failed to parse read_workspace_state arguments: {}", e.getMessage());
             return new ReadWorkspaceArgs(true, "");
         }
     }
 
-    private static String parseOptionalDocId(JsonElement argsElem) {
+    private static String parseOptionalWorkspaceId(JsonElement argsElem) {
         if (argsElem == null || argsElem.isJsonNull()) {
             return "";
         }
@@ -1605,7 +2131,12 @@ public final class SessionManager {
             if (!parsed.isJsonObject()) {
                 return "";
             }
-            return getString(parsed.getAsJsonObject(), "doc_id");
+            JsonObject obj = parsed.getAsJsonObject();
+            String workspaceId = getString(obj, "workspace_id");
+            if (workspaceId.isBlank()) {
+                workspaceId = getString(obj, "doc_id");
+            }
+            return workspaceId;
         } catch (Exception ignored) {
             return "";
         }
@@ -2275,31 +2806,7 @@ public final class SessionManager {
             if (doc == null) {
                 continue;
             }
-            JsonObject item = new JsonObject();
-            item.addProperty("id", doc.id == null ? "" : doc.id);
-            item.addProperty("name", doc.name == null ? "" : doc.name);
-            item.addProperty("active", session.activeDocId != null && session.activeDocId.equals(doc.id));
-            item.addProperty("revision", doc.revision == null ? "" : doc.revision);
-            boolean hasPending = doc.pendingPatch != null;
-            item.addProperty("hasPendingPatch", hasPending);
-            int pendingChanged = hasPending && doc.pendingPatch.preview != null ? doc.pendingPatch.preview.changedBlocks : 0;
-            item.addProperty("pendingChangedBlocks", pendingChanged);
-
-            boolean hasSize = doc.size != null;
-            item.addProperty("hasSize", hasSize);
-            item.addProperty("sizeX", hasSize ? doc.size.getX() : 0);
-            item.addProperty("sizeY", hasSize ? doc.size.getY() : 0);
-            item.addProperty("sizeZ", hasSize ? doc.size.getZ() : 0);
-            if (doc.origin != null) {
-                item.addProperty("originX", doc.origin.getX());
-                item.addProperty("originY", doc.origin.getY());
-                item.addProperty("originZ", doc.origin.getZ());
-            } else {
-                item.addProperty("originX", 0);
-                item.addProperty("originY", 0);
-                item.addProperty("originZ", 0);
-            }
-            arr.add(item);
+            arr.add(buildWorkspaceSummaryItem(doc, session.activeDocId != null && session.activeDocId.equals(doc.id)));
         }
         return GSON.toJson(arr);
     }
@@ -2315,6 +2822,12 @@ public final class SessionManager {
         }
         boolean active = session != null;
         String sessionId = active ? session.id : "";
+        if (active) {
+            ensureProject(session);
+        }
+        String projectId = active && session.currentProject != null && session.currentProject.id != null ? session.currentProject.id : "";
+        String projectName = active && session.currentProject != null && session.currentProject.name != null ? session.currentProject.name : "";
+        String projectDescription = active && session.currentProject != null && session.currentProject.description != null ? session.currentProject.description : "";
         String activeDocId = active && session.activeDocId != null ? session.activeDocId : "";
         DocumentState activeDoc = active ? getActiveDocument(session) : null;
         String activeDocName = activeDoc == null || activeDoc.name == null ? "" : activeDoc.name;
@@ -2351,6 +2864,9 @@ public final class SessionManager {
         ServerNetworkHandler.sendToClient(player, new S2CSessionSyncPayload(
                 active,
                 sessionId,
+                projectId,
+                projectName,
+                projectDescription,
                 turns,
                 partCount,
                 totalBlocks,
@@ -2478,17 +2994,31 @@ public final class SessionManager {
 
     private static final class ReadWorkspaceArgs {
         final boolean committed;
-        final String docId;
+        final String workspaceId;
 
-        ReadWorkspaceArgs(boolean committed, String docId) {
+        ReadWorkspaceArgs(boolean committed, String workspaceId) {
             this.committed = committed;
-            this.docId = docId == null ? "" : docId.trim();
+            this.workspaceId = workspaceId == null ? "" : workspaceId.trim();
         }
+    }
+
+    private static final class ProjectState {
+        private String id;
+        private String name;
+        private String description;
+        private long createdAt;
+        private long updatedAt;
+        private BlockPos defaultOrigin;
+        private List<String> tags = new ArrayList<>();
+        private JsonObject metadata = new JsonObject();
     }
 
     private static final class DocumentState {
         private String id;
         private String name;
+        private String path;
+        private String type = "manual";
+        private String areaTag = "";
         private BlockPos origin;
         private Vec3i size;
         private StructureBuilder.VbsScriptV2 current;
@@ -2497,6 +3027,10 @@ public final class SessionManager {
         private Deque<CommitEntry> undoStack = new ArrayDeque<>();
         private Deque<CommitEntry> redoStack = new ArrayDeque<>();
         private List<CheckpointEntry> checkpoints = new ArrayList<>();
+        private String summary = "";
+        private List<String> dependsOn = new ArrayList<>();
+        private String generatedFrom = "";
+        private JsonObject metadata = new JsonObject();
     }
 
     private static final class CheckpointEntry {
@@ -2523,6 +3057,7 @@ public final class SessionManager {
 
     public static class Session {
         String id;
+        ProjectState currentProject;
         BlockPos origin;
         Vec3i size;
         List<JsonObject> history;

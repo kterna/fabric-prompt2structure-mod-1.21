@@ -37,6 +37,9 @@ public final class SessionPersistence {
             List<ChatMessageEntry> chatLog,
             List<TodoItemEntry> todoItems,
             String todoTitle,
+            String projectId,
+            String projectName,
+            String projectDescription,
             int originX, int originY, int originZ,
             boolean hasSize,
             int sizeX, int sizeY, int sizeZ,
@@ -66,6 +69,9 @@ public final class SessionPersistence {
             sessionJson.addProperty("updatedAt", session.updatedAt());
             sessionJson.addProperty("messageCount", session.messageCount());
             sessionJson.addProperty("todoTitle", session.todoTitle() == null ? "" : session.todoTitle());
+            sessionJson.addProperty("projectId", session.projectId() == null ? "" : session.projectId());
+            sessionJson.addProperty("projectName", session.projectName() == null ? "" : session.projectName());
+            sessionJson.addProperty("projectDescription", session.projectDescription() == null ? "" : session.projectDescription());
 
             JsonArray historyArray = new JsonArray();
             if (session.llmHistory() != null) {
@@ -206,6 +212,9 @@ public final class SessionPersistence {
                     chatLog,
                     todoItems,
                     getStr(root, "todoTitle"),
+                    getStr(root, "projectId"),
+                    getStr(root, "projectName"),
+                    getStr(root, "projectDescription"),
                     getInt(root, "originX"),
                     getInt(root, "originY"),
                     getInt(root, "originZ"),

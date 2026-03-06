@@ -34,6 +34,7 @@ public final class ClientAgentManager {
     private static final int MAX_CHOICE_OPTIONS = 3;
     private static final String CLIENT_TOOL_CONTRACT = """
             ## Client Agent Contract
+            - Start with get_project_state for project-level context before editing specific workspace files.
             - Use list_skills to inspect available player skills by name/description.
             - Read full skill text only when needed via read_skill.
             - Read focused skill sub-documents via read_subdoc when read_skill exposes subdocs.
@@ -41,8 +42,10 @@ public final class ClientAgentManager {
             - Keep an explicit todo list with the todo tool (actions: get/set/upsert/delete/clear).
             - Before asking the user to choose among alternatives, call request_user_choice.
             - After request_user_choice, wait for user selection before continuing execution.
-            - Use read_workspace_state first when workspace size/current blocks context is required (optionally set doc_id for a specific file).
-            - Propose edits with propose_patch and wait for user apply/discard decision (optionally set doc_id for a specific file).
+            - Use read_workspace_file when workspace size/current blocks context is required (set workspace_id explicitly when reading a specific file).
+            - read_workspace_state is a compatibility alias of read_workspace_file; prefer the canonical name.
+            - Use create_workspace_file / rename_workspace_file / delete_workspace_file for file management.
+            - Propose edits with propose_patch and wait for user apply/discard decision; always set workspace_id explicitly.
             - Use search_block_ids when unsure about block id names.
             - Use list_profiles/get_profile before creating subagents when profile choice matters.
             - Use create_subagent for delegated tasks, then poll with get_subagent.
@@ -59,7 +62,7 @@ public final class ClientAgentManager {
     private static final Set<String> PARALLEL_SAFE_TOOLS = Set.of(
             "list_skills", "read_skill", "read_subdoc", "search_skill",
             "todo", "get_todo",
-            "read_workspace_state", "search_block_ids", "explain_plan",
+            "get_project_state", "read_workspace_file", "read_workspace_state", "search_block_ids", "explain_plan",
             "list_subagents", "get_subagent", "list_profiles", "get_profile"
     );
 
@@ -494,7 +497,9 @@ public final class ClientAgentManager {
                 ok.addProperty("accepted", true);
                 yield ok;
             }
-            case "read_workspace_state", "propose_patch", "search_block_ids" ->
+            case "get_project_state", "read_workspace_file", "read_workspace_state",
+                    "create_workspace_file", "rename_workspace_file", "delete_workspace_file",
+                    "propose_patch", "search_block_ids" ->
                     callServerTool(toolName, normalizeArgsObject(call.arguments()));
             default -> toolError(toolName, "Unknown tool");
         };
@@ -1054,6 +1059,15 @@ public final class ClientAgentManager {
         json.addProperty("sizeX", session.sizeX);
         json.addProperty("sizeY", session.sizeY);
         json.addProperty("sizeZ", session.sizeZ);
+        if (session.projectId != null && !session.projectId.isBlank()) {
+            json.addProperty("projectId", session.projectId);
+        }
+        if (session.projectName != null && !session.projectName.isBlank()) {
+            json.addProperty("projectName", session.projectName);
+        }
+        if (session.projectDescription != null && !session.projectDescription.isBlank()) {
+            json.addProperty("projectDescription", session.projectDescription);
+        }
         if (session.activeDocId != null && !session.activeDocId.isBlank()) {
             json.addProperty("activeDocId", session.activeDocId);
         }
@@ -1211,7 +1225,7 @@ public final class ClientAgentManager {
             JsonArray workspaceDocsArray = new JsonArray();
             List<ClientSessionState.WorkspaceDocInfo> workspaceDocs = ClientSessionState.getWorkspaceDocs();
             Map<String, String> workspaceDocScripts = ClientSessionState.getWorkspaceDocScripts();
-            String activeDocId = ClientSessionState.getActiveDocId();
+            String activeDocId = ClientSessionState.getSelectedWorkspaceId();
             String activeScriptJson = ClientSessionState.getCurrentScriptJson();
             for (ClientSessionState.WorkspaceDocInfo doc : workspaceDocs) {
                 if (doc == null || doc.id() == null || doc.id().isBlank()) {
@@ -1220,6 +1234,10 @@ public final class ClientAgentManager {
                 JsonObject docObj = new JsonObject();
                 docObj.addProperty("id", doc.id());
                 docObj.addProperty("name", doc.name() == null ? "" : doc.name());
+                docObj.addProperty("path", doc.path() == null ? "" : doc.path());
+                docObj.addProperty("type", doc.type() == null ? "" : doc.type());
+                docObj.addProperty("areaTag", doc.areaTag() == null ? "" : doc.areaTag());
+                docObj.addProperty("summary", doc.summary() == null ? "" : doc.summary());
                 docObj.addProperty("revision", doc.revision() == null ? "" : doc.revision());
                 docObj.addProperty("originX", doc.originX());
                 docObj.addProperty("originY", doc.originY());
@@ -1253,6 +1271,9 @@ public final class ClientAgentManager {
                     chatLog,
                     todoEntries,
                     ClientSessionState.getTodoTitle(),
+                    ClientSessionState.getProjectId(),
+                    ClientSessionState.getProjectName(),
+                    ClientSessionState.getProjectDescription(),
                     session.originX,
                     session.originY,
                     session.originZ,
@@ -1304,6 +1325,9 @@ public final class ClientAgentManager {
             session.inFlight = false;
             session.createdAt = saved.createdAt();
             session.serverSessionStarted = false;
+            session.projectId = saved.projectId() == null ? "" : saved.projectId();
+            session.projectName = saved.projectName() == null ? "" : saved.projectName();
+            session.projectDescription = saved.projectDescription() == null ? "" : saved.projectDescription();
             session.originX = saved.originX();
             session.originY = saved.originY();
             session.originZ = saved.originZ();
@@ -1380,6 +1404,9 @@ public final class ClientAgentManager {
         boolean serverSessionStarted;
         long createdAt;
         List<JsonObject> history;
+        String projectId = "";
+        String projectName = "";
+        String projectDescription = "";
         int originX, originY, originZ;
         boolean hasSize;
         int sizeX, sizeY, sizeZ;

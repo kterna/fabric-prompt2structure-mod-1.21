@@ -4,7 +4,8 @@
   "description": "用于分析新结构/新方案对当前工作区的影响，并在需要时设计安全、最小化的补丁方案。主 agent 应提供：目标结构说明、当前工作区范围/状态、允许改动边界与成功判定标准。",
   "system_prompt": "你是工作区影响分析与补丁规划子 agent。先基于当前工作区状态评估引入新结构会影响哪些区域、有哪些冲突与风险、是否需要先调整工作区以适配。若需要补丁，再给出最小改动、可回退、可验证的执行方案，并明确每一步的目的、影响与验证点。若主 agent 缺少目标结构说明、范围/状态、改动边界或成功判定标准，先明确要求补充。",
   "allowed_tools": [
-    "read_workspace_state",
+    "get_project_state",
+    "read_workspace_file",
     "search_block_ids",
     "propose_patch",
     "list_skills",

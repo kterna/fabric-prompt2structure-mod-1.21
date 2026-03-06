@@ -822,17 +822,69 @@ public final class LLMService {
             tools.add(clearChoiceTool);
         }
 
+        if (allowsTool(allowedTools, "get_project_state")) {
+            JsonObject projectTool = new JsonObject();
+            projectTool.addProperty("type", "function");
+            JsonObject projectFn = new JsonObject();
+            projectFn.addProperty("name", "get_project_state");
+            projectFn.addProperty("description", "Get the current project overview, workspace file list, pending workspace ids, and summary.");
+            JsonObject projectParams = new JsonObject();
+            projectParams.addProperty("type", "object");
+            projectParams.add("properties", new JsonObject());
+            projectParams.addProperty("additionalProperties", false);
+            projectFn.add("parameters", projectParams);
+            projectTool.add("function", projectFn);
+            tools.add(projectTool);
+        }
+
+        if (allowsTool(allowedTools, "read_workspace_file")) {
+            JsonObject readTool = new JsonObject();
+            readTool.addProperty("type", "function");
+            JsonObject readFn = new JsonObject();
+            readFn.addProperty("name", "read_workspace_file");
+            readFn.addProperty("description",
+                    "Read a workspace file state including size, origin, revision, and script. " +
+                    "Returns a full script JSON when small, otherwise truncated=true with script_json.");
+            JsonObject readParams = new JsonObject();
+            readParams.addProperty("type", "object");
+            JsonObject readProps = new JsonObject();
+
+            JsonObject workspaceIdProp = new JsonObject();
+            workspaceIdProp.addProperty("type", "string");
+            workspaceIdProp.addProperty("description", "Workspace file id to read.");
+            readProps.add("workspace_id", workspaceIdProp);
+
+            JsonObject committedProp = new JsonObject();
+            committedProp.addProperty("type", "boolean");
+            committedProp.addProperty("description", "Defaults to true (committed script). Set false only when staged script is needed for UI diff.");
+            readProps.add("committed", committedProp);
+
+            readParams.add("properties", readProps);
+            JsonArray readRequired = new JsonArray();
+            readRequired.add("workspace_id");
+            readParams.add("required", readRequired);
+            readParams.addProperty("additionalProperties", false);
+            readFn.add("parameters", readParams);
+            readTool.add("function", readFn);
+            tools.add(readTool);
+        }
+
         if (allowsTool(allowedTools, "read_workspace_state")) {
             JsonObject readTool = new JsonObject();
             readTool.addProperty("type", "function");
             JsonObject readFn = new JsonObject();
             readFn.addProperty("name", "read_workspace_state");
             readFn.addProperty("description",
-                    "Read workspace size and existing blocks script. " +
+                    "Legacy alias of read_workspace_file. Read workspace size and existing blocks script. " +
                     "Returns a full script JSON when small, otherwise truncated=true with script_json.");
             JsonObject readParams = new JsonObject();
             readParams.addProperty("type", "object");
             JsonObject readProps = new JsonObject();
+
+            JsonObject readWorkspaceId = new JsonObject();
+            readWorkspaceId.addProperty("type", "string");
+            readWorkspaceId.addProperty("description", "Optional workspace file id. Prefer workspace_id over doc_id.");
+            readProps.add("workspace_id", readWorkspaceId);
 
             JsonObject committedProp = new JsonObject();
             committedProp.addProperty("type", "boolean");
@@ -849,6 +901,119 @@ public final class LLMService {
             readFn.add("parameters", readParams);
             readTool.add("function", readFn);
             tools.add(readTool);
+        }
+
+        if (allowsTool(allowedTools, "create_workspace_file")) {
+            JsonObject createTool = new JsonObject();
+            createTool.addProperty("type", "function");
+            JsonObject createFn = new JsonObject();
+            createFn.addProperty("name", "create_workspace_file");
+            createFn.addProperty("description", "Create a new workspace file in the current project.");
+            JsonObject createParams = new JsonObject();
+            createParams.addProperty("type", "object");
+            JsonObject createProps = new JsonObject();
+
+            JsonObject createName = new JsonObject();
+            createName.addProperty("type", "string");
+            createName.addProperty("description", "Display name for the workspace file.");
+            createProps.add("name", createName);
+
+            JsonObject createPath = new JsonObject();
+            createPath.addProperty("type", "string");
+            createPath.addProperty("description", "Logical project path, such as workspace/floors/f1.json.");
+            createProps.add("path", createPath);
+
+            JsonObject createType = new JsonObject();
+            createType.addProperty("type", "string");
+            JsonArray typeEnum = new JsonArray();
+            typeEnum.add("layout");
+            typeEnum.add("floor");
+            typeEnum.add("facade");
+            typeEnum.add("component");
+            typeEnum.add("semantic");
+            typeEnum.add("generated");
+            typeEnum.add("manual");
+            typeEnum.add("shared");
+            createType.add("enum", typeEnum);
+            createType.addProperty("description", "Workspace file type.");
+            createProps.add("type", createType);
+
+            JsonObject copyFrom = new JsonObject();
+            copyFrom.addProperty("type", "string");
+            copyFrom.addProperty("description", "Optional source workspace id to copy content/origin/size from.");
+            createProps.add("copy_from_workspace_id", copyFrom);
+
+            createParams.add("properties", createProps);
+            JsonArray createRequired = new JsonArray();
+            createRequired.add("name");
+            createRequired.add("path");
+            createRequired.add("type");
+            createParams.add("required", createRequired);
+            createParams.addProperty("additionalProperties", false);
+            createFn.add("parameters", createParams);
+            createTool.add("function", createFn);
+            tools.add(createTool);
+        }
+
+        if (allowsTool(allowedTools, "rename_workspace_file")) {
+            JsonObject renameTool = new JsonObject();
+            renameTool.addProperty("type", "function");
+            JsonObject renameFn = new JsonObject();
+            renameFn.addProperty("name", "rename_workspace_file");
+            renameFn.addProperty("description", "Rename a workspace file and optionally update its logical path.");
+            JsonObject renameParams = new JsonObject();
+            renameParams.addProperty("type", "object");
+            JsonObject renameProps = new JsonObject();
+
+            JsonObject renameWorkspaceId = new JsonObject();
+            renameWorkspaceId.addProperty("type", "string");
+            renameWorkspaceId.addProperty("description", "Workspace file id.");
+            renameProps.add("workspace_id", renameWorkspaceId);
+
+            JsonObject renameName = new JsonObject();
+            renameName.addProperty("type", "string");
+            renameName.addProperty("description", "New display name.");
+            renameProps.add("name", renameName);
+
+            JsonObject renamePath = new JsonObject();
+            renamePath.addProperty("type", "string");
+            renamePath.addProperty("description", "Optional new logical path.");
+            renameProps.add("path", renamePath);
+
+            renameParams.add("properties", renameProps);
+            JsonArray renameRequired = new JsonArray();
+            renameRequired.add("workspace_id");
+            renameRequired.add("name");
+            renameParams.add("required", renameRequired);
+            renameParams.addProperty("additionalProperties", false);
+            renameFn.add("parameters", renameParams);
+            renameTool.add("function", renameFn);
+            tools.add(renameTool);
+        }
+
+        if (allowsTool(allowedTools, "delete_workspace_file")) {
+            JsonObject deleteTool = new JsonObject();
+            deleteTool.addProperty("type", "function");
+            JsonObject deleteFn = new JsonObject();
+            deleteFn.addProperty("name", "delete_workspace_file");
+            deleteFn.addProperty("description", "Delete a workspace file if it has no pending patch and it is not the last remaining file.");
+            JsonObject deleteParams = new JsonObject();
+            deleteParams.addProperty("type", "object");
+            JsonObject deleteProps = new JsonObject();
+
+            JsonObject deleteWorkspaceId = new JsonObject();
+            deleteWorkspaceId.addProperty("type", "string");
+            deleteWorkspaceId.addProperty("description", "Workspace file id.");
+            deleteProps.add("workspace_id", deleteWorkspaceId);
+
+            deleteParams.add("properties", deleteProps);
+            JsonArray deleteRequired = new JsonArray();
+            deleteRequired.add("workspace_id");
+            deleteParams.add("required", deleteRequired);
+            deleteParams.addProperty("additionalProperties", false);
+            deleteFn.add("parameters", deleteParams);
+            deleteTool.add("function", deleteFn);
+            tools.add(deleteTool);
         }
 
         if (allowsTool(allowedTools, "search_block_ids")) {
@@ -902,9 +1067,14 @@ public final class LLMService {
             baseRevision.addProperty("description", "Workspace revision this patch is based on.");
             properties.add("base_revision", baseRevision);
 
+            JsonObject patchWorkspaceId = new JsonObject();
+            patchWorkspaceId.addProperty("type", "string");
+            patchWorkspaceId.addProperty("description", "Workspace file id this patch applies to.");
+            properties.add("workspace_id", patchWorkspaceId);
+
             JsonObject patchDocId = new JsonObject();
             patchDocId.addProperty("type", "string");
-            patchDocId.addProperty("description", "Optional document id. If omitted, applies to current active document.");
+            patchDocId.addProperty("description", "Legacy alias of workspace_id.");
             properties.add("doc_id", patchDocId);
 
             JsonObject intent = new JsonObject();
@@ -1024,6 +1194,7 @@ public final class LLMService {
 
             params.add("properties", properties);
             JsonArray required = new JsonArray();
+            required.add("workspace_id");
             required.add("operations");
             params.add("required", required);
             patchFn.add("parameters", params);

@@ -34,6 +34,9 @@ public final class ClientNetworkHandler {
             context.client().execute(() -> ClientSessionState.onSessionSync(
                     payload.active(),
                     payload.sessionId(),
+                    payload.projectId(),
+                    payload.projectName(),
+                    payload.projectDescription(),
                     payload.turnCount(),
                     payload.partCount(),
                     payload.totalBlocks(),

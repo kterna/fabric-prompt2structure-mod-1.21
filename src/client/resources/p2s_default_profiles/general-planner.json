@@ -8,7 +8,8 @@
     "read_skill",
     "read_subdoc",
     "search_skill",
-    "read_workspace_state",
+    "get_project_state",
+    "read_workspace_file",
     "search_block_ids"
   ],
   "max_loops": 40,

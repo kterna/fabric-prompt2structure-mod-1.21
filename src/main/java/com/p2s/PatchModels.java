@@ -73,7 +73,7 @@ public final class PatchModels {
             this.error = error;
             this.expected = expected;
             this.actual = actual;
-            this.hint = "Read workspace state with read_workspace_state and retry with corrected old_actions.";
+            this.hint = "Read the workspace again with read_workspace_file (or read_workspace_state alias) and retry with corrected old_actions.";
         }
     }
 

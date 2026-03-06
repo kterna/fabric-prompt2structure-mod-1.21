@@ -15,6 +15,9 @@ import java.util.Map;
 public final class ClientSessionState {
     private static boolean active = false;
     private static String sessionId = "";
+    private static String projectId = "";
+    private static String projectName = "";
+    private static String projectDescription = "";
     private static int turnCount = 0;
     private static int partCount = 0;
     private static int totalBlocks = 0;
@@ -40,6 +43,7 @@ public final class ClientSessionState {
     private static int sizeZ = 0;
     private static String activeDocId = "";
     private static String activeDocName = "";
+    private static String selectedWorkspaceId = "";
     private static final List<WorkspaceDocInfo> workspaceDocs = new ArrayList<>();
     private static final Map<String, String> workspaceDocScripts = new LinkedHashMap<>();
     private static String todoTitle = "";
@@ -59,6 +63,9 @@ public final class ClientSessionState {
     public static void onSessionSync(
             boolean activeFlag,
             String id,
+            String projectIdValue,
+            String projectNameValue,
+            String projectDescriptionValue,
             int turns,
             int parts,
             int blocks,
@@ -81,6 +88,9 @@ public final class ClientSessionState {
     ) {
         active = activeFlag;
         sessionId = id == null ? "" : id;
+        projectId = projectIdValue == null ? "" : projectIdValue;
+        projectName = projectNameValue == null ? "" : projectNameValue;
+        projectDescription = projectDescriptionValue == null ? "" : projectDescriptionValue;
         turnCount = turns;
         partCount = parts;
         totalBlocks = blocks;
@@ -128,6 +138,10 @@ public final class ClientSessionState {
             currentScriptJson = "";
             activeDocId = "";
             activeDocName = "";
+            selectedWorkspaceId = "";
+            projectId = "";
+            projectName = "";
+            projectDescription = "";
             workspaceDocs.clear();
             workspaceDocScripts.clear();
         }
@@ -467,6 +481,49 @@ public final class ClientSessionState {
         return activeDocName;
     }
 
+    public static synchronized String getProjectId() {
+        return projectId;
+    }
+
+    public static synchronized String getProjectName() {
+        return projectName;
+    }
+
+    public static synchronized String getProjectDescription() {
+        return projectDescription;
+    }
+
+    public static synchronized String getSelectedWorkspaceId() {
+        return selectedWorkspaceId;
+    }
+
+    public static synchronized boolean setSelectedWorkspaceId(String workspaceId) {
+        String normalized = workspaceId == null ? "" : workspaceId.trim();
+        if (normalized.isBlank()) {
+            return false;
+        }
+        for (WorkspaceDocInfo doc : workspaceDocs) {
+            if (doc != null && normalized.equals(doc.id())) {
+                selectedWorkspaceId = normalized;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static synchronized String getSelectedWorkspaceName() {
+        WorkspaceDocInfo selected = findWorkspaceDoc(selectedWorkspaceId);
+        if (selected != null) {
+            if (selected.path() != null && !selected.path().isBlank()) {
+                return selected.path();
+            }
+            if (selected.name() != null && !selected.name().isBlank()) {
+                return selected.name();
+            }
+        }
+        return activeDocName;
+    }
+
     public static synchronized List<WorkspaceDocInfo> getWorkspaceDocs() {
         return List.copyOf(workspaceDocs);
     }
@@ -481,6 +538,17 @@ public final class ClientSessionState {
 
     public static synchronized Map<String, String> getWorkspaceDocScripts() {
         return Map.copyOf(workspaceDocScripts);
+    }
+
+    public static synchronized void setWorkspaceDocScriptJson(String workspaceId, String scriptJson) {
+        if (workspaceId == null || workspaceId.isBlank()) {
+            return;
+        }
+        if (scriptJson == null || scriptJson.isBlank()) {
+            workspaceDocScripts.remove(workspaceId.trim());
+            return;
+        }
+        workspaceDocScripts.put(workspaceId.trim(), scriptJson);
     }
 
     private static synchronized void updateWorkspaceDocs(String docsSummaryJson) {
@@ -507,6 +575,10 @@ public final class ClientSessionState {
                 }
                 validIds.add(id);
                 String name = obj.has("name") && obj.get("name").isJsonPrimitive() ? obj.get("name").getAsString().trim() : "";
+                String path = obj.has("path") && obj.get("path").isJsonPrimitive() ? obj.get("path").getAsString().trim() : "";
+                String type = obj.has("type") && obj.get("type").isJsonPrimitive() ? obj.get("type").getAsString().trim() : "";
+                String areaTag = obj.has("areaTag") && obj.get("areaTag").isJsonPrimitive() ? obj.get("areaTag").getAsString().trim() : "";
+                String summary = obj.has("summary") && obj.get("summary").isJsonPrimitive() ? obj.get("summary").getAsString().trim() : "";
                 boolean active = obj.has("active") && obj.get("active").isJsonPrimitive() && obj.get("active").getAsBoolean();
                 boolean hasPending = obj.has("hasPendingPatch") && obj.get("hasPendingPatch").isJsonPrimitive() && obj.get("hasPendingPatch").getAsBoolean();
                 String revision = obj.has("revision") && obj.get("revision").isJsonPrimitive() ? obj.get("revision").getAsString().trim() : "";
@@ -520,7 +592,7 @@ public final class ClientSessionState {
                 int changed = obj.has("pendingChangedBlocks") && obj.get("pendingChangedBlocks").isJsonPrimitive()
                         ? Math.max(0, obj.get("pendingChangedBlocks").getAsInt())
                         : 0;
-                workspaceDocs.add(new WorkspaceDocInfo(id, name, active, hasPending, revision, ox, oy, oz, hasSizeValue, sx, sy, sz, changed));
+                workspaceDocs.add(new WorkspaceDocInfo(id, name, path, type, areaTag, summary, active, hasPending, revision, ox, oy, oz, hasSizeValue, sx, sy, sz, changed));
                 if (active && (activeDocName == null || activeDocName.isBlank()) && !name.isBlank()) {
                     activeDocName = name;
                 }
@@ -528,6 +600,35 @@ public final class ClientSessionState {
         } catch (Exception ignored) {
         }
         workspaceDocScripts.keySet().removeIf(id -> !validIds.contains(id));
+
+        boolean hasSelected = false;
+        for (WorkspaceDocInfo doc : workspaceDocs) {
+            if (doc != null && doc.id().equals(selectedWorkspaceId)) {
+                hasSelected = true;
+                break;
+            }
+        }
+        if (!hasSelected) {
+            if (activeDocId != null && !activeDocId.isBlank() && validIds.contains(activeDocId)) {
+                selectedWorkspaceId = activeDocId;
+            } else if (!workspaceDocs.isEmpty()) {
+                selectedWorkspaceId = workspaceDocs.get(0).id();
+            } else {
+                selectedWorkspaceId = "";
+            }
+        }
+    }
+
+    private static WorkspaceDocInfo findWorkspaceDoc(String workspaceId) {
+        if (workspaceId == null || workspaceId.isBlank()) {
+            return null;
+        }
+        for (WorkspaceDocInfo doc : workspaceDocs) {
+            if (doc != null && workspaceId.equals(doc.id())) {
+                return doc;
+            }
+        }
+        return null;
     }
 
     private static synchronized void updateCheckpoints(String checkpointsJson) {
@@ -641,6 +742,10 @@ public final class ClientSessionState {
     public record WorkspaceDocInfo(
             String id,
             String name,
+            String path,
+            String type,
+            String areaTag,
+            String summary,
             boolean active,
             boolean hasPendingPatch,
             String revision,

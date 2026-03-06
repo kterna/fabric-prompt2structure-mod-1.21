@@ -34,6 +34,11 @@ public final class SubagentProfileStore {
             "read_skill",
             "read_subdoc",
             "search_skill",
+            "get_project_state",
+            "read_workspace_file",
+            "create_workspace_file",
+            "rename_workspace_file",
+            "delete_workspace_file",
             "read_workspace_state",
             "propose_patch",
             "search_block_ids"
@@ -202,9 +207,15 @@ public final class SubagentProfileStore {
             return new ArrayList<>(List.of("search_block_ids", "list_skills", "read_skill", "read_subdoc", "search_skill"));
         }
         if ("patch-planner".equals(id)) {
-            return new ArrayList<>(List.of("read_workspace_state", "search_block_ids", "propose_patch", "list_skills", "read_skill", "read_subdoc", "search_skill"));
+            return new ArrayList<>(List.of(
+                    "get_project_state", "read_workspace_file", "search_block_ids", "propose_patch",
+                    "list_skills", "read_skill", "read_subdoc", "search_skill"
+            ));
         }
-        return new ArrayList<>(List.of("list_skills", "read_skill", "read_subdoc", "search_skill", "read_workspace_state", "search_block_ids"));
+        return new ArrayList<>(List.of(
+                "list_skills", "read_skill", "read_subdoc", "search_skill",
+                "get_project_state", "read_workspace_file", "search_block_ids"
+        ));
     }
 
     private static List<String> readStringArray(JsonElement element) {

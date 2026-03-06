@@ -8,6 +8,9 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 public record S2CSessionSyncPayload(
         boolean active,
         String sessionId,
+        String projectId,
+        String projectName,
+        String projectDescription,
         int turnCount,
         int partCount,
         int totalBlocks,
@@ -33,6 +36,9 @@ public record S2CSessionSyncPayload(
             (buf, payload) -> {
                 buf.writeBoolean(payload.active);
                 buf.writeUtf(payload.sessionId == null ? "" : payload.sessionId, 64);
+                buf.writeUtf(payload.projectId == null ? "" : payload.projectId, 128);
+                buf.writeUtf(payload.projectName == null ? "" : payload.projectName, 256);
+                buf.writeUtf(payload.projectDescription == null ? "" : payload.projectDescription, 1024);
                 buf.writeVarInt(payload.turnCount);
                 buf.writeVarInt(payload.partCount);
                 buf.writeVarInt(payload.totalBlocks);
@@ -60,6 +66,9 @@ public record S2CSessionSyncPayload(
             buf -> new S2CSessionSyncPayload(
                     buf.readBoolean(),
                     buf.readUtf(64),
+                    buf.readUtf(128),
+                    buf.readUtf(256),
+                    buf.readUtf(1024),
                     buf.readVarInt(),
                     buf.readVarInt(),
                     buf.readVarInt(),

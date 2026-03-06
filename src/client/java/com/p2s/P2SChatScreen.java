@@ -69,6 +69,13 @@ public class P2SChatScreen extends Screen {
     private EditBox discardReasonInput;
     private Button discardOkButton;
     private Button discardCancelButton;
+    private boolean workspaceRenameMode = false;
+    private String workspaceRenameDraft = "";
+    private EditBox workspaceRenameInput;
+    private Button workspaceRenameButton;
+    private Button workspaceDeleteButton;
+    private Button workspaceRenameOkButton;
+    private Button workspaceRenameCancelButton;
 
     // Left context editor
     private final List<String> contextJsonLines = new ArrayList<>();
@@ -283,10 +290,14 @@ public class P2SChatScreen extends Screen {
             activeContextTab = ContextTab.SCRIPT;
         }
         if (activeContextTab == ContextTab.SCRIPT && contextJsonLines.isEmpty()) {
-            String current = ClientSessionState.getCurrentScriptJson();
+            String selectedWorkspaceId = ClientSessionState.getSelectedWorkspaceId();
+            String current = ClientSessionState.getWorkspaceDocScriptJson(selectedWorkspaceId);
+            if ((current == null || current.isBlank()) && selectedWorkspaceId != null && !selectedWorkspaceId.isBlank()) {
+                current = ClientSessionState.getCurrentScriptJson();
+            }
             if (current != null && !current.isBlank()) {
                 setContextJsonText(current);
-                contextLoadedDocId = ClientSessionState.getActiveDocId();
+                contextLoadedDocId = selectedWorkspaceId == null ? "" : selectedWorkspaceId;
             } else {
                 setContextJsonText("{\n}\n");
             }
@@ -306,26 +317,61 @@ public class P2SChatScreen extends Screen {
 
         // Explorer (left): VSCode-like file list
         workspaceDocButtons.clear();
-        workspaceDocCreateButton = addRenderableWidget(Button.builder(Component.literal("+ New File"), btn -> createWorkspaceDoc())
-                .bounds(leftX, row1Y, explorerWidth, INPUT_HEIGHT).build());
-        List<ClientSessionState.WorkspaceDocInfo> docs = ClientSessionState.getWorkspaceDocs();
-        int docY = row1Y + INPUT_HEIGHT + rowGap;
-        int docBottom = this.height - CONTEXT_FOOTER_HEIGHT - 8;
-        for (ClientSessionState.WorkspaceDocInfo doc : docs) {
-            if (docY + INPUT_HEIGHT > docBottom) {
-                break;
-            }
-            String docName = doc.name() == null || doc.name().isBlank() ? doc.id() : doc.name();
-            int slash = docName.lastIndexOf('/');
-            String label = slash >= 0 ? docName.substring(slash + 1) : docName;
-            if (doc.hasPendingPatch()) {
-                label = label + " *";
-            }
-            Button docBtn = addRenderableWidget(Button.builder(Component.literal(label), btn -> switchWorkspaceDoc(doc.id()))
-                    .bounds(leftX, docY, explorerWidth, INPUT_HEIGHT).build());
-            docBtn.active = !doc.active();
-            workspaceDocButtons.add(docBtn);
-            docY += INPUT_HEIGHT + 1;
+        if (workspaceRenameMode && (workspaceRenameDraft == null || workspaceRenameDraft.isBlank())) {
+            String selectedName = ClientSessionState.getSelectedWorkspaceName();
+            workspaceRenameDraft = selectedName == null ? "" : selectedName;
+        }
+        P2SWorkspaceExplorerComponent.BuildResult explorer = P2SWorkspaceExplorerComponent.build(
+                new P2SWorkspaceExplorerComponent.Host() {
+                    @Override
+                    public net.minecraft.client.gui.Font font() {
+                        return P2SChatScreen.this.font;
+                    }
+
+                    @Override
+                    public int screenHeight() {
+                        return P2SChatScreen.this.height;
+                    }
+
+                    @Override
+                    public Button addButton(Button button) {
+                        return P2SChatScreen.this.addRenderableWidget(button);
+                    }
+
+                    @Override
+                    public EditBox addEditBox(EditBox editBox) {
+                        P2SChatScreen.this.addRenderableWidget(editBox);
+                        return editBox;
+                    }
+                },
+                new P2SWorkspaceExplorerComponent.Config(
+                        leftX,
+                        row1Y,
+                        row2Y,
+                        explorerWidth,
+                        INPUT_HEIGHT,
+                        CONTEXT_FOOTER_HEIGHT,
+                        workspaceRenameMode,
+                        workspaceRenameDraft,
+                        ClientSessionState.getSelectedWorkspaceId(),
+                        ClientSessionState.getWorkspaceDocs(),
+                        this::createWorkspaceDoc,
+                        this::enterWorkspaceRenameMode,
+                        this::deleteSelectedWorkspaceDoc,
+                        this::switchWorkspaceDoc,
+                        this::confirmWorkspaceRename,
+                        this::exitWorkspaceRenameMode
+                )
+        );
+        workspaceDocCreateButton = explorer.createButton();
+        workspaceRenameButton = explorer.renameButton();
+        workspaceDeleteButton = explorer.deleteButton();
+        workspaceRenameInput = explorer.renameInput();
+        workspaceRenameOkButton = explorer.renameOkButton();
+        workspaceRenameCancelButton = explorer.renameCancelButton();
+        workspaceDocButtons.addAll(explorer.docButtons());
+        if (workspaceRenameInput != null) {
+            workspaceRenameInput.setFocused(true);
         }
 
         // Editor controls (right)
@@ -443,6 +489,9 @@ public class P2SChatScreen extends Screen {
 
     private void captureContextControlState() {
         saveCurrentTabEditorState();
+        if (workspaceRenameMode && workspaceRenameInput != null) {
+            workspaceRenameDraft = workspaceRenameInput.getValue();
+        }
         if (contextStartInput != null) {
             contextRangeStart = parsePositiveInt(contextStartInput.getValue(), contextRangeStart <= 0 ? 1 : contextRangeStart);
         }
@@ -460,10 +509,14 @@ public class P2SChatScreen extends Screen {
         JsonObject payload = new JsonObject();
         int next = Math.max(1, ClientSessionState.getWorkspaceDocs().size() + 1);
         payload.addProperty("name", "workspace/file-" + next + ".json");
+        payload.addProperty("path", "workspace/file-" + next + ".json");
+        payload.addProperty("type", "manual");
         payload.addProperty("switchToNew", true);
-        sendSessionAction("doc_create", payload.toString());
+        sendSessionAction("workspace_file_create", payload.toString());
         activeContextTab = ContextTab.SCRIPT;
         contextLoadedDocId = "";
+        workspaceRenameMode = false;
+        workspaceRenameDraft = "";
         setContextStatus("Creating new file...", 0xAAAAAA);
         createWidgets();
     }
@@ -472,22 +525,26 @@ public class P2SChatScreen extends Screen {
         if (docId == null || docId.isBlank()) {
             return;
         }
-        JsonObject payload = new JsonObject();
-        payload.addProperty("id", docId);
-        sendSessionAction("doc_switch", payload.toString());
+        if (!ClientSessionState.setSelectedWorkspaceId(docId)) {
+            return;
+        }
+        if (workspaceRenameMode) {
+            workspaceRenameDraft = "";
+        }
         activeContextTab = ContextTab.SCRIPT;
         contextLoadedDocId = "";
         clearContextDiffView();
-        setContextStatus("Switching file...", 0xAAAAAA);
+        setContextStatus("Switched local file context", 0x55FF55);
         createWidgets();
     }
 
     private JsonObject workspaceReadArgs(boolean committed) {
         JsonObject args = new JsonObject();
         args.addProperty("committed", committed);
-        String activeDocId = ClientSessionState.getActiveDocId();
-        if (activeDocId != null && !activeDocId.isBlank()) {
-            args.addProperty("doc_id", activeDocId);
+        String selectedWorkspaceId = ClientSessionState.getSelectedWorkspaceId();
+        if (selectedWorkspaceId != null && !selectedWorkspaceId.isBlank()) {
+            args.addProperty("workspace_id", selectedWorkspaceId);
+            args.addProperty("doc_id", selectedWorkspaceId);
         }
         return args;
     }
@@ -496,26 +553,29 @@ public class P2SChatScreen extends Screen {
         if (activeContextTab != ContextTab.SCRIPT || contextDiffMode) {
             return;
         }
-        String activeDocId = ClientSessionState.getActiveDocId();
-        if (activeDocId == null || activeDocId.isBlank()) {
+        String selectedWorkspaceId = ClientSessionState.getSelectedWorkspaceId();
+        if (selectedWorkspaceId == null || selectedWorkspaceId.isBlank()) {
             return;
         }
-        if (activeDocId.equals(contextLoadedDocId)) {
+        if (selectedWorkspaceId.equals(contextLoadedDocId)) {
             return;
         }
-        String script = ClientSessionState.getCurrentScriptJson();
+        String script = ClientSessionState.getWorkspaceDocScriptJson(selectedWorkspaceId);
+        if ((script == null || script.isBlank()) && selectedWorkspaceId.equals(ClientSessionState.getActiveDocId())) {
+            script = ClientSessionState.getCurrentScriptJson();
+        }
         if (script == null || script.isBlank()) {
             setContextJsonText("{\n}\n");
-            contextLoadedDocId = activeDocId;
+            contextLoadedDocId = selectedWorkspaceId;
             return;
         }
         setContextJsonText(script);
-        contextLoadedDocId = activeDocId;
+        contextLoadedDocId = selectedWorkspaceId;
     }
 
     private void refreshWorkspaceExplorerIfNeeded() {
         StringBuilder sb = new StringBuilder();
-        sb.append(ClientSessionState.getActiveDocId()).append('|');
+        sb.append(ClientSessionState.getSelectedWorkspaceId()).append('|');
         List<ClientSessionState.WorkspaceDocInfo> docs = ClientSessionState.getWorkspaceDocs();
         sb.append(docs.size());
         for (ClientSessionState.WorkspaceDocInfo doc : docs) {
@@ -524,7 +584,8 @@ public class P2SChatScreen extends Screen {
             }
             sb.append('|').append(doc.id())
                     .append(':').append(doc.name())
-                    .append(':').append(doc.active())
+                    .append(':').append(doc.path())
+                    .append(':').append(doc.type())
                     .append(':').append(doc.hasPendingPatch())
                     .append(':').append(doc.revision());
         }
@@ -537,9 +598,9 @@ public class P2SChatScreen extends Screen {
     }
 
     private String activeContextFileName() {
-        String activeDocName = ClientSessionState.getActiveDocName();
+        String activeDocName = ClientSessionState.getSelectedWorkspaceName();
         if (activeDocName == null || activeDocName.isBlank()) {
-            String activeDocId = ClientSessionState.getActiveDocId();
+            String activeDocId = ClientSessionState.getSelectedWorkspaceId();
             activeDocName = (activeDocId == null || activeDocId.isBlank()) ? "workspace/main.json" : activeDocId + ".json";
         }
         return switch (activeContextTab) {
@@ -626,7 +687,8 @@ public class P2SChatScreen extends Screen {
         scriptLoading = true;
         setContextStatus("Fetching script...", 0xAAAAAA);
 
-        ClientToolBridge.call("read_workspace_state", workspaceReadArgs(true))
+        String selectedWorkspaceId = ClientSessionState.getSelectedWorkspaceId();
+        ClientToolBridge.call("read_workspace_file", workspaceReadArgs(true))
                 .thenAccept(result -> {
                     Minecraft mc = this.minecraft;
                     if (mc != null) {
@@ -639,9 +701,12 @@ public class P2SChatScreen extends Screen {
                             } else {
                                 setContextStatus("Script loaded", 0x55FF55);
                             }
+                            if (selectedWorkspaceId != null && !selectedWorkspaceId.isBlank()) {
+                                ClientSessionState.setWorkspaceDocScriptJson(selectedWorkspaceId, scriptText);
+                            }
                             if (activeContextTab == ContextTab.SCRIPT) {
                                 setContextJsonText(scriptText);
-                                contextLoadedDocId = ClientSessionState.getActiveDocId();
+                                contextLoadedDocId = selectedWorkspaceId == null ? "" : selectedWorkspaceId;
                             } else {
                                 // Update cache only
                                 scriptJsonLines.clear();
@@ -655,7 +720,7 @@ public class P2SChatScreen extends Screen {
                                 scriptCursorLine = 0;
                                 scriptCursorColumn = 0;
                                 scriptScroll = 0;
-                                contextLoadedDocId = ClientSessionState.getActiveDocId();
+                                contextLoadedDocId = selectedWorkspaceId == null ? "" : selectedWorkspaceId;
                             }
                         });
                     }
@@ -679,8 +744,8 @@ public class P2SChatScreen extends Screen {
         JsonObject committedArgs = workspaceReadArgs(true);
         JsonObject stagedArgs = workspaceReadArgs(false);
 
-        ClientToolBridge.call("read_workspace_state", committedArgs)
-                .thenCombine(ClientToolBridge.call("read_workspace_state", stagedArgs), (committed, staged) -> {
+        ClientToolBridge.call("read_workspace_file", committedArgs)
+                .thenCombine(ClientToolBridge.call("read_workspace_file", stagedArgs), (committed, staged) -> {
                     String committedText = extractWorkspaceScriptText(committed);
                     String stagedText = extractWorkspaceScriptText(staged);
                     return buildContextDiffView(committedText, stagedText);
@@ -1808,6 +1873,21 @@ public class P2SChatScreen extends Screen {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (workspaceRenameMode) {
+            if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
+                exitWorkspaceRenameMode();
+                return true;
+            }
+            if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
+                confirmWorkspaceRename();
+                return true;
+            }
+            if (workspaceRenameInput != null && workspaceRenameInput.keyPressed(keyCode, scanCode, modifiers)) {
+                return true;
+            }
+            return super.keyPressed(keyCode, scanCode, modifiers);
+        }
+
         if (discardReasonMode) {
             if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
                 exitDiscardReasonMode();
@@ -1849,6 +1929,12 @@ public class P2SChatScreen extends Screen {
 
     @Override
     public boolean charTyped(char codePoint, int modifiers) {
+        if (workspaceRenameMode) {
+            if (workspaceRenameInput != null && workspaceRenameInput.charTyped(codePoint, modifiers)) {
+                return true;
+            }
+            return super.charTyped(codePoint, modifiers);
+        }
         if (discardReasonMode) {
             if (discardReasonInput != null && discardReasonInput.charTyped(codePoint, modifiers)) {
                 return true;
@@ -2002,6 +2088,12 @@ public class P2SChatScreen extends Screen {
     public void render(GuiGraphics gfx, int mouseX, int mouseY, float delta) {
         refreshChoiceButtons();
         if (checkpointModeButton != null) { checkpointModeButton.setMessage(Component.literal(modeLabel())); }
+        if (workspaceRenameMode) {
+            String selectedWorkspaceId = ClientSessionState.getSelectedWorkspaceId();
+            if (selectedWorkspaceId == null || selectedWorkspaceId.isBlank()) {
+                exitWorkspaceRenameMode();
+            }
+        }
         if (discardReasonMode && !ClientSessionState.hasPendingPatch()) {
             exitDiscardReasonMode();
         }
@@ -2074,7 +2166,7 @@ public class P2SChatScreen extends Screen {
         int y = PADDING;
         gfx.drawString(this.font, "Workspace Files", x, y, 0xE8F0FF, true);
         y += this.font.lineHeight + 2;
-        String docName = ClientSessionState.getActiveDocName();
+        String docName = ClientSessionState.getSelectedWorkspaceName();
         if (docName == null || docName.isBlank()) {
             docName = "workspace/main.json";
         }
@@ -2322,6 +2414,9 @@ public class P2SChatScreen extends Screen {
         if (input != null) {
             boxes.add(input);
         }
+        if (workspaceRenameInput != null) {
+            boxes.add(workspaceRenameInput);
+        }
         if (contextStartInput != null) {
             boxes.add(contextStartInput);
         }
@@ -2337,6 +2432,11 @@ public class P2SChatScreen extends Screen {
         y += this.font.lineHeight + 2;
 
         if (ClientSessionState.isActive()) {
+            String projectName = ClientSessionState.getProjectName();
+            if (projectName != null && !projectName.isBlank()) {
+                gfx.drawString(this.font, "Project " + projectName, panelX + PADDING, y, 0xCFE1FF, true);
+                y += this.font.lineHeight + 2;
+            }
             String info = "Session " + ClientSessionState.getSessionId() + " | Turns " + ClientSessionState.getTurnCount();
             gfx.drawString(this.font, info, panelX + PADDING, y, 0xAAAAAA, true);
             y += this.font.lineHeight + 2;
@@ -2719,6 +2819,69 @@ public class P2SChatScreen extends Screen {
         JsonObject payload = new JsonObject();
         payload.addProperty("label", "manual-" + ClientSessionState.getTurnCount());
         sendSessionAction("create_checkpoint", payload.toString());
+    }
+
+    private void enterWorkspaceRenameMode() {
+        String selectedWorkspaceId = ClientSessionState.getSelectedWorkspaceId();
+        if (selectedWorkspaceId == null || selectedWorkspaceId.isBlank()) {
+            return;
+        }
+        workspaceRenameMode = true;
+        String selectedName = ClientSessionState.getSelectedWorkspaceName();
+        workspaceRenameDraft = selectedName == null ? "" : selectedName;
+        createWidgets();
+        if (workspaceRenameInput != null) {
+            workspaceRenameInput.setFocused(true);
+        }
+        if (input != null) {
+            input.setFocused(false);
+        }
+        setContextStatus("Rename selected workspace file", 0xAAD5FF);
+    }
+
+    private void exitWorkspaceRenameMode() {
+        workspaceRenameMode = false;
+        workspaceRenameDraft = "";
+        createWidgets();
+        if (input != null) {
+            input.setFocused(true);
+        }
+    }
+
+    private void confirmWorkspaceRename() {
+        String selectedWorkspaceId = ClientSessionState.getSelectedWorkspaceId();
+        if (selectedWorkspaceId == null || selectedWorkspaceId.isBlank()) {
+            exitWorkspaceRenameMode();
+            return;
+        }
+        String value = workspaceRenameInput != null ? workspaceRenameInput.getValue() : workspaceRenameDraft;
+        if (value == null || value.trim().isEmpty()) {
+            setContextStatus("Workspace file name cannot be empty", 0xFF5555);
+            return;
+        }
+        JsonObject payload = new JsonObject();
+        payload.addProperty("workspace_id", selectedWorkspaceId);
+        payload.addProperty("name", value.trim());
+        payload.addProperty("path", value.trim());
+        exitWorkspaceRenameMode();
+        sendSessionAction("workspace_file_rename", payload.toString());
+        setContextStatus("Renaming workspace file...", 0xAAAAAA);
+    }
+
+    private void deleteSelectedWorkspaceDoc() {
+        String selectedWorkspaceId = ClientSessionState.getSelectedWorkspaceId();
+        if (selectedWorkspaceId == null || selectedWorkspaceId.isBlank()) {
+            return;
+        }
+        JsonObject payload = new JsonObject();
+        payload.addProperty("workspace_id", selectedWorkspaceId);
+        sendSessionAction("workspace_file_delete", payload.toString());
+        workspaceRenameMode = false;
+        workspaceRenameDraft = "";
+        contextLoadedDocId = "";
+        clearContextDiffView();
+        setContextStatus("Deleting workspace file...", 0xAAAAAA);
+        createWidgets();
     }
 
     private void rollbackSelectedCheckpoint() {
