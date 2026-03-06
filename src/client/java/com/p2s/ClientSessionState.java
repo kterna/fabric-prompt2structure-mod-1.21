@@ -7,8 +7,10 @@ import com.google.gson.JsonParser;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 public final class ClientSessionState {
     private static boolean active = false;
@@ -36,6 +38,10 @@ public final class ClientSessionState {
     private static int sizeX = 0;
     private static int sizeY = 0;
     private static int sizeZ = 0;
+    private static String activeDocId = "";
+    private static String activeDocName = "";
+    private static final List<WorkspaceDocInfo> workspaceDocs = new ArrayList<>();
+    private static final Map<String, String> workspaceDocScripts = new LinkedHashMap<>();
     private static String todoTitle = "";
     private static final List<TodoItem> todoItems = new ArrayList<>();
     private static ChoiceRequest pendingChoice = null;
@@ -68,7 +74,10 @@ public final class ClientSessionState {
             boolean hasSz,
             int sx, int sy, int sz,
             String checkpointsJson,
-            String scriptJson
+            String scriptJson,
+            String activeDoc,
+            String activeDocDisplayName,
+            String docsSummaryJson
     ) {
         active = activeFlag;
         sessionId = id == null ? "" : id;
@@ -91,6 +100,12 @@ public final class ClientSessionState {
         sizeY = sy;
         sizeZ = sz;
         currentScriptJson = scriptJson == null ? "" : scriptJson;
+        activeDocId = activeDoc == null ? "" : activeDoc;
+        activeDocName = activeDocDisplayName == null ? "" : activeDocDisplayName;
+        updateWorkspaceDocs(docsSummaryJson);
+        if (active && !activeDocId.isBlank() && currentScriptJson != null && !currentScriptJson.isBlank()) {
+            workspaceDocScripts.put(activeDocId, currentScriptJson);
+        }
         updateCheckpoints(checkpointsJson);
         if (!pending) {
             clearPreview();
@@ -111,6 +126,10 @@ public final class ClientSessionState {
             sizeY = 0;
             sizeZ = 0;
             currentScriptJson = "";
+            activeDocId = "";
+            activeDocName = "";
+            workspaceDocs.clear();
+            workspaceDocScripts.clear();
         }
     }
 
@@ -440,6 +459,77 @@ public final class ClientSessionState {
         return currentScriptJson;
     }
 
+    public static synchronized String getActiveDocId() {
+        return activeDocId;
+    }
+
+    public static synchronized String getActiveDocName() {
+        return activeDocName;
+    }
+
+    public static synchronized List<WorkspaceDocInfo> getWorkspaceDocs() {
+        return List.copyOf(workspaceDocs);
+    }
+
+    public static synchronized String getWorkspaceDocScriptJson(String docId) {
+        if (docId == null || docId.isBlank()) {
+            return "";
+        }
+        String value = workspaceDocScripts.get(docId.trim());
+        return value == null ? "" : value;
+    }
+
+    public static synchronized Map<String, String> getWorkspaceDocScripts() {
+        return Map.copyOf(workspaceDocScripts);
+    }
+
+    private static synchronized void updateWorkspaceDocs(String docsSummaryJson) {
+        workspaceDocs.clear();
+        List<String> validIds = new ArrayList<>();
+        if (docsSummaryJson == null || docsSummaryJson.isBlank()) {
+            workspaceDocScripts.clear();
+            return;
+        }
+        try {
+            JsonElement root = JsonParser.parseString(docsSummaryJson);
+            if (!root.isJsonArray()) {
+                workspaceDocScripts.clear();
+                return;
+            }
+            for (JsonElement el : root.getAsJsonArray()) {
+                if (el == null || !el.isJsonObject()) {
+                    continue;
+                }
+                JsonObject obj = el.getAsJsonObject();
+                String id = obj.has("id") && obj.get("id").isJsonPrimitive() ? obj.get("id").getAsString().trim() : "";
+                if (id.isBlank()) {
+                    continue;
+                }
+                validIds.add(id);
+                String name = obj.has("name") && obj.get("name").isJsonPrimitive() ? obj.get("name").getAsString().trim() : "";
+                boolean active = obj.has("active") && obj.get("active").isJsonPrimitive() && obj.get("active").getAsBoolean();
+                boolean hasPending = obj.has("hasPendingPatch") && obj.get("hasPendingPatch").isJsonPrimitive() && obj.get("hasPendingPatch").getAsBoolean();
+                String revision = obj.has("revision") && obj.get("revision").isJsonPrimitive() ? obj.get("revision").getAsString().trim() : "";
+                boolean hasSizeValue = obj.has("hasSize") && obj.get("hasSize").isJsonPrimitive() && obj.get("hasSize").getAsBoolean();
+                int sx = obj.has("sizeX") && obj.get("sizeX").isJsonPrimitive() ? obj.get("sizeX").getAsInt() : 0;
+                int sy = obj.has("sizeY") && obj.get("sizeY").isJsonPrimitive() ? obj.get("sizeY").getAsInt() : 0;
+                int sz = obj.has("sizeZ") && obj.get("sizeZ").isJsonPrimitive() ? obj.get("sizeZ").getAsInt() : 0;
+                int ox = obj.has("originX") && obj.get("originX").isJsonPrimitive() ? obj.get("originX").getAsInt() : 0;
+                int oy = obj.has("originY") && obj.get("originY").isJsonPrimitive() ? obj.get("originY").getAsInt() : 0;
+                int oz = obj.has("originZ") && obj.get("originZ").isJsonPrimitive() ? obj.get("originZ").getAsInt() : 0;
+                int changed = obj.has("pendingChangedBlocks") && obj.get("pendingChangedBlocks").isJsonPrimitive()
+                        ? Math.max(0, obj.get("pendingChangedBlocks").getAsInt())
+                        : 0;
+                workspaceDocs.add(new WorkspaceDocInfo(id, name, active, hasPending, revision, ox, oy, oz, hasSizeValue, sx, sy, sz, changed));
+                if (active && (activeDocName == null || activeDocName.isBlank()) && !name.isBlank()) {
+                    activeDocName = name;
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        workspaceDocScripts.keySet().removeIf(id -> !validIds.contains(id));
+    }
+
     private static synchronized void updateCheckpoints(String checkpointsJson) {
         checkpoints.clear();
         if (checkpointsJson != null && !checkpointsJson.isBlank()) {
@@ -546,5 +636,22 @@ public final class ClientSessionState {
     }
 
     public record CheckpointInfo(String id, String label, String revision) {
+    }
+
+    public record WorkspaceDocInfo(
+            String id,
+            String name,
+            boolean active,
+            boolean hasPendingPatch,
+            String revision,
+            int originX,
+            int originY,
+            int originZ,
+            boolean hasSize,
+            int sizeX,
+            int sizeY,
+            int sizeZ,
+            int pendingChangedBlocks
+    ) {
     }
 }

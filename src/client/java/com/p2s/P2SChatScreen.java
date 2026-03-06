@@ -85,7 +85,9 @@ public class P2SChatScreen extends Screen {
     private Button contextDiffPrevButton;
     private Button contextDiffNextButton;
     private Button contextAddRangeButton;
-    private ContextTab activeContextTab = ContextTab.STATE;
+    private Button workspaceDocCreateButton;
+    private final List<Button> workspaceDocButtons = new ArrayList<>();
+    private ContextTab activeContextTab = ContextTab.SCRIPT;
     private final List<String> stateJsonLines = new ArrayList<>();
     private int stateCursorLine = 0;
     private int stateCursorColumn = 0;
@@ -95,6 +97,8 @@ public class P2SChatScreen extends Screen {
     private int scriptCursorColumn = 0;
     private int scriptScroll = 0;
     private boolean scriptLoading = false;
+    private String contextLoadedDocId = "";
+    private String workspaceUiSignature = "";
     private int contextVisibleRows = 0;
     private int contextScroll = 0;
     private int contextEditorX = 0;
@@ -275,67 +279,89 @@ public class P2SChatScreen extends Screen {
     }
 
     private void initContextWidgets(int panelX) {
-        if (activeContextTab == ContextTab.STATE && contextJsonLines.isEmpty()) {
-            setContextJsonText(buildWorkspaceStateJson());
+        if (activeContextTab == ContextTab.STATE) {
+            activeContextTab = ContextTab.SCRIPT;
+        }
+        if (activeContextTab == ContextTab.SCRIPT && contextJsonLines.isEmpty()) {
+            String current = ClientSessionState.getCurrentScriptJson();
+            if (current != null && !current.isBlank()) {
+                setContextJsonText(current);
+                contextLoadedDocId = ClientSessionState.getActiveDocId();
+            } else {
+                setContextJsonText("{\n}\n");
+            }
         }
         contextScroll = Math.max(0, contextScroll);
 
         int leftX = PADDING;
         int leftWidth = Math.max(100, panelX - PADDING * 2);
+        int explorerWidth = Math.min(220, Math.max(130, leftWidth / 3));
+        int splitGap = 6;
+        int editorXBase = leftX + explorerWidth + splitGap;
+        int editorWidth = Math.max(120, leftWidth - explorerWidth - splitGap);
         int rowGap = 2;
         int row1Y = PADDING + this.font.lineHeight + 6;
         int row2Y = row1Y + INPUT_HEIGHT + rowGap;
         int row3Y = row2Y + INPUT_HEIGHT + rowGap;
 
-        // Row 1: Tab buttons
-        int tabGap = 2;
-        int tabWidth = Math.max(40, (leftWidth - tabGap * 2) / 3);
-        int tabX = leftX;
-        contextTabStateButton = addRenderableWidget(Button.builder(Component.literal("State"), btn -> switchContextTab(ContextTab.STATE))
-                .bounds(tabX, row1Y, tabWidth, INPUT_HEIGHT).build());
-        contextTabStateButton.active = activeContextTab != ContextTab.STATE;
-        tabX += tabWidth + tabGap;
-        contextTabScriptButton = addRenderableWidget(Button.builder(Component.literal("Script"), btn -> switchContextTab(ContextTab.SCRIPT))
-                .bounds(tabX, row1Y, tabWidth, INPUT_HEIGHT).build());
-        contextTabScriptButton.active = activeContextTab != ContextTab.SCRIPT;
-        tabX += tabWidth + tabGap;
-        contextTabDiffButton = addRenderableWidget(Button.builder(Component.literal("Diff"), btn -> switchContextTab(ContextTab.DIFF))
-                .bounds(tabX, row1Y, tabWidth, INPUT_HEIGHT).build());
-        contextTabDiffButton.active = activeContextTab != ContextTab.DIFF;
+        // Explorer (left): VSCode-like file list
+        workspaceDocButtons.clear();
+        workspaceDocCreateButton = addRenderableWidget(Button.builder(Component.literal("+ New File"), btn -> createWorkspaceDoc())
+                .bounds(leftX, row1Y, explorerWidth, INPUT_HEIGHT).build());
+        List<ClientSessionState.WorkspaceDocInfo> docs = ClientSessionState.getWorkspaceDocs();
+        int docY = row1Y + INPUT_HEIGHT + rowGap;
+        int docBottom = this.height - CONTEXT_FOOTER_HEIGHT - 8;
+        for (ClientSessionState.WorkspaceDocInfo doc : docs) {
+            if (docY + INPUT_HEIGHT > docBottom) {
+                break;
+            }
+            String docName = doc.name() == null || doc.name().isBlank() ? doc.id() : doc.name();
+            int slash = docName.lastIndexOf('/');
+            String label = slash >= 0 ? docName.substring(slash + 1) : docName;
+            if (doc.hasPendingPatch()) {
+                label = label + " *";
+            }
+            Button docBtn = addRenderableWidget(Button.builder(Component.literal(label), btn -> switchWorkspaceDoc(doc.id()))
+                    .bounds(leftX, docY, explorerWidth, INPUT_HEIGHT).build());
+            docBtn.active = !doc.active();
+            workspaceDocButtons.add(docBtn);
+            docY += INPUT_HEIGHT + 1;
+        }
 
-        // Row 2: Action buttons (vary by tab)
+        // Editor controls (right)
+        int row1ButtonCount = 4;
+        int row1BtnWidth = Math.max(52, (editorWidth - rowGap * (row1ButtonCount - 1)) / row1ButtonCount);
+        int row1X = editorXBase;
+        contextTabScriptButton = addRenderableWidget(Button.builder(Component.literal("Script"), btn -> switchContextTab(ContextTab.SCRIPT))
+                .bounds(row1X, row1Y, row1BtnWidth, INPUT_HEIGHT).build());
+        contextTabScriptButton.active = activeContextTab != ContextTab.SCRIPT;
+        row1X += row1BtnWidth + rowGap;
+        contextTabDiffButton = addRenderableWidget(Button.builder(Component.literal("Diff"), btn -> switchContextTab(ContextTab.DIFF))
+                .bounds(row1X, row1Y, row1BtnWidth, INPUT_HEIGHT).build());
+        contextTabDiffButton.active = activeContextTab != ContextTab.DIFF;
+        row1X += row1BtnWidth + rowGap;
+        contextLoadButton = addRenderableWidget(Button.builder(Component.literal(activeContextTab == ContextTab.DIFF ? "Refresh" : "Fetch"), btn -> {
+                    if (activeContextTab == ContextTab.DIFF) {
+                        loadWorkspaceDiff();
+                    } else {
+                        fetchWorkspaceScript();
+                    }
+                })
+                .bounds(row1X, row1Y, row1BtnWidth, INPUT_HEIGHT).build());
+        row1X += row1BtnWidth + rowGap;
+        contextClearQueueButton = addRenderableWidget(Button.builder(Component.literal("Clear Ctx"), btn -> clearContextQueue())
+                .bounds(row1X, row1Y, row1BtnWidth, INPUT_HEIGHT).build());
+
+        // Row 2: Editor-specific actions
         int row2ButtonCount = 4;
-        int row2BtnWidth = Math.max(46, (leftWidth - rowGap * (row2ButtonCount - 1)) / row2ButtonCount);
-        int row2X = leftX;
+        int row2BtnWidth = Math.max(46, (editorWidth - rowGap * (row2ButtonCount - 1)) / row2ButtonCount);
+        int row2X = editorXBase;
         switch (activeContextTab) {
-            case STATE -> {
-                contextLoadButton = addRenderableWidget(Button.builder(Component.literal("Load"), btn -> loadWorkspaceStateJson())
-                        .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
-                row2X += row2BtnWidth + rowGap;
-                contextFormatButton = addRenderableWidget(Button.builder(Component.literal("Format"), btn -> formatContextJson())
-                        .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
-                row2X += row2BtnWidth + rowGap;
-                contextClearJsonButton = addRenderableWidget(Button.builder(Component.literal("Clear"), btn -> clearContextJson())
-                        .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
-                row2X += row2BtnWidth + rowGap;
-                contextClearQueueButton = addRenderableWidget(Button.builder(Component.literal("Clear Ctx"), btn -> clearContextQueue())
-                        .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
-            }
             case SCRIPT -> {
-                contextLoadButton = addRenderableWidget(Button.builder(Component.literal("Fetch"), btn -> fetchWorkspaceScript())
-                        .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
-                row2X += row2BtnWidth + rowGap;
                 contextFormatButton = addRenderableWidget(Button.builder(Component.literal("Format"), btn -> formatContextJson())
                         .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
                 row2X += row2BtnWidth + rowGap;
                 contextClearJsonButton = addRenderableWidget(Button.builder(Component.literal("Clear"), btn -> clearContextJson())
-                        .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
-                row2X += row2BtnWidth + rowGap;
-                contextClearQueueButton = addRenderableWidget(Button.builder(Component.literal("Clear Ctx"), btn -> clearContextQueue())
-                        .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
-            }
-            case DIFF -> {
-                contextLoadButton = addRenderableWidget(Button.builder(Component.literal("Refresh"), btn -> loadWorkspaceDiff())
                         .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
                 row2X += row2BtnWidth + rowGap;
                 contextDiffPrevButton = addRenderableWidget(Button.builder(Component.literal("<D"), btn -> navigateContextDiffChange(-1))
@@ -343,29 +369,41 @@ public class P2SChatScreen extends Screen {
                 row2X += row2BtnWidth + rowGap;
                 contextDiffNextButton = addRenderableWidget(Button.builder(Component.literal("D>"), btn -> navigateContextDiffChange(1))
                         .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
-                row2X += row2BtnWidth + rowGap;
-                contextClearQueueButton = addRenderableWidget(Button.builder(Component.literal("Clear Ctx"), btn -> clearContextQueue())
+            }
+            case DIFF -> {
+                contextDiffPrevButton = addRenderableWidget(Button.builder(Component.literal("<D"), btn -> navigateContextDiffChange(-1))
                         .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
+                row2X += row2BtnWidth + rowGap;
+                contextDiffNextButton = addRenderableWidget(Button.builder(Component.literal("D>"), btn -> navigateContextDiffChange(1))
+                        .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
+                row2X += row2BtnWidth + rowGap;
+                contextFormatButton = addRenderableWidget(Button.builder(Component.literal("Format"), btn -> formatContextJson())
+                        .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
+                row2X += row2BtnWidth + rowGap;
+                contextClearJsonButton = addRenderableWidget(Button.builder(Component.literal("Clear"), btn -> clearContextJson())
+                        .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
+            }
+            default -> {
             }
         }
 
         // Row 3: Range inputs + Add Range button
         int startWidth = 52;
         int endWidth = 52;
-        int addWidth = Math.max(80, leftWidth - startWidth - endWidth - rowGap * 2);
+        int addWidth = Math.max(80, editorWidth - startWidth - endWidth - rowGap * 2);
 
-        contextStartInput = new EditBox(this.font, leftX, row3Y, startWidth, INPUT_HEIGHT, Component.literal("start line"));
+        contextStartInput = new EditBox(this.font, editorXBase, row3Y, startWidth, INPUT_HEIGHT, Component.literal("start line"));
         contextStartInput.setMaxLength(8);
         contextStartInput.setHint(Component.literal("start"));
         addRenderableWidget(contextStartInput);
 
-        contextEndInput = new EditBox(this.font, leftX + startWidth + rowGap, row3Y, endWidth, INPUT_HEIGHT, Component.literal("end line"));
+        contextEndInput = new EditBox(this.font, editorXBase + startWidth + rowGap, row3Y, endWidth, INPUT_HEIGHT, Component.literal("end line"));
         contextEndInput.setMaxLength(8);
         contextEndInput.setHint(Component.literal("end"));
         addRenderableWidget(contextEndInput);
 
         contextAddRangeButton = addRenderableWidget(Button.builder(Component.literal("Add Range -> Ctx"), btn -> addSelectedRangeAsContext())
-                .bounds(leftX + startWidth + endWidth + rowGap * 2, row3Y, addWidth, INPUT_HEIGHT).build());
+                .bounds(editorXBase + startWidth + endWidth + rowGap * 2, row3Y, addWidth, INPUT_HEIGHT).build());
 
         if (activeContextTab == ContextTab.DIFF) {
             contextStartInput.active = false;
@@ -388,9 +426,9 @@ public class P2SChatScreen extends Screen {
         int rowStep = CONTEXT_ROW_HEIGHT + CONTEXT_ROW_GAP;
         contextVisibleRows = Math.max(4, Math.min(40, available / rowStep));
         int renderedRows = Math.max(1, contextVisibleRows);
-        contextEditorX = leftX;
+        contextEditorX = editorXBase;
         contextEditorY = editorTop;
-        contextEditorWidth = leftWidth;
+        contextEditorWidth = editorWidth;
         contextEditorHeight = renderedRows * rowStep - CONTEXT_ROW_GAP + CONTEXT_EDITOR_PADDING * 2;
         contextQueueTopY = contextEditorY + contextEditorHeight + 6;
 
@@ -418,11 +456,96 @@ public class P2SChatScreen extends Screen {
         setContextStatus("Loaded current workspace state", 0x55FF55);
     }
 
+    private void createWorkspaceDoc() {
+        JsonObject payload = new JsonObject();
+        int next = Math.max(1, ClientSessionState.getWorkspaceDocs().size() + 1);
+        payload.addProperty("name", "workspace/file-" + next + ".json");
+        payload.addProperty("switchToNew", true);
+        sendSessionAction("doc_create", payload.toString());
+        activeContextTab = ContextTab.SCRIPT;
+        contextLoadedDocId = "";
+        setContextStatus("Creating new file...", 0xAAAAAA);
+        createWidgets();
+    }
+
+    private void switchWorkspaceDoc(String docId) {
+        if (docId == null || docId.isBlank()) {
+            return;
+        }
+        JsonObject payload = new JsonObject();
+        payload.addProperty("id", docId);
+        sendSessionAction("doc_switch", payload.toString());
+        activeContextTab = ContextTab.SCRIPT;
+        contextLoadedDocId = "";
+        clearContextDiffView();
+        setContextStatus("Switching file...", 0xAAAAAA);
+        createWidgets();
+    }
+
+    private JsonObject workspaceReadArgs(boolean committed) {
+        JsonObject args = new JsonObject();
+        args.addProperty("committed", committed);
+        String activeDocId = ClientSessionState.getActiveDocId();
+        if (activeDocId != null && !activeDocId.isBlank()) {
+            args.addProperty("doc_id", activeDocId);
+        }
+        return args;
+    }
+
+    private void syncActiveDocScriptIfNeeded() {
+        if (activeContextTab != ContextTab.SCRIPT || contextDiffMode) {
+            return;
+        }
+        String activeDocId = ClientSessionState.getActiveDocId();
+        if (activeDocId == null || activeDocId.isBlank()) {
+            return;
+        }
+        if (activeDocId.equals(contextLoadedDocId)) {
+            return;
+        }
+        String script = ClientSessionState.getCurrentScriptJson();
+        if (script == null || script.isBlank()) {
+            setContextJsonText("{\n}\n");
+            contextLoadedDocId = activeDocId;
+            return;
+        }
+        setContextJsonText(script);
+        contextLoadedDocId = activeDocId;
+    }
+
+    private void refreshWorkspaceExplorerIfNeeded() {
+        StringBuilder sb = new StringBuilder();
+        sb.append(ClientSessionState.getActiveDocId()).append('|');
+        List<ClientSessionState.WorkspaceDocInfo> docs = ClientSessionState.getWorkspaceDocs();
+        sb.append(docs.size());
+        for (ClientSessionState.WorkspaceDocInfo doc : docs) {
+            if (doc == null) {
+                continue;
+            }
+            sb.append('|').append(doc.id())
+                    .append(':').append(doc.name())
+                    .append(':').append(doc.active())
+                    .append(':').append(doc.hasPendingPatch())
+                    .append(':').append(doc.revision());
+        }
+        String signature = sb.toString();
+        if (signature.equals(workspaceUiSignature)) {
+            return;
+        }
+        workspaceUiSignature = signature;
+        createWidgets();
+    }
+
     private String activeContextFileName() {
+        String activeDocName = ClientSessionState.getActiveDocName();
+        if (activeDocName == null || activeDocName.isBlank()) {
+            String activeDocId = ClientSessionState.getActiveDocId();
+            activeDocName = (activeDocId == null || activeDocId.isBlank()) ? "workspace/main.json" : activeDocId + ".json";
+        }
         return switch (activeContextTab) {
             case STATE -> "workspace-state.json";
-            case SCRIPT -> "workspace-script.json";
-            case DIFF -> "workspace-diff";
+            case SCRIPT -> activeDocName;
+            case DIFF -> activeDocName + ".diff";
         };
     }
 
@@ -503,7 +626,7 @@ public class P2SChatScreen extends Screen {
         scriptLoading = true;
         setContextStatus("Fetching script...", 0xAAAAAA);
 
-        ClientToolBridge.call("read_workspace_state", new JsonObject())
+        ClientToolBridge.call("read_workspace_state", workspaceReadArgs(true))
                 .thenAccept(result -> {
                     Minecraft mc = this.minecraft;
                     if (mc != null) {
@@ -518,6 +641,7 @@ public class P2SChatScreen extends Screen {
                             }
                             if (activeContextTab == ContextTab.SCRIPT) {
                                 setContextJsonText(scriptText);
+                                contextLoadedDocId = ClientSessionState.getActiveDocId();
                             } else {
                                 // Update cache only
                                 scriptJsonLines.clear();
@@ -531,6 +655,7 @@ public class P2SChatScreen extends Screen {
                                 scriptCursorLine = 0;
                                 scriptCursorColumn = 0;
                                 scriptScroll = 0;
+                                contextLoadedDocId = ClientSessionState.getActiveDocId();
                             }
                         });
                     }
@@ -551,10 +676,8 @@ public class P2SChatScreen extends Screen {
     private void loadWorkspaceDiff() {
         setContextStatus("Loading workspace diff...", 0xAAAAAA);
 
-        JsonObject committedArgs = new JsonObject();
-        committedArgs.addProperty("committed", true);
-        JsonObject stagedArgs = new JsonObject();
-        stagedArgs.addProperty("committed", false);
+        JsonObject committedArgs = workspaceReadArgs(true);
+        JsonObject stagedArgs = workspaceReadArgs(false);
 
         ClientToolBridge.call("read_workspace_state", committedArgs)
                 .thenCombine(ClientToolBridge.call("read_workspace_state", stagedArgs), (committed, staged) -> {
@@ -1488,14 +1611,12 @@ public class P2SChatScreen extends Screen {
     }
 
     private void refreshContextDiffControls() {
-        if (activeContextTab == ContextTab.DIFF) {
-            boolean hasChanges = contextDiffMode && !contextDiffChangeRows.isEmpty();
-            if (contextDiffPrevButton != null) {
-                contextDiffPrevButton.active = hasChanges;
-            }
-            if (contextDiffNextButton != null) {
-                contextDiffNextButton.active = hasChanges;
-            }
+        boolean hasChanges = activeContextTab == ContextTab.DIFF && contextDiffMode && !contextDiffChangeRows.isEmpty();
+        if (contextDiffPrevButton != null) {
+            contextDiffPrevButton.active = hasChanges;
+        }
+        if (contextDiffNextButton != null) {
+            contextDiffNextButton.active = hasChanges;
         }
     }
 
@@ -1902,6 +2023,8 @@ public class P2SChatScreen extends Screen {
             redoButton.active = active;
         }
         refreshContextDiffControls();
+        refreshWorkspaceExplorerIfNeeded();
+        syncActiveDocScriptIfNeeded();
 
         int panelWidth = getPanelWidth();
         int panelX = getPanelX(panelWidth);
@@ -1949,12 +2072,16 @@ public class P2SChatScreen extends Screen {
 
         int x = PADDING;
         int y = PADDING;
-        gfx.drawString(this.font, "Context JSON", x, y, 0xE8F0FF, true);
+        gfx.drawString(this.font, "Workspace Files", x, y, 0xE8F0FF, true);
         y += this.font.lineHeight + 2;
+        String docName = ClientSessionState.getActiveDocName();
+        if (docName == null || docName.isBlank()) {
+            docName = "workspace/main.json";
+        }
         String modeHint = switch (activeContextTab) {
-            case STATE -> "workspace-state.json — session info";
-            case SCRIPT -> "workspace-script.json — VBS palette + structures";
-            case DIFF -> "Inline diff view (committed vs staged) [F7 nav]";
+            case STATE -> "State view";
+            case SCRIPT -> docName + " (script)";
+            case DIFF -> docName + " diff (committed vs staged) [F7 nav]";
         };
         gfx.drawString(this.font, modeHint, x, y, 0x9CAECC, false);
 

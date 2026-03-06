@@ -41,8 +41,8 @@ public final class ClientAgentManager {
             - Keep an explicit todo list with the todo tool (actions: get/set/upsert/delete/clear).
             - Before asking the user to choose among alternatives, call request_user_choice.
             - After request_user_choice, wait for user selection before continuing execution.
-            - Use read_workspace_state first when workspace size/current blocks context is required.
-            - Propose edits with propose_patch and wait for user apply/discard decision.
+            - Use read_workspace_state first when workspace size/current blocks context is required (optionally set doc_id for a specific file).
+            - Propose edits with propose_patch and wait for user apply/discard decision (optionally set doc_id for a specific file).
             - Use search_block_ids when unsure about block id names.
             - Use list_profiles/get_profile before creating subagents when profile choice matters.
             - Use create_subagent for delegated tasks, then poll with get_subagent.
@@ -1042,7 +1042,8 @@ public final class ClientAgentManager {
     private static String buildStartPayload(LocalSession session) {
         boolean hasSpatial = session.originX != 0 || session.originY != 0 || session.originZ != 0 || session.hasSize;
         boolean hasScript = session.currentScriptJson != null && !session.currentScriptJson.isBlank();
-        if (!hasSpatial && !hasScript) {
+        boolean hasWorkspaceDocs = session.workspaceDocsJson != null && !session.workspaceDocsJson.isBlank();
+        if (!hasSpatial && !hasScript && !hasWorkspaceDocs) {
             return "";
         }
         JsonObject json = new JsonObject();
@@ -1053,6 +1054,18 @@ public final class ClientAgentManager {
         json.addProperty("sizeX", session.sizeX);
         json.addProperty("sizeY", session.sizeY);
         json.addProperty("sizeZ", session.sizeZ);
+        if (session.activeDocId != null && !session.activeDocId.isBlank()) {
+            json.addProperty("activeDocId", session.activeDocId);
+        }
+        if (hasWorkspaceDocs) {
+            try {
+                JsonElement docsElem = JsonParser.parseString(session.workspaceDocsJson);
+                if (docsElem.isJsonArray()) {
+                    json.add("workspaceDocs", docsElem.getAsJsonArray());
+                }
+            } catch (Exception ignored) {
+            }
+        }
         if (hasScript) {
             json.addProperty("currentScriptJson", session.currentScriptJson);
         }
@@ -1195,6 +1208,41 @@ public final class ClientAgentManager {
                 title = "Session " + session.id.substring(0, 8);
             }
 
+            JsonArray workspaceDocsArray = new JsonArray();
+            List<ClientSessionState.WorkspaceDocInfo> workspaceDocs = ClientSessionState.getWorkspaceDocs();
+            Map<String, String> workspaceDocScripts = ClientSessionState.getWorkspaceDocScripts();
+            String activeDocId = ClientSessionState.getActiveDocId();
+            String activeScriptJson = ClientSessionState.getCurrentScriptJson();
+            for (ClientSessionState.WorkspaceDocInfo doc : workspaceDocs) {
+                if (doc == null || doc.id() == null || doc.id().isBlank()) {
+                    continue;
+                }
+                JsonObject docObj = new JsonObject();
+                docObj.addProperty("id", doc.id());
+                docObj.addProperty("name", doc.name() == null ? "" : doc.name());
+                docObj.addProperty("revision", doc.revision() == null ? "" : doc.revision());
+                docObj.addProperty("originX", doc.originX());
+                docObj.addProperty("originY", doc.originY());
+                docObj.addProperty("originZ", doc.originZ());
+                docObj.addProperty("hasSize", doc.hasSize());
+                docObj.addProperty("sizeX", doc.sizeX());
+                docObj.addProperty("sizeY", doc.sizeY());
+                docObj.addProperty("sizeZ", doc.sizeZ());
+
+                String scriptJson = workspaceDocScripts.get(doc.id());
+                if ((scriptJson == null || scriptJson.isBlank()) && doc.id().equals(activeDocId)) {
+                    scriptJson = activeScriptJson;
+                }
+                if (scriptJson != null && !scriptJson.isBlank()) {
+                    docObj.addProperty("currentScriptJson", scriptJson);
+                }
+                workspaceDocsArray.add(docObj);
+            }
+            String workspaceDocsJson = workspaceDocsArray.size() <= 0 ? "" : GSON.toJson(workspaceDocsArray);
+            session.activeDocId = activeDocId == null ? "" : activeDocId;
+            session.workspaceDocsJson = workspaceDocsJson;
+            session.currentScriptJson = activeScriptJson == null ? "" : activeScriptJson;
+
             SessionPersistence.SavedSession saved = new SessionPersistence.SavedSession(
                     session.id,
                     title,
@@ -1212,7 +1260,9 @@ public final class ClientAgentManager {
                     session.sizeX,
                     session.sizeY,
                     session.sizeZ,
-                    ClientSessionState.getCurrentScriptJson()
+                    session.activeDocId,
+                    session.workspaceDocsJson,
+                    session.currentScriptJson
             );
 
             CompletableFuture.runAsync(() -> SessionPersistence.saveSession(saved));
@@ -1261,6 +1311,8 @@ public final class ClientAgentManager {
             session.sizeX = saved.sizeX();
             session.sizeY = saved.sizeY();
             session.sizeZ = saved.sizeZ();
+            session.activeDocId = saved.activeDocId() == null ? "" : saved.activeDocId();
+            session.workspaceDocsJson = saved.workspaceDocsJson() == null ? "" : saved.workspaceDocsJson();
             session.currentScriptJson = saved.currentScriptJson() == null ? "" : saved.currentScriptJson();
             currentSession = session;
         }
@@ -1331,6 +1383,8 @@ public final class ClientAgentManager {
         int originX, originY, originZ;
         boolean hasSize;
         int sizeX, sizeY, sizeZ;
+        String activeDocId = "";
+        String workspaceDocsJson = "";
         String currentScriptJson = "";
     }
 }

@@ -40,6 +40,8 @@ public final class SessionPersistence {
             int originX, int originY, int originZ,
             boolean hasSize,
             int sizeX, int sizeY, int sizeZ,
+            String activeDocId,
+            String workspaceDocsJson,
             String currentScriptJson
     ) {
     }
@@ -103,6 +105,8 @@ public final class SessionPersistence {
             sessionJson.addProperty("sizeX", session.sizeX());
             sessionJson.addProperty("sizeY", session.sizeY());
             sessionJson.addProperty("sizeZ", session.sizeZ());
+            sessionJson.addProperty("activeDocId", session.activeDocId() == null ? "" : session.activeDocId());
+            sessionJson.addProperty("workspaceDocsJson", session.workspaceDocsJson() == null ? "" : session.workspaceDocsJson());
             sessionJson.addProperty("currentScriptJson", session.currentScriptJson() == null ? "" : session.currentScriptJson());
 
             Path sessionFile = SESSIONS_DIR.resolve(session.id() + ".json");
@@ -209,6 +213,8 @@ public final class SessionPersistence {
                     getInt(root, "sizeX"),
                     getInt(root, "sizeY"),
                     getInt(root, "sizeZ"),
+                    getStr(root, "activeDocId"),
+                    getStr(root, "workspaceDocsJson"),
                     getStr(root, "currentScriptJson")
             );
         } catch (Exception e) {

@@ -18,6 +18,7 @@ import net.minecraft.server.level.ServerPlayer;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -38,14 +39,20 @@ public final class SessionManager {
     private static final int MAX_PREVIEW_OPERATION_LINES = 40;
     private static final int MAX_PREVIEW_WARNING_LINES = 20;
     private static final int MAX_CHECKPOINTS = 24;
+    private static final int MAX_DOCS_PER_SESSION = 64;
+    private static final String DOC_ROOT = "workspace";
+    private static final String DEFAULT_DOC_ID = "doc-main";
+    private static final String DEFAULT_DOC_NAME = DOC_ROOT + "/main.json";
 
     private static final String SESSION_TOOL_CONTRACT = """
             ## IDE Session Contract
-            - Use read_workspace_state first when you need workspace size and existing blocks.
+            - Workspace contains multiple files (documents). Use read_workspace_state first when you need file size and existing blocks.
+              - Optional doc_id selects file; if omitted, reads current active file.
               - Returns only size + current script (or truncated script_json).
               - Default reads committed script; committed=false can include staged script for UI diff.
             - Propose all edits with propose_patch; do not directly build blocks.
-            - The user reviews a preview and confirms apply/discard.
+              - Optional doc_id selects file; if omitted, patch current active file.
+            - The user reviews a preview and confirms apply/discard for the active file.
             - Use search_block_ids when unsure about a block id.
             - If propose_patch returns errors or warnings, adjust the patch before asking user to apply.
             - Keep patches minimal and focused on requested changes.
@@ -68,6 +75,10 @@ public final class SessionManager {
         }
 
         Session session = ensureSession(player);
+        persistActiveDocument(session);
+        if (session != null && session.activeDocId != null && !session.activeDocId.isBlank()) {
+            loadActiveDocument(session, session.activeDocId);
+        }
         String playerName = player.getGameProfile().getName();
         String sessionId = session == null ? "-" : session.id;
         int msgLen = safeLength(message);
@@ -195,7 +206,7 @@ public final class SessionManager {
             }
 
             if (toolResult.autoApplyRequested) {
-                toolResult.autoApplied = commitPendingPatch(player, session, true);
+                toolResult.autoApplied = commitPendingPatch(player, session, true, toolResult.autoApplyDocId);
             }
 
             if (result.textContent() != null && !result.textContent().isBlank()) {
@@ -266,6 +277,7 @@ public final class SessionManager {
         if (toolCalls == null || toolCalls.isEmpty()) {
             return result;
         }
+        persistActiveDocument(session);
 
         for (LLMService.ToolCall call : toolCalls) {
             if (call == null || call.name() == null) {
@@ -287,6 +299,14 @@ public final class SessionManager {
                     }
                 }
                 case "propose_patch" -> {
+                    String targetDocId = parseOptionalDocId(call.arguments());
+                    if (!targetDocId.isBlank() && !targetDocId.equals(session.activeDocId)) {
+                        if (!switchActiveDocument(session, targetDocId)) {
+                            result.toolMessages.add(buildToolMessage(call, buildToolError(toolName, "Unknown doc_id: " + targetDocId)));
+                            session.runtimeState = RuntimeState.FAILED;
+                            break;
+                        }
+                    }
                     session.runtimeState = RuntimeState.VALIDATING;
                     PatchModels.StructurePatch patch = parsePatchArguments(call.arguments());
                     if (P2SMod.DEBUG) {
@@ -390,6 +410,7 @@ public final class SessionManager {
                     session.runtimeState = RuntimeState.PATCH_GENERATED;
 
                     JsonObject payload = buildToolSuccess(toolName);
+                    payload.addProperty("doc_id", session.activeDocId == null ? "" : session.activeDocId);
                     payload.addProperty("preview", pending.preview.summary);
                     payload.addProperty("changed", pending.preview.changedBlocks);
                     payload.addProperty("risk", pending.preview.riskLevel);
@@ -406,6 +427,7 @@ public final class SessionManager {
 
                     result.previewUpdated = true;
                     result.autoApplyRequested = !validation.requiresConfirm;
+                    result.autoApplyDocId = session.activeDocId == null ? "" : session.activeDocId;
                     P2SMod.LOGGER.info("AgentLoop tool propose_patch ok -> player={}, session={}, changed={}, risk={}",
                             playerName, sessionId, pending.preview.changedBlocks, pending.preview.riskLevel);
                 }
@@ -448,6 +470,7 @@ public final class SessionManager {
         if (session.pendingPatch != null) {
             session.runtimeState = RuntimeState.AWAITING_CONFIRM;
         }
+        persistActiveDocument(session);
         return result;
     }
 
@@ -468,6 +491,9 @@ public final class SessionManager {
             case "save" -> save(player, payload);
             case "apply" -> applyPendingPatch(player);
             case "discard" -> discardPendingPatch(player, payload);
+            case "doc_create" -> createDocument(player, payload);
+            case "doc_switch" -> switchDocument(player, payload);
+            case "doc_rename" -> renameDocument(player, payload);
             case "create_checkpoint" -> createCheckpoint(player, payload);
             case "rollback_checkpoint" -> rollbackCheckpoint(player, payload);
             default -> player.displayClientMessage(Component.literal("Unknown session action: " + action), false);
@@ -505,7 +531,7 @@ public final class SessionManager {
             LLMService.ToolCall call = new LLMService.ToolCall(rid, normalizedTool, arguments);
             ToolCallProcessingResult toolResult = processToolCalls(session, List.of(call), playerName, sessionId);
             if (toolResult.autoApplyRequested) {
-                toolResult.autoApplied = commitPendingPatch(player, session, true);
+                toolResult.autoApplied = commitPendingPatch(player, session, true, toolResult.autoApplyDocId);
             }
 
             JsonObject payload = extractToolBridgePayload(toolResult, normalizedTool);
@@ -529,20 +555,27 @@ public final class SessionManager {
             return null;
         }
 
+        JsonObject startJson = null;
         BlockPos restoredOrigin = null;
         Vec3i restoredSize = null;
         if (payload != null && !payload.isBlank()) {
             try {
-                JsonObject json = JsonParser.parseString(payload).getAsJsonObject();
-                if (json.has("originX") && json.has("originY") && json.has("originZ")) {
+                startJson = JsonParser.parseString(payload).getAsJsonObject();
+                JsonObject json = startJson;
+                if (json.has("originX") && json.has("originY") && json.has("originZ")
+                        && json.get("originX").isJsonPrimitive()
+                        && json.get("originY").isJsonPrimitive()
+                        && json.get("originZ").isJsonPrimitive()) {
                     restoredOrigin = new BlockPos(
                             json.get("originX").getAsInt(),
                             json.get("originY").getAsInt(),
                             json.get("originZ").getAsInt()
                     );
                 }
-                if (json.has("hasSize") && json.get("hasSize").getAsBoolean()
-                        && json.has("sizeX") && json.has("sizeY") && json.has("sizeZ")) {
+                if (json.has("hasSize") && json.get("hasSize").isJsonPrimitive() && json.get("hasSize").getAsBoolean()
+                        && json.has("sizeX") && json.get("sizeX").isJsonPrimitive()
+                        && json.has("sizeY") && json.get("sizeY").isJsonPrimitive()
+                        && json.has("sizeZ") && json.get("sizeZ").isJsonPrimitive()) {
                     restoredSize = new Vec3i(
                             json.get("sizeX").getAsInt(),
                             json.get("sizeY").getAsInt(),
@@ -551,6 +584,7 @@ public final class SessionManager {
                 }
             } catch (Exception e) {
                 P2SMod.LOGGER.debug("Could not parse start payload as origin/size: {}", e.getMessage());
+                startJson = null;
             }
         }
 
@@ -561,12 +595,84 @@ public final class SessionManager {
             session = createSession(player);
         }
 
-        if (payload != null && !payload.isBlank()) {
+        if (startJson != null) {
             try {
-                JsonObject json = JsonParser.parseString(payload).getAsJsonObject();
-                if (json.has("currentScriptJson")) {
-                    String scriptJson = json.get("currentScriptJson").getAsString();
-                    if (scriptJson != null && !scriptJson.isBlank()) {
+                if (startJson.has("workspaceDocs") && startJson.get("workspaceDocs").isJsonArray()) {
+                    Map<String, DocumentState> restoredDocs = new LinkedHashMap<>();
+                    for (JsonElement docElem : startJson.getAsJsonArray("workspaceDocs")) {
+                        if (docElem == null || !docElem.isJsonObject()) {
+                            continue;
+                        }
+                        JsonObject docJson = docElem.getAsJsonObject();
+                        String docId = getString(docJson, "id");
+                        String docName = getString(docJson, "name");
+                        if (docId.isBlank()) {
+                            continue;
+                        }
+
+                        BlockPos docOrigin = restoredOrigin;
+                        if (docJson.has("originX") && docJson.has("originY") && docJson.has("originZ")
+                                && docJson.get("originX").isJsonPrimitive()
+                                && docJson.get("originY").isJsonPrimitive()
+                                && docJson.get("originZ").isJsonPrimitive()) {
+                            docOrigin = new BlockPos(
+                                    docJson.get("originX").getAsInt(),
+                                    docJson.get("originY").getAsInt(),
+                                    docJson.get("originZ").getAsInt()
+                            );
+                        }
+
+                        Vec3i docSize = restoredSize;
+                        if (docJson.has("hasSize") && docJson.get("hasSize").isJsonPrimitive() && docJson.get("hasSize").getAsBoolean()
+                                && docJson.has("sizeX") && docJson.get("sizeX").isJsonPrimitive()
+                                && docJson.has("sizeY") && docJson.get("sizeY").isJsonPrimitive()
+                                && docJson.has("sizeZ") && docJson.get("sizeZ").isJsonPrimitive()) {
+                            docSize = new Vec3i(
+                                    docJson.get("sizeX").getAsInt(),
+                                    docJson.get("sizeY").getAsInt(),
+                                    docJson.get("sizeZ").getAsInt()
+                            );
+                        }
+
+                        StructureBuilder.VbsScriptV2 restoredScript = null;
+                        String docScriptJson = getString(docJson, "currentScriptJson");
+                        if (!docScriptJson.isBlank()) {
+                            try {
+                                restoredScript = GSON.fromJson(docScriptJson, StructureBuilder.VbsScriptV2.class);
+                            } catch (Exception ignored) {
+                            }
+                        }
+
+                        String docRevision = getString(docJson, "revision");
+                        if (docRevision.isBlank()) {
+                            docRevision = restoredScript == null ? "rev-0" : "rev-restored";
+                        }
+
+                        String normalizedId = normalizeDocId(docId, restoredDocs);
+                        String normalizedName = normalizeDocName(docName);
+                        if (normalizedName.isBlank()) {
+                            normalizedName = buildDefaultDocName(restoredDocs.size() + 1);
+                        }
+                        DocumentState doc = newDocumentState(normalizedId, normalizedName, docOrigin, docSize, restoredScript, docRevision);
+                        restoredDocs.put(doc.id, doc);
+                    }
+
+                    if (!restoredDocs.isEmpty()) {
+                        session.docs.clear();
+                        session.docs.putAll(restoredDocs);
+                        session.nextDocIndex = Math.max(1, restoredDocs.size() + 1);
+
+                        String activeDocId = getString(startJson, "activeDocId");
+                        String selectedDocId = activeDocId;
+                        if (selectedDocId == null || selectedDocId.isBlank() || !session.docs.containsKey(selectedDocId)) {
+                            selectedDocId = restoredDocs.keySet().iterator().next();
+                        }
+                        session.activeDocId = selectedDocId;
+                        loadActiveDocument(session, selectedDocId);
+                    }
+                } else if (startJson.has("currentScriptJson")) {
+                    String scriptJson = getString(startJson, "currentScriptJson");
+                    if (!scriptJson.isBlank()) {
                         StructureBuilder.VbsScriptV2 restored = GSON.fromJson(scriptJson, StructureBuilder.VbsScriptV2.class);
                         if (restored != null) {
                             session.current = restored;
@@ -579,6 +685,7 @@ public final class SessionManager {
             }
         }
 
+        persistActiveDocument(session);
         sessions.put(player.getUUID(), session);
         sendSessionSync(player, session);
         sendPatchPreview(player, null);
@@ -593,6 +700,7 @@ public final class SessionManager {
             return;
         }
         Session removed = sessions.remove(player.getUUID());
+        persistActiveDocument(removed);
         sendSessionSync(player, null);
         sendPatchPreview(player, null);
         P2SMod.LOGGER.info("Session end -> player={}, session={}, turns={}, parts={}, blocks={}",
@@ -610,6 +718,12 @@ public final class SessionManager {
         }
         Session session = sessions.get(player.getUUID());
         if (session == null || session.undoStack.isEmpty()) {
+            player.displayClientMessage(Component.literal("Nothing to undo"), false);
+            return;
+        }
+        persistActiveDocument(session);
+        loadActiveDocument(session, session.activeDocId);
+        if (session.undoStack.isEmpty()) {
             player.displayClientMessage(Component.literal("Nothing to undo"), false);
             return;
         }
@@ -638,6 +752,12 @@ public final class SessionManager {
             player.displayClientMessage(Component.literal("Nothing to redo"), false);
             return;
         }
+        persistActiveDocument(session);
+        loadActiveDocument(session, session.activeDocId);
+        if (session.redoStack.isEmpty()) {
+            player.displayClientMessage(Component.literal("Nothing to redo"), false);
+            return;
+        }
 
         CommitEntry commit = session.redoStack.pop();
         StructurePatchEngine.applyBlockOps(player.serverLevel(), session.origin, commit.forwardOps);
@@ -663,6 +783,12 @@ public final class SessionManager {
             player.displayClientMessage(Component.literal("No active session or empty structure"), false);
             return;
         }
+        persistActiveDocument(session);
+        loadActiveDocument(session, session.activeDocId);
+        if (session.current == null) {
+            player.displayClientMessage(Component.literal("No active session or empty structure"), false);
+            return;
+        }
         String saved = ScriptStorage.saveV2("session", session.current, "session", name);
         P2SMod.LOGGER.info("Session save -> player={}, session={}, name={}",
                 player.getGameProfile().getName(), session.id, saved);
@@ -671,6 +797,374 @@ public final class SessionManager {
 
     public static Session getSession(UUID playerId) {
         return sessions.get(playerId);
+    }
+
+    private static void createDocument(ServerPlayer player, String payload) {
+        if (player == null) {
+            return;
+        }
+        Session session = sessions.get(player.getUUID());
+        if (session == null) {
+            player.displayClientMessage(Component.literal("No active session"), false);
+            return;
+        }
+        persistActiveDocument(session);
+        loadActiveDocument(session, session.activeDocId);
+        if (session.inFlight) {
+            player.displayClientMessage(Component.literal("Busy with current request"), false);
+            return;
+        }
+
+        String requestedName = "";
+        String requestedId = "";
+        boolean switchToNew = true;
+        if (payload != null && !payload.isBlank()) {
+            try {
+                JsonObject obj = JsonParser.parseString(payload).getAsJsonObject();
+                requestedName = getString(obj, "name");
+                requestedId = getString(obj, "id");
+                if (obj.has("switchToNew") && obj.get("switchToNew").isJsonPrimitive()) {
+                    switchToNew = obj.get("switchToNew").getAsBoolean();
+                }
+            } catch (Exception e) {
+                requestedName = payload.trim();
+            }
+        }
+
+        persistActiveDocument(session);
+        DocumentState activeDoc = getActiveDocument(session);
+        if (session.docs.size() >= MAX_DOCS_PER_SESSION) {
+            player.displayClientMessage(Component.literal("Maximum documents reached: " + MAX_DOCS_PER_SESSION), false);
+            return;
+        }
+
+        String docId = normalizeDocId(requestedId, session.docs);
+        if (docId.isBlank()) {
+            docId = normalizeDocId("doc-" + (session.nextDocIndex++), session.docs);
+        }
+        String normalizedName = normalizeDocName(requestedName);
+        if (normalizedName.isBlank()) {
+            normalizedName = buildDefaultDocName(session.nextDocIndex++);
+        }
+        normalizedName = ensureUniqueDocName(session, normalizedName, null);
+
+        BlockPos origin = activeDoc == null ? session.origin : activeDoc.origin;
+        Vec3i size = activeDoc == null ? session.size : activeDoc.size;
+        DocumentState doc = newDocumentState(docId, normalizedName, origin, size, null, "rev-0");
+        session.docs.put(doc.id, doc);
+
+        if (switchToNew) {
+            switchActiveDocument(session, doc.id);
+        }
+        sendPatchPreview(player, session.pendingPatch == null ? null : session.pendingPatch.preview);
+        sendSessionSync(player, session);
+        player.displayClientMessage(Component.literal("Document created: " + doc.name), false);
+    }
+
+    private static void switchDocument(ServerPlayer player, String payload) {
+        if (player == null) {
+            return;
+        }
+        Session session = sessions.get(player.getUUID());
+        if (session == null) {
+            player.displayClientMessage(Component.literal("No active session"), false);
+            return;
+        }
+        if (session.inFlight) {
+            player.displayClientMessage(Component.literal("Busy with current request"), false);
+            return;
+        }
+
+        String docId = "";
+        if (payload != null && !payload.isBlank()) {
+            try {
+                JsonObject obj = JsonParser.parseString(payload).getAsJsonObject();
+                docId = getString(obj, "id");
+            } catch (Exception ignored) {
+                docId = payload.trim();
+            }
+        }
+        if (docId.isBlank()) {
+            player.displayClientMessage(Component.literal("Missing doc id"), false);
+            return;
+        }
+
+        persistActiveDocument(session);
+        DocumentState before = getActiveDocument(session);
+        boolean hadPending = before != null && before.pendingPatch != null;
+        if (!switchActiveDocument(session, docId)) {
+            player.displayClientMessage(Component.literal("Document not found: " + docId), false);
+            return;
+        }
+
+        sendPatchPreview(player, session.pendingPatch == null ? null : session.pendingPatch.preview);
+        sendSessionSync(player, session);
+        if (hadPending) {
+            player.displayClientMessage(Component.literal("Switched document. Previous pending patch was stashed."), false);
+        } else {
+            player.displayClientMessage(Component.literal("Switched document: " + session.activeDocId), false);
+        }
+    }
+
+    private static void renameDocument(ServerPlayer player, String payload) {
+        if (player == null) {
+            return;
+        }
+        Session session = sessions.get(player.getUUID());
+        if (session == null) {
+            player.displayClientMessage(Component.literal("No active session"), false);
+            return;
+        }
+        if (session.inFlight) {
+            player.displayClientMessage(Component.literal("Busy with current request"), false);
+            return;
+        }
+        if (payload == null || payload.isBlank()) {
+            player.displayClientMessage(Component.literal("Missing rename payload"), false);
+            return;
+        }
+
+        String docId = "";
+        String name = "";
+        try {
+            JsonObject obj = JsonParser.parseString(payload).getAsJsonObject();
+            docId = getString(obj, "id");
+            name = getString(obj, "name");
+        } catch (Exception ignored) {
+            player.displayClientMessage(Component.literal("Invalid rename payload"), false);
+            return;
+        }
+        if (docId.isBlank() || name.isBlank()) {
+            player.displayClientMessage(Component.literal("Rename requires id and name"), false);
+            return;
+        }
+
+        persistActiveDocument(session);
+        DocumentState doc = session.docs.get(docId.trim());
+        if (doc == null) {
+            player.displayClientMessage(Component.literal("Document not found: " + docId), false);
+            return;
+        }
+
+        String normalized = normalizeDocName(name);
+        if (normalized.isBlank()) {
+            player.displayClientMessage(Component.literal("Invalid document name"), false);
+            return;
+        }
+        normalized = ensureUniqueDocName(session, normalized, doc.id);
+        doc.name = normalized;
+
+        if (doc.id.equals(session.activeDocId)) {
+            loadActiveDocument(session, doc.id);
+        }
+        sendSessionSync(player, session);
+        player.displayClientMessage(Component.literal("Renamed document: " + normalized), false);
+    }
+
+    private static DocumentState getActiveDocument(Session session) {
+        if (session == null) {
+            return null;
+        }
+        if (session.docs == null || session.docs.isEmpty()) {
+            session.docs = new LinkedHashMap<>();
+            DocumentState doc = newDocumentState(DEFAULT_DOC_ID, DEFAULT_DOC_NAME, session.origin, session.size, session.current, session.revision);
+            session.docs.put(doc.id, doc);
+            session.activeDocId = doc.id;
+        }
+        if (session.activeDocId == null || session.activeDocId.isBlank() || !session.docs.containsKey(session.activeDocId)) {
+            session.activeDocId = session.docs.keySet().iterator().next();
+        }
+        return session.docs.get(session.activeDocId);
+    }
+
+    private static void persistActiveDocument(Session session) {
+        if (session == null) {
+            return;
+        }
+        DocumentState active = getActiveDocument(session);
+        if (active == null) {
+            return;
+        }
+        active.origin = session.origin;
+        active.size = session.size;
+        active.current = copyScript(session.current);
+        active.revision = session.revision == null || session.revision.isBlank() ? "rev-0" : session.revision;
+        active.pendingPatch = session.pendingPatch;
+        active.undoStack = session.undoStack == null ? new ArrayDeque<>() : session.undoStack;
+        active.redoStack = session.redoStack == null ? new ArrayDeque<>() : session.redoStack;
+        active.checkpoints = session.checkpoints == null ? new ArrayList<>() : session.checkpoints;
+    }
+
+    private static void loadActiveDocument(Session session, String docId) {
+        if (session == null) {
+            return;
+        }
+        if (session.docs == null || session.docs.isEmpty()) {
+            DocumentState doc = newDocumentState(DEFAULT_DOC_ID, DEFAULT_DOC_NAME, session.origin, session.size, session.current, session.revision);
+            session.docs = new LinkedHashMap<>();
+            session.docs.put(doc.id, doc);
+            session.activeDocId = doc.id;
+        }
+
+        DocumentState doc = session.docs.get(docId);
+        if (doc == null) {
+            doc = getActiveDocument(session);
+            if (doc == null) {
+                return;
+            }
+        } else {
+            session.activeDocId = doc.id;
+        }
+
+        session.origin = doc.origin;
+        session.size = doc.size;
+        session.current = copyScript(doc.current);
+        session.revision = doc.revision == null || doc.revision.isBlank() ? "rev-0" : doc.revision;
+        session.pendingPatch = doc.pendingPatch;
+        session.undoStack = doc.undoStack == null ? new ArrayDeque<>() : doc.undoStack;
+        session.redoStack = doc.redoStack == null ? new ArrayDeque<>() : doc.redoStack;
+        session.checkpoints = doc.checkpoints == null ? new ArrayList<>() : doc.checkpoints;
+    }
+
+    private static boolean switchActiveDocument(Session session, String docId) {
+        if (session == null || docId == null || docId.isBlank()) {
+            return false;
+        }
+        if (session.docs == null || session.docs.isEmpty()) {
+            return false;
+        }
+        String normalizedId = docId.trim();
+        if (!session.docs.containsKey(normalizedId)) {
+            return false;
+        }
+        persistActiveDocument(session);
+        loadActiveDocument(session, normalizedId);
+        if (!session.inFlight) {
+            session.runtimeState = session.pendingPatch == null ? RuntimeState.IDLE : RuntimeState.AWAITING_CONFIRM;
+        }
+        return true;
+    }
+
+    private static DocumentState newDocumentState(
+            String id,
+            String name,
+            BlockPos origin,
+            Vec3i size,
+            StructureBuilder.VbsScriptV2 script,
+            String revision
+    ) {
+        DocumentState doc = new DocumentState();
+        doc.id = id == null || id.isBlank() ? DEFAULT_DOC_ID : id.trim();
+        doc.name = normalizeDocName(name);
+        if (doc.name.isBlank()) {
+            doc.name = DEFAULT_DOC_NAME;
+        }
+        doc.origin = origin;
+        doc.size = size;
+        doc.current = copyScript(script);
+        doc.revision = revision == null || revision.isBlank() ? "rev-0" : revision.trim();
+        doc.pendingPatch = null;
+        doc.undoStack = new ArrayDeque<>();
+        doc.redoStack = new ArrayDeque<>();
+        doc.checkpoints = new ArrayList<>();
+        return doc;
+    }
+
+    private static String normalizeDocName(String name) {
+        if (name == null) {
+            return "";
+        }
+        String normalized = name.trim().replace('\\', '/');
+        while (normalized.startsWith("/")) {
+            normalized = normalized.substring(1);
+        }
+        if (normalized.isBlank()) {
+            return "";
+        }
+        if (!normalized.startsWith(DOC_ROOT + "/")) {
+            normalized = DOC_ROOT + "/" + normalized;
+        }
+        while (normalized.contains("//")) {
+            normalized = normalized.replace("//", "/");
+        }
+        if (!normalized.endsWith(".json")) {
+            normalized = normalized + ".json";
+        }
+        return normalized;
+    }
+
+    private static String buildDefaultDocName(int index) {
+        if (index <= 1) {
+            return DEFAULT_DOC_NAME;
+        }
+        return DOC_ROOT + "/file-" + index + ".json";
+    }
+
+    private static String normalizeDocId(String id, Map<String, DocumentState> existing) {
+        String candidate = id == null ? "" : id.trim();
+        if (!candidate.isBlank()) {
+            candidate = candidate.replaceAll("[^a-zA-Z0-9._-]", "-");
+        }
+        if (candidate.isBlank()) {
+            candidate = "doc-" + UUID.randomUUID().toString().substring(0, 8);
+        }
+        if (existing == null) {
+            return candidate;
+        }
+        if (!existing.containsKey(candidate)) {
+            return candidate;
+        }
+        String base = candidate;
+        int i = 2;
+        while (existing.containsKey(base + "-" + i)) {
+            i++;
+        }
+        return base + "-" + i;
+    }
+
+    private static String ensureUniqueDocName(Session session, String baseName, String excludeId) {
+        if (session == null) {
+            return baseName;
+        }
+        String candidate = baseName;
+        int dot = baseName.lastIndexOf('.');
+        String stem = dot > 0 ? baseName.substring(0, dot) : baseName;
+        String ext = dot > 0 ? baseName.substring(dot) : "";
+        int i = 2;
+        while (hasDocName(session, candidate, excludeId)) {
+            candidate = stem + "-" + i + ext;
+            i++;
+        }
+        return candidate;
+    }
+
+    private static boolean hasDocName(Session session, String name, String excludeId) {
+        if (session == null || session.docs == null || name == null) {
+            return false;
+        }
+        for (DocumentState doc : session.docs.values()) {
+            if (doc == null) {
+                continue;
+            }
+            if (excludeId != null && excludeId.equals(doc.id)) {
+                continue;
+            }
+            if (name.equals(doc.name)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String getString(JsonObject obj, String key) {
+        if (obj == null || key == null || !obj.has(key) || obj.get(key).isJsonNull() || !obj.get(key).isJsonPrimitive()) {
+            return "";
+        }
+        try {
+            return obj.get(key).getAsString().trim();
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     private static void applyPendingPatch(ServerPlayer player) {
@@ -698,13 +1192,21 @@ public final class SessionManager {
             return;
         }
 
-        if (!commitPendingPatch(player, session, false)) {
+        if (!commitPendingPatch(player, session, false, session.activeDocId)) {
             player.displayClientMessage(Component.literal("Failed to apply patch"), false);
         }
     }
 
-    private static boolean commitPendingPatch(ServerPlayer player, Session session, boolean autoApply) {
-        if (player == null || session == null || session.pendingPatch == null) {
+    private static boolean commitPendingPatch(ServerPlayer player, Session session, boolean autoApply, String targetDocId) {
+        if (player == null || session == null) {
+            return false;
+        }
+        if (targetDocId != null && !targetDocId.isBlank() && !targetDocId.equals(session.activeDocId)) {
+            if (!switchActiveDocument(session, targetDocId)) {
+                return false;
+            }
+        }
+        if (session.pendingPatch == null) {
             return false;
         }
 
@@ -767,6 +1269,12 @@ public final class SessionManager {
             player.displayClientMessage(Component.literal("No pending patch"), false);
             return;
         }
+        persistActiveDocument(session);
+        loadActiveDocument(session, session.activeDocId);
+        if (session.pendingPatch == null) {
+            player.displayClientMessage(Component.literal("No pending patch"), false);
+            return;
+        }
 
         session.pendingPatch = null;
         session.runtimeState = RuntimeState.CANCELLED;
@@ -813,13 +1321,17 @@ public final class SessionManager {
 
         Session session = new Session();
         session.id = UUID.randomUUID().toString();
-        session.origin = origin;
-        session.size = size;
         session.history = new ArrayList<>();
         session.history.add(systemMsg);
-        session.revision = "rev-0";
+        session.docs = new LinkedHashMap<>();
+        session.nextDocIndex = 2;
+        DocumentState doc = newDocumentState(DEFAULT_DOC_ID, DEFAULT_DOC_NAME, origin, size, null, "rev-0");
+        session.docs.put(doc.id, doc);
+        session.activeDocId = doc.id;
+        loadActiveDocument(session, doc.id);
         session.runtimeState = RuntimeState.IDLE;
         addCheckpoint(session, "session-start");
+        persistActiveDocument(session);
         return session;
     }
 
@@ -924,17 +1436,32 @@ public final class SessionManager {
         return script == null ? null : GSON.fromJson(GSON.toJson(script), StructureBuilder.VbsScriptV2.class);
     }
 
-    private static JsonObject buildWorkspaceStatePayload(Session session, boolean committedOnly) {
+    private static JsonObject buildWorkspaceStatePayload(DocumentState doc, boolean committedOnly) {
         JsonObject payload = new JsonObject();
-        boolean hasPending = session.pendingPatch != null && session.pendingPatch.nextScript != null;
-        StructureBuilder.VbsScriptV2 effectiveScript = committedOnly ? session.current : (hasPending ? session.pendingPatch.nextScript : session.current);
+        if (doc == null) {
+            payload.addProperty("empty", true);
+            return payload;
+        }
 
-        if (session.size != null) {
+        payload.addProperty("doc_id", doc.id == null ? "" : doc.id);
+        payload.addProperty("doc_name", doc.name == null ? "" : doc.name);
+
+        boolean hasPending = doc.pendingPatch != null && doc.pendingPatch.nextScript != null;
+        StructureBuilder.VbsScriptV2 effectiveScript = committedOnly ? doc.current : (hasPending ? doc.pendingPatch.nextScript : doc.current);
+
+        if (doc.size != null) {
             JsonObject size = new JsonObject();
-            size.addProperty("x", session.size.getX());
-            size.addProperty("y", session.size.getY());
-            size.addProperty("z", session.size.getZ());
+            size.addProperty("x", doc.size.getX());
+            size.addProperty("y", doc.size.getY());
+            size.addProperty("z", doc.size.getZ());
             payload.add("size", size);
+        }
+        if (doc.origin != null) {
+            JsonObject origin = new JsonObject();
+            origin.addProperty("x", doc.origin.getX());
+            origin.addProperty("y", doc.origin.getY());
+            origin.addProperty("z", doc.origin.getZ());
+            payload.add("origin", origin);
         }
 
         if (effectiveScript == null) {
@@ -955,7 +1482,23 @@ public final class SessionManager {
 
     private static JsonObject handleReadWorkspaceState(Session session, String toolName, ReadWorkspaceArgs args) {
         JsonObject payload = buildToolSuccess(toolName);
-        payload.add("state", buildWorkspaceStatePayload(session, args.committed));
+        persistActiveDocument(session);
+        DocumentState target = null;
+        if (args != null && args.docId != null && !args.docId.isBlank()) {
+            target = session.docs == null ? null : session.docs.get(args.docId.trim());
+            if (target == null) {
+                return buildToolError(toolName, "Unknown doc_id: " + args.docId);
+            }
+        }
+        if (target == null) {
+            target = getActiveDocument(session);
+        }
+        if (target == null) {
+            return buildToolError(toolName, "No document available");
+        }
+        payload.addProperty("doc_id", target.id == null ? "" : target.id);
+        payload.addProperty("doc_name", target.name == null ? "" : target.name);
+        payload.add("state", buildWorkspaceStatePayload(target, args == null || args.committed));
         return payload;
     }
 
@@ -1020,28 +1563,51 @@ public final class SessionManager {
 
     private static ReadWorkspaceArgs parseReadWorkspaceArgs(JsonElement argsElem) {
         if (argsElem == null || argsElem.isJsonNull()) {
-            return new ReadWorkspaceArgs(true);
+            return new ReadWorkspaceArgs(true, "");
         }
         try {
             JsonElement parsed = argsElem;
             if (argsElem.isJsonPrimitive() && argsElem.getAsJsonPrimitive().isString()) {
                 String raw = argsElem.getAsString();
                 if (raw == null || raw.isBlank()) {
-                    return new ReadWorkspaceArgs(true);
+                    return new ReadWorkspaceArgs(true, "");
                 }
                 parsed = JsonParser.parseString(raw);
             }
             if (!parsed.isJsonObject()) {
-                return new ReadWorkspaceArgs(true);
+                return new ReadWorkspaceArgs(true, "");
             }
             JsonObject obj = parsed.getAsJsonObject();
             boolean committed = !obj.has("committed")
                     || !obj.get("committed").isJsonPrimitive()
                     || obj.get("committed").getAsBoolean();
-            return new ReadWorkspaceArgs(committed);
+            String docId = getString(obj, "doc_id");
+            return new ReadWorkspaceArgs(committed, docId);
         } catch (Exception e) {
             P2SMod.LOGGER.warn("Failed to parse read_workspace_state arguments: {}", e.getMessage());
-            return new ReadWorkspaceArgs(true);
+            return new ReadWorkspaceArgs(true, "");
+        }
+    }
+
+    private static String parseOptionalDocId(JsonElement argsElem) {
+        if (argsElem == null || argsElem.isJsonNull()) {
+            return "";
+        }
+        try {
+            JsonElement parsed = argsElem;
+            if (argsElem.isJsonPrimitive() && argsElem.getAsJsonPrimitive().isString()) {
+                String raw = argsElem.getAsString();
+                if (raw == null || raw.isBlank()) {
+                    return "";
+                }
+                parsed = JsonParser.parseString(raw);
+            }
+            if (!parsed.isJsonObject()) {
+                return "";
+            }
+            return getString(parsed.getAsJsonObject(), "doc_id");
+        } catch (Exception ignored) {
+            return "";
         }
     }
 
@@ -1563,6 +2129,7 @@ public final class SessionManager {
             player.displayClientMessage(Component.literal("No active session"), false);
             return;
         }
+        persistActiveDocument(session);
         String label = "";
         if (payload != null && !payload.isBlank()) {
             try {
@@ -1591,6 +2158,7 @@ public final class SessionManager {
             player.displayClientMessage(Component.literal("No active session"), false);
             return;
         }
+        persistActiveDocument(session);
 
         String targetId = "";
         String mode = "workspace_and_session";
@@ -1634,6 +2202,7 @@ public final class SessionManager {
         session.turnCount = cp.turnCount;
         session.runtimeState = RuntimeState.IDLE;
         session.inFlight = false;
+        persistActiveDocument(session);
 
         sendSessionSync(player, session);
         player.displayClientMessage(Component.literal("Rolled back to checkpoint: " + cp.label + (sessionOnly ? " (session only)" : "")), false);
@@ -1693,13 +2262,62 @@ public final class SessionManager {
         return GSON.toJson(arr);
     }
 
+    private static String docsSummaryJson(Session session) {
+        JsonArray arr = new JsonArray();
+        if (session == null) {
+            return "[]";
+        }
+        persistActiveDocument(session);
+        if (session.docs == null || session.docs.isEmpty()) {
+            return "[]";
+        }
+        for (DocumentState doc : session.docs.values()) {
+            if (doc == null) {
+                continue;
+            }
+            JsonObject item = new JsonObject();
+            item.addProperty("id", doc.id == null ? "" : doc.id);
+            item.addProperty("name", doc.name == null ? "" : doc.name);
+            item.addProperty("active", session.activeDocId != null && session.activeDocId.equals(doc.id));
+            item.addProperty("revision", doc.revision == null ? "" : doc.revision);
+            boolean hasPending = doc.pendingPatch != null;
+            item.addProperty("hasPendingPatch", hasPending);
+            int pendingChanged = hasPending && doc.pendingPatch.preview != null ? doc.pendingPatch.preview.changedBlocks : 0;
+            item.addProperty("pendingChangedBlocks", pendingChanged);
+
+            boolean hasSize = doc.size != null;
+            item.addProperty("hasSize", hasSize);
+            item.addProperty("sizeX", hasSize ? doc.size.getX() : 0);
+            item.addProperty("sizeY", hasSize ? doc.size.getY() : 0);
+            item.addProperty("sizeZ", hasSize ? doc.size.getZ() : 0);
+            if (doc.origin != null) {
+                item.addProperty("originX", doc.origin.getX());
+                item.addProperty("originY", doc.origin.getY());
+                item.addProperty("originZ", doc.origin.getZ());
+            } else {
+                item.addProperty("originX", 0);
+                item.addProperty("originY", 0);
+                item.addProperty("originZ", 0);
+            }
+            arr.add(item);
+        }
+        return GSON.toJson(arr);
+    }
+
     private static void sendSessionSync(ServerPlayer player, Session session) {
         if (player == null) {
             return;
         }
 
+        persistActiveDocument(session);
+        if (session != null && session.activeDocId != null && !session.activeDocId.isBlank()) {
+            loadActiveDocument(session, session.activeDocId);
+        }
         boolean active = session != null;
         String sessionId = active ? session.id : "";
+        String activeDocId = active && session.activeDocId != null ? session.activeDocId : "";
+        DocumentState activeDoc = active ? getActiveDocument(session) : null;
+        String activeDocName = activeDoc == null || activeDoc.name == null ? "" : activeDoc.name;
         int turns = active ? session.turnCount : 0;
         int partCount = active ? countParts(session.current) : 0;
         int totalBlocks = active ? countBlocks(session.current) : 0;
@@ -1748,7 +2366,10 @@ public final class SessionManager {
                 hasSz,
                 sx, sy, sz,
                 checkpointsJson(session),
-                currentScriptJson
+                currentScriptJson,
+                activeDocId,
+                activeDocName,
+                active ? docsSummaryJson(session) : "[]"
         ));
     }
 
@@ -1818,6 +2439,7 @@ public final class SessionManager {
         private boolean previewUpdated = false;
         private boolean autoApplyRequested = false;
         private boolean autoApplied = false;
+        private String autoApplyDocId = "";
         private final List<JsonObject> toolMessages = new ArrayList<>();
     }
 
@@ -1856,10 +2478,25 @@ public final class SessionManager {
 
     private static final class ReadWorkspaceArgs {
         final boolean committed;
+        final String docId;
 
-        ReadWorkspaceArgs(boolean committed) {
+        ReadWorkspaceArgs(boolean committed, String docId) {
             this.committed = committed;
+            this.docId = docId == null ? "" : docId.trim();
         }
+    }
+
+    private static final class DocumentState {
+        private String id;
+        private String name;
+        private BlockPos origin;
+        private Vec3i size;
+        private StructureBuilder.VbsScriptV2 current;
+        private String revision = "rev-0";
+        private PendingPatch pendingPatch;
+        private Deque<CommitEntry> undoStack = new ArrayDeque<>();
+        private Deque<CommitEntry> redoStack = new ArrayDeque<>();
+        private List<CheckpointEntry> checkpoints = new ArrayList<>();
     }
 
     private static final class CheckpointEntry {
@@ -1892,6 +2529,9 @@ public final class SessionManager {
         StructureBuilder.VbsScriptV2 current;
         int turnCount = 0;
         boolean inFlight = false;
+        Map<String, DocumentState> docs = new LinkedHashMap<>();
+        String activeDocId = DEFAULT_DOC_ID;
+        int nextDocIndex = 2;
 
         String revision;
         RuntimeState runtimeState = RuntimeState.IDLE;

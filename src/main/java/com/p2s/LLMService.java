@@ -839,6 +839,11 @@ public final class LLMService {
             committedProp.addProperty("description", "Defaults to true (committed script). Set false only when staged script is needed for UI diff.");
             readProps.add("committed", committedProp);
 
+            JsonObject readDocId = new JsonObject();
+            readDocId.addProperty("type", "string");
+            readDocId.addProperty("description", "Optional document id. If omitted, reads current active document.");
+            readProps.add("doc_id", readDocId);
+
             readParams.add("properties", readProps);
             readParams.addProperty("additionalProperties", false);
             readFn.add("parameters", readParams);
@@ -896,6 +901,11 @@ public final class LLMService {
             baseRevision.addProperty("type", "string");
             baseRevision.addProperty("description", "Workspace revision this patch is based on.");
             properties.add("base_revision", baseRevision);
+
+            JsonObject patchDocId = new JsonObject();
+            patchDocId.addProperty("type", "string");
+            patchDocId.addProperty("description", "Optional document id. If omitted, applies to current active document.");
+            properties.add("doc_id", patchDocId);
 
             JsonObject intent = new JsonObject();
             intent.addProperty("type", "string");
