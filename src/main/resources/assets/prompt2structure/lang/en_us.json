@@ -251,6 +251,7 @@
   "screen.p2s.sessions.status.loaded": "Loaded session: %s",
   "screen.p2s.sessions.status.open_project_first": "Open a project first",
   "screen.p2s.sessions.title": "Sessions",
+  "screen.p2s.skill_editor.body": "Body",
   "screen.p2s.skill_editor.body_line": "Body line",
   "screen.p2s.skill_editor.body_page": "Body · Page %s",
   "screen.p2s.skill_editor.description": "Description",

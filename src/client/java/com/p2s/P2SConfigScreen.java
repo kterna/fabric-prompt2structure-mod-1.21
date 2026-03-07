@@ -28,7 +28,7 @@ public class P2SConfigScreen extends Screen {
     private EditBox apiKeyInput;
     private EditBox modelInput;
     private EditBox timeoutInput;
-    private EditBox systemPromptInput;
+    private P2SMultiLineTextEditor systemPromptEditor;
     private Button toolCallButton;
     private Button streamingButton;
     private boolean useToolCall;
@@ -190,11 +190,12 @@ public class P2SConfigScreen extends Screen {
         }).bounds(left + 310, y + 14, 160, 20).build());
         y += 50;
 
-        systemPromptInput = new EditBox(this.font, left + 10, y + 14, inputWidth, 20, P2SI18n.tr("screen.p2s.config.llm.system_prompt"));
-        systemPromptInput.setMaxLength(2048);
-        systemPromptInput.setValue(P2SClientConfig.getSystemPrompt());
-        addRenderableWidget(systemPromptInput);
-        y += 50;
+        int promptY = y + 14;
+        systemPromptEditor = new P2SMultiLineTextEditor(this.font);
+        systemPromptEditor.setMaxLength(2048);
+        systemPromptEditor.setBounds(left + 10, promptY, inputWidth, llmPromptHeight(promptY));
+        systemPromptEditor.setText(P2SClientConfig.getSystemPrompt());
+        y = promptY + llmPromptHeight(promptY) + 10;
 
         addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.common.save"), btn -> saveLlmConfig())
                 .bounds(left + 10, y, 80, 20).build());
@@ -214,6 +215,14 @@ public class P2SConfigScreen extends Screen {
                 P2SI18n.tr(useStreaming ? "screen.p2s.common.on" : "screen.p2s.common.off"));
     }
 
+    private int llmPromptHeight(int promptY) {
+        int available = this.height - promptY - 60;
+        if (available <= 0) {
+            return 40;
+        }
+        return Math.max(40, Math.min(180, available));
+    }
+
     private void saveLlmConfig() {
         Integer timeout = parseTimeout(timeoutInput == null ? "" : timeoutInput.getValue());
         boolean ok = P2SClientConfig.setLlmConfig(
@@ -222,7 +231,7 @@ public class P2SConfigScreen extends Screen {
                 modelInput == null ? "" : modelInput.getValue(),
                 timeout,
                 useToolCall,
-                systemPromptInput == null ? "" : systemPromptInput.getValue(),
+                systemPromptEditor == null ? "" : systemPromptEditor.getText(),
                 true
         );
         P2SClientConfig.setUseStreaming(useStreaming, true);
@@ -241,7 +250,7 @@ public class P2SConfigScreen extends Screen {
         if (apiKeyInput != null) apiKeyInput.setValue(P2SClientConfig.getApiKey());
         if (modelInput != null) modelInput.setValue(P2SClientConfig.getModel());
         if (timeoutInput != null) timeoutInput.setValue(Integer.toString(P2SClientConfig.getHttpTimeoutSeconds()));
-        if (systemPromptInput != null) systemPromptInput.setValue(P2SClientConfig.getSystemPrompt());
+        if (systemPromptEditor != null) systemPromptEditor.setText(P2SClientConfig.getSystemPrompt());
         useToolCall = P2SClientConfig.isUseToolCall();
         if (toolCallButton != null) toolCallButton.setMessage(toolCallLabel());
         useStreaming = P2SClientConfig.getUseStreaming();
@@ -453,6 +462,9 @@ public class P2SConfigScreen extends Screen {
             onClose();
             return true;
         }
+        if (currentTab == Tab.LLM && systemPromptEditor != null && systemPromptEditor.keyPressed(keyCode, modifiers)) {
+            return true;
+        }
         for (EditBox box : collectEditBoxes()) {
             if (box != null && box.keyPressed(keyCode, scanCode, modifiers)) return true;
         }
@@ -461,16 +473,58 @@ public class P2SConfigScreen extends Screen {
 
     @Override
     public boolean charTyped(char codePoint, int modifiers) {
+        if (currentTab == Tab.LLM && systemPromptEditor != null && systemPromptEditor.charTyped(codePoint, modifiers)) {
+            return true;
+        }
         for (EditBox box : collectEditBoxes()) {
             if (box != null && box.charTyped(codePoint, modifiers)) return true;
         }
         return super.charTyped(codePoint, modifiers);
     }
 
+    @Override
+    public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        if (currentTab == Tab.LLM && systemPromptEditor != null && systemPromptEditor.mouseClicked(mouseX, mouseY, button)) {
+            if (apiUrlInput != null) apiUrlInput.setFocused(false);
+            if (apiKeyInput != null) apiKeyInput.setFocused(false);
+            if (modelInput != null) modelInput.setFocused(false);
+            if (timeoutInput != null) timeoutInput.setFocused(false);
+            return true;
+        }
+        if (button == 0 && systemPromptEditor != null) {
+            systemPromptEditor.setFocused(false);
+        }
+        return super.mouseClicked(mouseX, mouseY, button);
+    }
+
+    @Override
+    public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
+        if (currentTab == Tab.LLM && systemPromptEditor != null && systemPromptEditor.mouseDragged(mouseX, mouseY, button)) {
+            return true;
+        }
+        return super.mouseDragged(mouseX, mouseY, button, dragX, dragY);
+    }
+
+    @Override
+    public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        if (currentTab == Tab.LLM && systemPromptEditor != null && systemPromptEditor.mouseReleased(mouseX, mouseY, button)) {
+            return true;
+        }
+        return super.mouseReleased(mouseX, mouseY, button);
+    }
+
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+        if (currentTab == Tab.LLM && systemPromptEditor != null && systemPromptEditor.mouseScrolled(mouseX, mouseY, verticalAmount)) {
+            return true;
+        }
+        return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
+    }
+
     private List<EditBox> collectEditBoxes() {
         return switch (currentTab) {
             case GENERAL -> selectionItemInput == null ? List.of() : List.of(selectionItemInput);
-            case LLM -> List.of(apiUrlInput, apiKeyInput, modelInput, timeoutInput, systemPromptInput);
+            case LLM -> List.of(apiUrlInput, apiKeyInput, modelInput, timeoutInput);
             case SKILLS -> List.of();
         };
     }
@@ -524,6 +578,9 @@ public class P2SConfigScreen extends Screen {
         gfx.drawString(this.font, P2SI18n.tr("screen.p2s.config.llm.timeout"), left + 10, y, 0xBBBBBB, false);
         y += 50;
         gfx.drawString(this.font, P2SI18n.tr("screen.p2s.config.llm.system_prompt"), left + 10, y, 0xBBBBBB, false);
+        if (systemPromptEditor != null) {
+            systemPromptEditor.render(gfx);
+        }
     }
 
     private void renderSkillsTab(GuiGraphics gfx, int left, int top, int panelWidth) {

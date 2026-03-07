@@ -251,6 +251,7 @@
   "screen.p2s.sessions.status.loaded": "已加载会话：%s",
   "screen.p2s.sessions.status.open_project_first": "请先打开一个项目",
   "screen.p2s.sessions.title": "会话",
+  "screen.p2s.skill_editor.body": "正文",
   "screen.p2s.skill_editor.body_line": "正文行",
   "screen.p2s.skill_editor.body_page": "正文 · 第 %s 页",
   "screen.p2s.skill_editor.description": "描述",

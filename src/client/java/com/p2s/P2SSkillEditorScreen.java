@@ -7,12 +7,7 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import org.lwjgl.glfw.GLFW;
 
-import java.util.ArrayList;
-import java.util.List;
-
 public class P2SSkillEditorScreen extends Screen {
-    private static final int BODY_ROWS = 10;
-
     public enum Mode {
         CREATE,
         EDIT,
@@ -25,16 +20,11 @@ public class P2SSkillEditorScreen extends Screen {
 
     private EditBox nameInput;
     private EditBox descInput;
-    private final List<EditBox> bodyInputs = new ArrayList<>();
-    private final List<String> bodyLines = new ArrayList<>();
-    private int bodyPage = 0;
+    private P2SMultiLineTextEditor bodyEditor;
 
     private String originalBody = "";
     private Component statusText = Component.empty();
     private int statusColor = 0xAAAAAA;
-
-    private Button prevPageButton;
-    private Button nextPageButton;
 
     public P2SSkillEditorScreen(Screen parent, Mode mode, String skillId) {
         super(switch (mode == null ? Mode.CREATE : mode) {
@@ -69,37 +59,26 @@ public class P2SSkillEditorScreen extends Screen {
 
         int bodyTop = top + 94;
         int bodyWidth = panelWidth - 20;
-        int rowHeight = 18;
-        int rowSpacing = 3;
-
-        bodyInputs.clear();
+        int buttonY;
         if (mode != Mode.RENAME) {
-            for (int i = 0; i < BODY_ROWS; i++) {
-                EditBox row = new EditBox(this.font, left + 10, bodyTop + i * (rowHeight + rowSpacing), bodyWidth, rowHeight, P2SI18n.tr("screen.p2s.skill_editor.body_line"));
-                row.setMaxLength(1024);
-                bodyInputs.add(row);
-                addRenderableWidget(row);
-            }
+            int bodyHeight = Math.max(72, this.height - bodyTop - 44);
+            bodyEditor = new P2SMultiLineTextEditor(this.font);
+            bodyEditor.setMaxLength(65536);
+            bodyEditor.setBounds(left + 10, bodyTop, bodyWidth, bodyHeight);
+            bodyEditor.setText(originalBody);
+            buttonY = bodyTop + bodyHeight + 10;
+        } else {
+            bodyEditor = null;
+            buttonY = top + 104;
         }
-        loadBodyPage();
 
-        int buttonY = top + 94 + BODY_ROWS * (rowHeight + rowSpacing) + 10;
         addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.common.save"), btn -> saveSkill())
                 .bounds(left + 10, buttonY, 80, 20).build());
         addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.common.cancel"), btn -> onClose())
                 .bounds(left + 98, buttonY, 90, 20).build());
-
-        if (mode != Mode.RENAME) {
-            prevPageButton = addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.common.prev"), btn -> changePage(-1))
-                    .bounds(left + panelWidth - 190, buttonY, 80, 20).build());
-            nextPageButton = addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.common.next"), btn -> changePage(1))
-                    .bounds(left + panelWidth - 100, buttonY, 80, 20).build());
-            refreshPageButtons();
-        }
     }
 
     private void loadInitialState() {
-        bodyLines.clear();
         originalBody = "";
         if (mode == Mode.CREATE) {
             return;
@@ -110,13 +89,6 @@ public class P2SSkillEditorScreen extends Screen {
         }
         if (doc.body() != null) {
             originalBody = doc.body();
-            String[] lines = doc.body().split("\\R", -1);
-            for (String line : lines) {
-                bodyLines.add(line == null ? "" : line);
-            }
-        }
-        if (bodyLines.isEmpty()) {
-            bodyLines.add("");
         }
         cachedName = doc.meta().name();
         cachedDescription = doc.meta().description();
@@ -139,72 +111,19 @@ public class P2SSkillEditorScreen extends Screen {
         return cachedDescription == null ? "" : cachedDescription;
     }
 
-    private void saveBodyPage() {
-        if (mode == Mode.RENAME) {
-            return;
-        }
-        ensureBodyCapacity((bodyPage + 1) * BODY_ROWS);
-        for (int i = 0; i < bodyInputs.size(); i++) {
-            int idx = bodyPage * BODY_ROWS + i;
-            String value = bodyInputs.get(i).getValue();
-            bodyLines.set(idx, value == null ? "" : value);
-        }
-    }
-
-    private void loadBodyPage() {
-        if (mode == Mode.RENAME) {
-            return;
-        }
-        ensureBodyCapacity((bodyPage + 1) * BODY_ROWS);
-        for (int i = 0; i < bodyInputs.size(); i++) {
-            int idx = bodyPage * BODY_ROWS + i;
-            String value = idx < bodyLines.size() ? bodyLines.get(idx) : "";
-            bodyInputs.get(i).setValue(value == null ? "" : value);
-        }
-    }
-
-    private void changePage(int delta) {
-        saveBodyPage();
-        int next = Math.max(0, bodyPage + delta);
-        if (next == bodyPage) {
-            return;
-        }
-        bodyPage = next;
-        loadBodyPage();
-        refreshPageButtons();
-    }
-
-    private void refreshPageButtons() {
-        if (prevPageButton == null || nextPageButton == null) {
-            return;
-        }
-        prevPageButton.active = bodyPage > 0;
-        nextPageButton.active = true;
-    }
-
-    private void ensureBodyCapacity(int size) {
-        while (bodyLines.size() < size) {
-            bodyLines.add("");
-        }
-    }
-
     private String buildBodyText() {
-        saveBodyPage();
-        int end = bodyLines.size();
-        while (end > 0 && (bodyLines.get(end - 1) == null || bodyLines.get(end - 1).isBlank())) {
+        if (bodyEditor == null) {
+            return "";
+        }
+        String[] lines = bodyEditor.getText().replace("\r\n", "\n").replace('\r', '\n').split("\n", -1);
+        int end = lines.length;
+        while (end > 0 && (lines[end - 1] == null || lines[end - 1].isBlank())) {
             end -= 1;
         }
         if (end <= 0) {
             return "";
         }
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < end; i++) {
-            if (i > 0) {
-                sb.append('\n');
-            }
-            sb.append(bodyLines.get(i) == null ? "" : bodyLines.get(i));
-        }
-        return sb.toString();
+        return String.join("\n", java.util.Arrays.copyOf(lines, end));
     }
 
     private void saveSkill() {
@@ -261,10 +180,8 @@ public class P2SSkillEditorScreen extends Screen {
         if (descInput != null && descInput.keyPressed(keyCode, scanCode, modifiers)) {
             return true;
         }
-        for (EditBox box : bodyInputs) {
-            if (box.keyPressed(keyCode, scanCode, modifiers)) {
-                return true;
-            }
+        if (bodyEditor != null && bodyEditor.keyPressed(keyCode, modifiers)) {
+            return true;
         }
         return super.keyPressed(keyCode, scanCode, modifiers);
     }
@@ -277,12 +194,47 @@ public class P2SSkillEditorScreen extends Screen {
         if (descInput != null && descInput.charTyped(codePoint, modifiers)) {
             return true;
         }
-        for (EditBox box : bodyInputs) {
-            if (box.charTyped(codePoint, modifiers)) {
-                return true;
-            }
+        if (bodyEditor != null && bodyEditor.charTyped(codePoint, modifiers)) {
+            return true;
         }
         return super.charTyped(codePoint, modifiers);
+    }
+
+    @Override
+    public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        if (bodyEditor != null && bodyEditor.mouseClicked(mouseX, mouseY, button)) {
+            if (nameInput != null) nameInput.setFocused(false);
+            if (descInput != null) descInput.setFocused(false);
+            return true;
+        }
+        if (button == 0 && bodyEditor != null) {
+            bodyEditor.setFocused(false);
+        }
+        return super.mouseClicked(mouseX, mouseY, button);
+    }
+
+    @Override
+    public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
+        if (bodyEditor != null && bodyEditor.mouseDragged(mouseX, mouseY, button)) {
+            return true;
+        }
+        return super.mouseDragged(mouseX, mouseY, button, dragX, dragY);
+    }
+
+    @Override
+    public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        if (bodyEditor != null && bodyEditor.mouseReleased(mouseX, mouseY, button)) {
+            return true;
+        }
+        return super.mouseReleased(mouseX, mouseY, button);
+    }
+
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+        if (bodyEditor != null && bodyEditor.mouseScrolled(mouseX, mouseY, verticalAmount)) {
+            return true;
+        }
+        return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
     }
 
     @Override
@@ -298,7 +250,10 @@ public class P2SSkillEditorScreen extends Screen {
         gfx.drawString(this.font, P2SI18n.tr("screen.p2s.skill_editor.name"), left + 10, top + 16, 0xCCCCCC, false);
         gfx.drawString(this.font, P2SI18n.tr("screen.p2s.skill_editor.description"), left + 10, top + 46, 0xCCCCCC, false);
         if (mode != Mode.RENAME) {
-            gfx.drawString(this.font, P2SI18n.tr("screen.p2s.skill_editor.body_page", bodyPage + 1), left + 10, top + 84, 0xCCCCCC, false);
+            if (bodyEditor != null) {
+                bodyEditor.render(gfx);
+            }
+            gfx.drawString(this.font, P2SI18n.tr("screen.p2s.skill_editor.body"), left + 10, top + 84, 0xCCCCCC, false);
         } else {
             gfx.drawString(this.font, P2SI18n.tr("screen.p2s.skill_editor.rename_only"), left + 10, top + 84, 0xAAAAAA, false);
         }
