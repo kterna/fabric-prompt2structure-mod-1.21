@@ -13,12 +13,12 @@ import java.util.Locale;
 import java.util.Map;
 
 public final class ClientSessionState {
-    private static boolean active = false;
+    private static boolean hasProject = false;
+    private static boolean sessionActive = false;
     private static String sessionId = "";
     private static String projectId = "";
     private static String projectName = "";
     private static String projectDescription = "";
-    private static int turnCount = 0;
     private static int partCount = 0;
     private static int totalBlocks = 0;
     private static String partsSummary = "";
@@ -27,6 +27,7 @@ public final class ClientSessionState {
     private static String runtimeState = "";
     private static String revision = "";
     private static boolean hasPendingPatch = false;
+    private static String pendingPath = "";
     private static String pendingSummary = "";
     private static String pendingRisk = "";
     private static int pendingChangedBlocks = 0;
@@ -41,11 +42,9 @@ public final class ClientSessionState {
     private static int sizeX = 0;
     private static int sizeY = 0;
     private static int sizeZ = 0;
-    private static String activeDocId = "";
-    private static String activeDocName = "";
-    private static String selectedWorkspaceId = "";
-    private static final List<WorkspaceDocInfo> workspaceDocs = new ArrayList<>();
-    private static final Map<String, String> workspaceDocScripts = new LinkedHashMap<>();
+    private static String selectedWorkspacePath = "";
+    private static final List<WorkspaceFileInfo> workspaceFiles = new ArrayList<>();
+    private static final Map<String, String> workspaceFileScripts = new LinkedHashMap<>();
     private static String todoTitle = "";
     private static final List<TodoItem> todoItems = new ArrayList<>();
     private static ChoiceRequest pendingChoice = null;
@@ -60,13 +59,21 @@ public final class ClientSessionState {
     private ClientSessionState() {
     }
 
-    public static void onSessionSync(
-            boolean activeFlag,
+    public static synchronized void onSessionSync(
+            boolean hasProjectFlag,
+            boolean sessionActiveFlag,
             String id,
             String projectIdValue,
             String projectNameValue,
             String projectDescriptionValue,
-            int turns,
+            int ox,
+            int oy,
+            int oz,
+            boolean hasSz,
+            int sx,
+            int sy,
+            int sz,
+            String selectedPath,
             int parts,
             int blocks,
             String summary,
@@ -74,34 +81,20 @@ public final class ClientSessionState {
             String runtime,
             String rev,
             boolean pending,
+            String pendingWorkspacePath,
             String pendingPatchSummary,
             String risk,
             int changed,
-            int ox, int oy, int oz,
-            boolean hasSz,
-            int sx, int sy, int sz,
             String checkpointsJson,
             String scriptJson,
-            String activeDoc,
-            String activeDocDisplayName,
-            String docsSummaryJson
+            String workspaceFilesJson
     ) {
-        active = activeFlag;
+        hasProject = hasProjectFlag;
+        sessionActive = sessionActiveFlag;
         sessionId = id == null ? "" : id;
         projectId = projectIdValue == null ? "" : projectIdValue;
         projectName = projectNameValue == null ? "" : projectNameValue;
         projectDescription = projectDescriptionValue == null ? "" : projectDescriptionValue;
-        turnCount = turns;
-        partCount = parts;
-        totalBlocks = blocks;
-        partsSummary = summary == null ? "" : summary;
-        structureSummary = structure == null ? "" : structure;
-        runtimeState = runtime == null ? "" : runtime;
-        revision = rev == null ? "" : rev;
-        hasPendingPatch = pending;
-        pendingSummary = pendingPatchSummary == null ? "" : pendingPatchSummary;
-        pendingRisk = risk == null ? "" : risk;
-        pendingChangedBlocks = Math.max(0, changed);
         originX = ox;
         originY = oy;
         originZ = oz;
@@ -109,25 +102,56 @@ public final class ClientSessionState {
         sizeX = sx;
         sizeY = sy;
         sizeZ = sz;
+        selectedWorkspacePath = normalizeWorkspacePath(selectedPath);
+        partCount = Math.max(0, parts);
+        totalBlocks = Math.max(0, blocks);
+        partsSummary = summary == null ? "" : summary;
+        structureSummary = structure == null ? "" : structure;
+        runtimeState = runtime == null ? "" : runtime;
+        revision = rev == null ? "" : rev;
+        hasPendingPatch = pending;
+        pendingPath = normalizeWorkspacePath(pendingWorkspacePath);
+        pendingSummary = pendingPatchSummary == null ? "" : pendingPatchSummary;
+        pendingRisk = risk == null ? "" : risk;
+        pendingChangedBlocks = Math.max(0, changed);
         currentScriptJson = scriptJson == null ? "" : scriptJson;
-        activeDocId = activeDoc == null ? "" : activeDoc;
-        activeDocName = activeDocDisplayName == null ? "" : activeDocDisplayName;
-        updateWorkspaceDocs(docsSummaryJson);
-        if (active && !activeDocId.isBlank() && currentScriptJson != null && !currentScriptJson.isBlank()) {
-            workspaceDocScripts.put(activeDocId, currentScriptJson);
+
+        updateWorkspaceFiles(workspaceFilesJson);
+        if (sessionActive && !selectedWorkspacePath.isBlank() && !currentScriptJson.isBlank()) {
+            workspaceFileScripts.put(selectedWorkspacePath, currentScriptJson);
         }
         updateCheckpoints(checkpointsJson);
         if (!pending) {
             clearPreview();
         }
-        if (!activeFlag) {
+
+        if (!sessionActiveFlag) {
             status = "";
-            messages.clear();
             clearPreview();
             clearTodo();
             clearPendingChoice();
             checkpoints.clear();
             selectedCheckpointIndex = -1;
+            currentScriptJson = "";
+            runtimeState = "";
+            revision = "";
+            pendingPath = "";
+            pendingSummary = "";
+            pendingRisk = "";
+            pendingChangedBlocks = 0;
+            hasPendingPatch = false;
+            partCount = 0;
+            totalBlocks = 0;
+            partsSummary = "";
+            structureSummary = "";
+            selectedWorkspacePath = "";
+            messages.clear();
+        }
+
+        if (!hasProjectFlag) {
+            projectId = "";
+            projectName = "";
+            projectDescription = "";
             originX = 0;
             originY = 0;
             originZ = 0;
@@ -135,19 +159,12 @@ public final class ClientSessionState {
             sizeX = 0;
             sizeY = 0;
             sizeZ = 0;
-            currentScriptJson = "";
-            activeDocId = "";
-            activeDocName = "";
-            selectedWorkspaceId = "";
-            projectId = "";
-            projectName = "";
-            projectDescription = "";
-            workspaceDocs.clear();
-            workspaceDocScripts.clear();
+            workspaceFiles.clear();
+            workspaceFileScripts.clear();
         }
     }
 
-    public static void onChatResponse(String text, boolean hasStructure, String newStatus) {
+    public static synchronized void onChatResponse(String text, boolean hasStructure, String newStatus) {
         if (text != null && !text.isBlank()) {
             addMessage("AI", text.trim());
         }
@@ -156,27 +173,27 @@ public final class ClientSessionState {
         }
     }
 
-    public static void onBuildProgress(String phase, String currentPart, int progress, int blocksPlaced) {
+    public static synchronized void onBuildProgress(String phase, String currentPart, int progress, int blocksPlaced) {
         StringBuilder sb = new StringBuilder();
         if (phase != null && !phase.isBlank()) {
             sb.append(phase);
         }
         if (currentPart != null && !currentPart.isBlank()) {
             if (sb.length() > 0) {
-                sb.append(" ");
+                sb.append(' ');
             }
             sb.append(currentPart);
         }
         if (progress >= 0) {
             if (sb.length() > 0) {
-                sb.append(" ");
+                sb.append(' ');
             }
-            sb.append(progress).append("%");
+            sb.append(progress).append('%');
         }
         status = sb.toString();
     }
 
-    public static void onPatchPreview(boolean hasPreview, String summary, String detail, int changedBlocks, String riskLevel) {
+    public static synchronized void onPatchPreview(boolean hasPreview, String summary, String detail, int changedBlocks, String riskLevel) {
         if (!hasPreview) {
             clearPreview();
             return;
@@ -187,7 +204,7 @@ public final class ClientSessionState {
         previewChangedBlocks = Math.max(0, changedBlocks);
     }
 
-    public static void addUserMessage(String text) {
+    public static synchronized void addUserMessage(String text) {
         if (text != null && !text.isBlank()) {
             addMessage("You", text.trim());
         }
@@ -196,21 +213,18 @@ public final class ClientSessionState {
     public static synchronized void setTodo(String title, List<TodoItem> items) {
         todoTitle = title == null ? "" : title.trim();
         todoItems.clear();
-        if (items != null) {
-            for (TodoItem item : items) {
-                if (item == null || item.id() == null || item.id().isBlank()) {
-                    continue;
-                }
-                String content = item.content() == null ? "" : item.content().trim();
-                if (content.isBlank()) {
-                    continue;
-                }
-                todoItems.add(new TodoItem(
-                        item.id().trim(),
-                        content,
-                        normalizeTodoStatus(item.status())
-                ));
+        if (items == null) {
+            return;
+        }
+        for (TodoItem item : items) {
+            if (item == null || item.id() == null || item.id().isBlank()) {
+                continue;
             }
+            String content = item.content() == null ? "" : item.content().trim();
+            if (content.isBlank()) {
+                continue;
+            }
+            todoItems.add(new TodoItem(item.id().trim(), content, normalizeTodoStatus(item.status())));
         }
     }
 
@@ -222,24 +236,22 @@ public final class ClientSessionState {
         return List.copyOf(todoItems);
     }
 
-    public static synchronized boolean upsertTodoItem(String id, String content, String status) {
+    public static synchronized boolean upsertTodoItem(String id, String content, String statusValue) {
         if (id == null || id.isBlank()) {
             return false;
         }
         String itemId = id.trim();
-        String normalizedStatus = (status == null || status.isBlank()) ? "" : normalizeTodoStatus(status);
-
+        String normalizedStatus = statusValue == null || statusValue.isBlank() ? "" : normalizeTodoStatus(statusValue);
         for (int i = 0; i < todoItems.size(); i++) {
             TodoItem existing = todoItems.get(i);
             if (!itemId.equals(existing.id())) {
                 continue;
             }
-            String nextContent = (content == null || content.isBlank()) ? existing.content() : content.trim();
+            String nextContent = content == null || content.isBlank() ? existing.content() : content.trim();
             String nextStatus = normalizedStatus.isBlank() ? existing.status() : normalizedStatus;
             todoItems.set(i, new TodoItem(itemId, nextContent, nextStatus));
             return true;
         }
-
         if (content == null || content.isBlank()) {
             return false;
         }
@@ -267,34 +279,26 @@ public final class ClientSessionState {
     }
 
     public static synchronized void setPendingChoice(String requestId, String prompt, List<ChoiceOption> options) {
-        if (prompt == null || prompt.isBlank() || options == null || options.isEmpty()) {
-            pendingChoice = null;
-            return;
-        }
         List<ChoiceOption> normalized = new ArrayList<>();
-        for (ChoiceOption option : options) {
-            if (option == null || option.id() == null || option.id().isBlank()) {
-                continue;
+        if (options != null) {
+            for (ChoiceOption option : options) {
+                if (option == null || option.id() == null || option.id().isBlank()) {
+                    continue;
+                }
+                String label = option.label() == null ? "" : option.label().trim();
+                if (label.isBlank()) {
+                    continue;
+                }
+                normalized.add(new ChoiceOption(
+                        option.id().trim(),
+                        label,
+                        option.description() == null ? "" : option.description().trim()
+                ));
             }
-            String label = option.label() == null ? "" : option.label().trim();
-            if (label.isBlank()) {
-                continue;
-            }
-            normalized.add(new ChoiceOption(
-                    option.id().trim(),
-                    label,
-                    option.description() == null ? "" : option.description().trim()
-            ));
         }
-        if (normalized.isEmpty()) {
-            pendingChoice = null;
-            return;
-        }
-        pendingChoice = new ChoiceRequest(
-                requestId == null ? "" : requestId.trim(),
-                prompt.trim(),
-                List.copyOf(normalized)
-        );
+        pendingChoice = normalized.isEmpty()
+                ? null
+                : new ChoiceRequest(requestId == null ? "" : requestId.trim(), prompt == null ? "" : prompt.trim(), List.copyOf(normalized));
     }
 
     public static synchronized ChoiceRequest getPendingChoice() {
@@ -309,176 +313,175 @@ public final class ClientSessionState {
         pendingChoice = null;
     }
 
-    public static void clearPendingPatch() {
+    public static synchronized void clearPendingPatch() {
         hasPendingPatch = false;
+        pendingPath = "";
         pendingSummary = "";
         pendingRisk = "";
         pendingChangedBlocks = 0;
         clearPreview();
     }
 
-    public static void beginStreaming() {
-        synchronized (streamingBuffer) {
-            streamingBuffer.setLength(0);
-            streaming = true;
-        }
+    public static synchronized void beginStreaming() {
+        streaming = true;
+        streamingBuffer.setLength(0);
     }
 
-    public static void appendStreamingToken(String token) {
+    public static synchronized void appendStreamingToken(String token) {
         if (token == null || token.isEmpty()) {
             return;
         }
-        synchronized (streamingBuffer) {
-            streamingBuffer.append(token);
-        }
+        streamingBuffer.append(token);
     }
 
-    public static String getStreamingText() {
-        synchronized (streamingBuffer) {
-            return streamingBuffer.toString();
-        }
+    public static synchronized String getStreamingText() {
+        return streamingBuffer.toString();
     }
 
     public static boolean isStreaming() {
         return streaming;
     }
 
-    public static void endStreaming() {
-        synchronized (streamingBuffer) {
-            streaming = false;
-            streamingBuffer.setLength(0);
-        }
+    public static synchronized void endStreaming() {
+        streaming = false;
+        streamingBuffer.setLength(0);
     }
 
-    static void addMessage(String role, String text) {
+    static synchronized void addMessage(String role, String text) {
         messages.add(new ChatMessage(role, text));
         if (messages.size() > 200) {
             messages.remove(0);
         }
     }
 
-    public static void clearMessages() {
+    public static synchronized void clearMessages() {
         messages.clear();
     }
 
-    public static List<ChatMessage> getMessages() {
-        return Collections.unmodifiableList(messages);
+    public static synchronized List<ChatMessage> getMessages() {
+        return Collections.unmodifiableList(new ArrayList<>(messages));
     }
 
-    public static boolean isActive() {
-        return active;
+    public static synchronized boolean hasProject() {
+        return hasProject;
     }
 
-    public static String getSessionId() {
+    public static synchronized boolean isActive() {
+        return sessionActive;
+    }
+
+    public static synchronized String getSessionId() {
         return sessionId;
     }
 
-    public static int getTurnCount() {
-        return turnCount;
+    public static synchronized int getTurnCount() {
+        int count = 0;
+        for (ChatMessage message : messages) {
+            if (message != null && "You".equals(message.role())) {
+                count++;
+            }
+        }
+        return count;
     }
 
-    public static int getPartCount() {
+    public static synchronized int getPartCount() {
         return partCount;
     }
 
-    public static int getTotalBlocks() {
+    public static synchronized int getTotalBlocks() {
         return totalBlocks;
     }
 
-    public static String getPartsSummary() {
+    public static synchronized String getPartsSummary() {
         return partsSummary;
     }
 
-    public static String getStructureSummary() {
+    public static synchronized String getStructureSummary() {
         return structureSummary;
     }
 
-    public static String getStatus() {
+    public static synchronized String getStatus() {
         return status;
     }
 
-    public static void setStatus(String value) {
+    public static synchronized void setStatus(String value) {
         status = value == null ? "" : value;
     }
 
-    public static String getRuntimeState() {
+    public static synchronized String getRuntimeState() {
         return runtimeState;
     }
 
-    public static String getRevision() {
+    public static synchronized String getRevision() {
         return revision;
     }
 
-    public static boolean hasPendingPatch() {
+    public static synchronized boolean hasPendingPatch() {
         return hasPendingPatch;
     }
 
-    public static String getPendingSummary() {
+    public static synchronized String getPendingPath() {
+        return pendingPath;
+    }
+
+    public static synchronized String getPendingSummary() {
         return pendingSummary;
     }
 
-    public static String getPendingRisk() {
+    public static synchronized String getPendingRisk() {
         return pendingRisk;
     }
 
-    public static int getPendingChangedBlocks() {
+    public static synchronized int getPendingChangedBlocks() {
         return pendingChangedBlocks;
     }
 
-    public static String getPreviewSummary() {
+    public static synchronized String getPreviewSummary() {
         return previewSummary;
     }
 
-    public static String getPreviewDetail() {
+    public static synchronized String getPreviewDetail() {
         return previewDetail;
     }
 
-    public static String getPreviewRisk() {
+    public static synchronized String getPreviewRisk() {
         return previewRisk;
     }
 
-    public static int getPreviewChangedBlocks() {
+    public static synchronized int getPreviewChangedBlocks() {
         return previewChangedBlocks;
     }
 
-    public static int getOriginX() {
+    public static synchronized int getOriginX() {
         return originX;
     }
 
-    public static int getOriginY() {
+    public static synchronized int getOriginY() {
         return originY;
     }
 
-    public static int getOriginZ() {
+    public static synchronized int getOriginZ() {
         return originZ;
     }
 
-    public static boolean hasSize() {
+    public static synchronized boolean hasSize() {
         return hasSize;
     }
 
-    public static int getSizeX() {
+    public static synchronized int getSizeX() {
         return sizeX;
     }
 
-    public static int getSizeY() {
+    public static synchronized int getSizeY() {
         return sizeY;
     }
 
-    public static int getSizeZ() {
+    public static synchronized int getSizeZ() {
         return sizeZ;
     }
 
-    public static String getCurrentScriptJson() {
+    public static synchronized String getCurrentScriptJson() {
         return currentScriptJson;
-    }
-
-    public static synchronized String getActiveDocId() {
-        return activeDocId;
-    }
-
-    public static synchronized String getActiveDocName() {
-        return activeDocName;
     }
 
     public static synchronized String getProjectId() {
@@ -493,139 +496,124 @@ public final class ClientSessionState {
         return projectDescription;
     }
 
-    public static synchronized String getSelectedWorkspaceId() {
-        return selectedWorkspaceId;
+    public static synchronized String getSelectedWorkspacePath() {
+        return selectedWorkspacePath;
     }
 
-    public static synchronized boolean setSelectedWorkspaceId(String workspaceId) {
-        String normalized = workspaceId == null ? "" : workspaceId.trim();
+    public static synchronized boolean setSelectedWorkspacePath(String workspacePath) {
+        String normalized = normalizeWorkspacePath(workspacePath);
         if (normalized.isBlank()) {
-            return false;
+            selectedWorkspacePath = "";
+            return true;
         }
-        for (WorkspaceDocInfo doc : workspaceDocs) {
-            if (doc != null && normalized.equals(doc.id())) {
-                selectedWorkspaceId = normalized;
+        for (WorkspaceFileInfo file : workspaceFiles) {
+            if (file != null && normalized.equals(file.path())) {
+                selectedWorkspacePath = normalized;
                 return true;
             }
         }
         return false;
     }
 
-    public static synchronized String getSelectedWorkspaceName() {
-        WorkspaceDocInfo selected = findWorkspaceDoc(selectedWorkspaceId);
-        if (selected != null) {
-            if (selected.path() != null && !selected.path().isBlank()) {
-                return selected.path();
-            }
-            if (selected.name() != null && !selected.name().isBlank()) {
-                return selected.name();
-            }
-        }
-        return activeDocName;
-    }
-
-    public static synchronized List<WorkspaceDocInfo> getWorkspaceDocs() {
-        return List.copyOf(workspaceDocs);
-    }
-
-    public static synchronized String getWorkspaceDocScriptJson(String docId) {
-        if (docId == null || docId.isBlank()) {
+    public static synchronized String getSelectedWorkspaceLabel() {
+        WorkspaceFileInfo selected = findWorkspaceFile(selectedWorkspacePath);
+        if (selected == null) {
             return "";
         }
-        String value = workspaceDocScripts.get(docId.trim());
+        if (selected.path() != null && !selected.path().isBlank()) {
+            return selected.path();
+        }
+        return selected.name() == null ? "" : selected.name();
+    }
+
+    public static synchronized List<WorkspaceFileInfo> getWorkspaceFiles() {
+        return List.copyOf(workspaceFiles);
+    }
+
+    public static synchronized String getWorkspaceFileScriptJson(String workspacePath) {
+        String normalized = normalizeWorkspacePath(workspacePath);
+        if (normalized.isBlank()) {
+            return "";
+        }
+        String value = workspaceFileScripts.get(normalized);
         return value == null ? "" : value;
     }
 
-    public static synchronized Map<String, String> getWorkspaceDocScripts() {
-        return Map.copyOf(workspaceDocScripts);
+    public static synchronized Map<String, String> getWorkspaceFileScripts() {
+        return Map.copyOf(workspaceFileScripts);
     }
 
-    public static synchronized void setWorkspaceDocScriptJson(String workspaceId, String scriptJson) {
-        if (workspaceId == null || workspaceId.isBlank()) {
+    public static synchronized void setWorkspaceFileScriptJson(String workspacePath, String scriptJson) {
+        String normalized = normalizeWorkspacePath(workspacePath);
+        if (normalized.isBlank()) {
             return;
         }
         if (scriptJson == null || scriptJson.isBlank()) {
-            workspaceDocScripts.remove(workspaceId.trim());
+            workspaceFileScripts.remove(normalized);
             return;
         }
-        workspaceDocScripts.put(workspaceId.trim(), scriptJson);
+        workspaceFileScripts.put(normalized, scriptJson);
     }
 
-    private static synchronized void updateWorkspaceDocs(String docsSummaryJson) {
-        workspaceDocs.clear();
-        List<String> validIds = new ArrayList<>();
-        if (docsSummaryJson == null || docsSummaryJson.isBlank()) {
-            workspaceDocScripts.clear();
+    private static synchronized void updateWorkspaceFiles(String workspaceFilesJson) {
+        workspaceFiles.clear();
+        List<String> validPaths = new ArrayList<>();
+        if (workspaceFilesJson == null || workspaceFilesJson.isBlank()) {
+            workspaceFileScripts.clear();
+            selectedWorkspacePath = "";
             return;
         }
         try {
-            JsonElement root = JsonParser.parseString(docsSummaryJson);
+            JsonElement root = JsonParser.parseString(workspaceFilesJson);
             if (!root.isJsonArray()) {
-                workspaceDocScripts.clear();
+                workspaceFileScripts.clear();
+                selectedWorkspacePath = "";
                 return;
             }
-            for (JsonElement el : root.getAsJsonArray()) {
-                if (el == null || !el.isJsonObject()) {
+            for (JsonElement element : root.getAsJsonArray()) {
+                if (element == null || !element.isJsonObject()) {
                     continue;
                 }
-                JsonObject obj = el.getAsJsonObject();
-                String id = obj.has("id") && obj.get("id").isJsonPrimitive() ? obj.get("id").getAsString().trim() : "";
-                if (id.isBlank()) {
+                JsonObject obj = element.getAsJsonObject();
+                String path = normalizeWorkspacePath(getString(obj, "path"));
+                if (path.isBlank()) {
                     continue;
                 }
-                validIds.add(id);
-                String name = obj.has("name") && obj.get("name").isJsonPrimitive() ? obj.get("name").getAsString().trim() : "";
-                String path = obj.has("path") && obj.get("path").isJsonPrimitive() ? obj.get("path").getAsString().trim() : "";
-                String type = obj.has("type") && obj.get("type").isJsonPrimitive() ? obj.get("type").getAsString().trim() : "";
-                String areaTag = obj.has("areaTag") && obj.get("areaTag").isJsonPrimitive() ? obj.get("areaTag").getAsString().trim() : "";
-                String summary = obj.has("summary") && obj.get("summary").isJsonPrimitive() ? obj.get("summary").getAsString().trim() : "";
-                boolean active = obj.has("active") && obj.get("active").isJsonPrimitive() && obj.get("active").getAsBoolean();
-                boolean hasPending = obj.has("hasPendingPatch") && obj.get("hasPendingPatch").isJsonPrimitive() && obj.get("hasPendingPatch").getAsBoolean();
-                String revision = obj.has("revision") && obj.get("revision").isJsonPrimitive() ? obj.get("revision").getAsString().trim() : "";
-                boolean hasSizeValue = obj.has("hasSize") && obj.get("hasSize").isJsonPrimitive() && obj.get("hasSize").getAsBoolean();
-                int sx = obj.has("sizeX") && obj.get("sizeX").isJsonPrimitive() ? obj.get("sizeX").getAsInt() : 0;
-                int sy = obj.has("sizeY") && obj.get("sizeY").isJsonPrimitive() ? obj.get("sizeY").getAsInt() : 0;
-                int sz = obj.has("sizeZ") && obj.get("sizeZ").isJsonPrimitive() ? obj.get("sizeZ").getAsInt() : 0;
-                int ox = obj.has("originX") && obj.get("originX").isJsonPrimitive() ? obj.get("originX").getAsInt() : 0;
-                int oy = obj.has("originY") && obj.get("originY").isJsonPrimitive() ? obj.get("originY").getAsInt() : 0;
-                int oz = obj.has("originZ") && obj.get("originZ").isJsonPrimitive() ? obj.get("originZ").getAsInt() : 0;
-                int changed = obj.has("pendingChangedBlocks") && obj.get("pendingChangedBlocks").isJsonPrimitive()
-                        ? Math.max(0, obj.get("pendingChangedBlocks").getAsInt())
-                        : 0;
-                workspaceDocs.add(new WorkspaceDocInfo(id, name, path, type, areaTag, summary, active, hasPending, revision, ox, oy, oz, hasSizeValue, sx, sy, sz, changed));
-                if (active && (activeDocName == null || activeDocName.isBlank()) && !name.isBlank()) {
-                    activeDocName = name;
-                }
+                validPaths.add(path);
+                workspaceFiles.add(new WorkspaceFileInfo(
+                        path,
+                        getString(obj, "name"),
+                        getString(obj, "type"),
+                        getString(obj, "areaTag"),
+                        getString(obj, "summary"),
+                        getBoolean(obj, "hasPendingPatch"),
+                        getString(obj, "revision"),
+                        getInt(obj, "originX"),
+                        getInt(obj, "originY"),
+                        getInt(obj, "originZ"),
+                        getBoolean(obj, "hasSize"),
+                        getInt(obj, "sizeX"),
+                        getInt(obj, "sizeY"),
+                        getInt(obj, "sizeZ"),
+                        Math.max(0, getInt(obj, "pendingChangedBlocks"))
+                ));
             }
         } catch (Exception ignored) {
         }
-        workspaceDocScripts.keySet().removeIf(id -> !validIds.contains(id));
-
-        boolean hasSelected = false;
-        for (WorkspaceDocInfo doc : workspaceDocs) {
-            if (doc != null && doc.id().equals(selectedWorkspaceId)) {
-                hasSelected = true;
-                break;
-            }
-        }
-        if (!hasSelected) {
-            if (activeDocId != null && !activeDocId.isBlank() && validIds.contains(activeDocId)) {
-                selectedWorkspaceId = activeDocId;
-            } else if (!workspaceDocs.isEmpty()) {
-                selectedWorkspaceId = workspaceDocs.get(0).id();
-            } else {
-                selectedWorkspaceId = "";
-            }
+        workspaceFileScripts.keySet().removeIf(path -> !validPaths.contains(path));
+        if (!selectedWorkspacePath.isBlank() && !validPaths.contains(selectedWorkspacePath)) {
+            selectedWorkspacePath = "";
         }
     }
 
-    private static WorkspaceDocInfo findWorkspaceDoc(String workspaceId) {
-        if (workspaceId == null || workspaceId.isBlank()) {
+    private static WorkspaceFileInfo findWorkspaceFile(String workspacePath) {
+        String normalized = normalizeWorkspacePath(workspacePath);
+        if (normalized.isBlank()) {
             return null;
         }
-        for (WorkspaceDocInfo doc : workspaceDocs) {
-            if (doc != null && workspaceId.equals(doc.id())) {
-                return doc;
+        for (WorkspaceFileInfo file : workspaceFiles) {
+            if (file != null && normalized.equals(file.path())) {
+                return file;
             }
         }
         return null;
@@ -638,24 +626,21 @@ public final class ClientSessionState {
                 JsonElement root = JsonParser.parseString(checkpointsJson);
                 if (root.isJsonArray()) {
                     JsonArray arr = root.getAsJsonArray();
-                    for (JsonElement el : arr) {
-                        if (el == null || !el.isJsonObject()) {
+                    for (JsonElement element : arr) {
+                        if (element == null || !element.isJsonObject()) {
                             continue;
                         }
-                        JsonObject obj = el.getAsJsonObject();
-                        String id = obj.has("id") && obj.get("id").isJsonPrimitive() ? obj.get("id").getAsString().trim() : "";
+                        JsonObject obj = element.getAsJsonObject();
+                        String id = getString(obj, "id").trim();
                         if (id.isBlank()) {
                             continue;
                         }
-                        String label = obj.has("label") && obj.get("label").isJsonPrimitive() ? obj.get("label").getAsString().trim() : "";
-                        String revisionLabel = obj.has("revision") && obj.get("revision").isJsonPrimitive() ? obj.get("revision").getAsString().trim() : "";
-                        checkpoints.add(new CheckpointInfo(id, label, revisionLabel));
+                        checkpoints.add(new CheckpointInfo(id, getString(obj, "label"), getString(obj, "revision")));
                     }
                 }
             } catch (Exception ignored) {
             }
         }
-
         if (checkpoints.isEmpty()) {
             selectedCheckpointIndex = -1;
             return;
@@ -709,7 +694,7 @@ public final class ClientSessionState {
         return rollbackMode;
     }
 
-    private static void clearPreview() {
+    private static synchronized void clearPreview() {
         previewSummary = "";
         previewDetail = "";
         previewRisk = "";
@@ -722,6 +707,47 @@ public final class ClientSessionState {
             case "pending", "in_progress", "done", "blocked" -> value;
             default -> "pending";
         };
+    }
+
+    private static String normalizeWorkspacePath(String value) {
+        String normalized = value == null ? "" : value.trim().replace('\\', '/');
+        while (normalized.startsWith("/")) {
+            normalized = normalized.substring(1);
+        }
+        return normalized.replaceAll("/{2,}", "/");
+    }
+
+    private static String getString(JsonObject obj, String key) {
+        if (obj == null || key == null || !obj.has(key) || !obj.get(key).isJsonPrimitive()) {
+            return "";
+        }
+        try {
+            return obj.get(key).getAsString();
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
+    private static int getInt(JsonObject obj, String key) {
+        if (obj == null || key == null || !obj.has(key) || !obj.get(key).isJsonPrimitive()) {
+            return 0;
+        }
+        try {
+            return obj.get(key).getAsInt();
+        } catch (Exception ignored) {
+            return 0;
+        }
+    }
+
+    private static boolean getBoolean(JsonObject obj, String key) {
+        if (obj == null || key == null || !obj.has(key) || !obj.get(key).isJsonPrimitive()) {
+            return false;
+        }
+        try {
+            return obj.get(key).getAsBoolean();
+        } catch (Exception ignored) {
+            return false;
+        }
     }
 
     public record ChatMessage(String role, String text) {
@@ -739,14 +765,12 @@ public final class ClientSessionState {
     public record CheckpointInfo(String id, String label, String revision) {
     }
 
-    public record WorkspaceDocInfo(
-            String id,
-            String name,
+    public record WorkspaceFileInfo(
             String path,
+            String name,
             String type,
             String areaTag,
             String summary,
-            boolean active,
             boolean hasPendingPatch,
             String revision,
             int originX,

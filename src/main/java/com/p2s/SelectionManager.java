@@ -2,7 +2,6 @@ package com.p2s;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
-import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import com.p2s.network.S2CSelectionSyncPayload;
 
@@ -20,10 +19,6 @@ public final class SelectionManager {
         if (player == null || pos == null) {
             return;
         }
-        if (SessionManager.hasActiveSession(player.getUUID())) {
-            player.displayClientMessage(Component.literal("Selection is locked while session is active"), false);
-            return;
-        }
         UUID id = player.getUUID();
         Selection current = serverSelections.getOrDefault(id, new Selection(null, null));
         serverSelections.put(id, current.withPos1(pos));
@@ -32,10 +27,6 @@ public final class SelectionManager {
 
     public static void setPos2(ServerPlayer player, BlockPos pos) {
         if (player == null || pos == null) {
-            return;
-        }
-        if (SessionManager.hasActiveSession(player.getUUID())) {
-            player.displayClientMessage(Component.literal("Selection is locked while session is active"), false);
             return;
         }
         UUID id = player.getUUID();

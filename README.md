@@ -28,7 +28,7 @@ P2S 是一个用于 Minecraft 结构生成与迭代编辑的 Fabric 模组，支
   - 支持审批选项工具：`request_user_choice` / `clear_user_choice`（用户在聊天 UI 里点选后继续流程）。
   - 支持 subagent 管理工具：`list_subagents` / `create_subagent` / `get_subagent` / `delete_subagent` / `list_profiles` / `get_profile`。
 - 服务端工具桥接： [ClientToolBridge](src/client/java/com/p2s/ClientToolBridge.java)
-  - 客户端通过 `c2s_tool_bridge` 请求服务端工具（`read_workspace_state` / `propose_patch` / `search_block_ids`）。
+  - 客户端通过 `c2s_tool_bridge` 请求服务端工具（`read_workspace_file` / `propose_patch` / `search_block_ids`）。
   - 服务端返回 `s2c_tool_bridge`。
 - Skill 存储： [SkillStore](src/client/java/com/p2s/SkillStore.java)
   - 客户端全局目录：`config/p2s_skills/skills/<skill-id>/SKILL.md`
@@ -100,7 +100,7 @@ P2S 是一个用于 Minecraft 结构生成与迭代编辑的 Fabric 模组，支
 2. 客户端 agent 调用 LLM，并可先读 skill（`list/read/search_skill`）。
 3. 如需分派任务，主 agent 可先创建 subagent（异步）并轮询其状态/结果。
 4. 需要世界上下文时，通过 tool bridge 调用服务端工具：
-   - `read_workspace_state`
+   - `read_workspace_file`
    - `propose_patch`
    - `search_block_ids`
 5. 服务端对 patch 进行试算、diff、校验并生成 preview。

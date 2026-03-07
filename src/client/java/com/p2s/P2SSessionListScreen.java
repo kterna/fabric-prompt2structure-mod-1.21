@@ -24,6 +24,8 @@ public class P2SSessionListScreen extends Screen {
     private int scroll = 0;
     private String statusText = "";
     private int statusColor = 0xAAAAAA;
+    private String projectId = "";
+    private String projectName = "";
 
     public P2SSessionListScreen(Screen parent) {
         super(Component.literal("P2S Sessions"));
@@ -33,18 +35,22 @@ public class P2SSessionListScreen extends Screen {
     @Override
     protected void init() {
         super.init();
-        sessions = SessionPersistence.listSessions();
-        statusText = "";
+        projectId = ClientSessionState.getProjectId();
+        projectName = ClientSessionState.getProjectName();
+        sessions = projectId == null || projectId.isBlank()
+                ? new ArrayList<>()
+                : SessionPersistence.listSessions(projectId);
+        statusText = projectId == null || projectId.isBlank() ? "Open a project first." : "";
+        statusColor = projectId == null || projectId.isBlank() ? 0xFFAA55 : 0xAAAAAA;
 
         clearWidgets();
         rowButtons.clear();
         loadButtons.clear();
         deleteButtons.clear();
 
-        int panelWidth = Math.min(600, this.width - 40);
+        int panelWidth = Math.min(640, this.width - 40);
         int left = (this.width - panelWidth) / 2;
         int top = 40;
-
         int listWidth = panelWidth - BUTTON_WIDTH * 2 - 16;
 
         for (int i = 0; i < VISIBLE_ROWS; i++) {
@@ -58,7 +64,7 @@ public class P2SSessionListScreen extends Screen {
             rowButtons.add(rowBtn);
             addRenderableWidget(rowBtn);
 
-            Button loadBtn = Button.builder(Component.literal("Load"), btn -> loadSession(row))
+            Button loadBtn = Button.builder(Component.literal("Open"), btn -> loadSession(row))
                     .bounds(left + listWidth + 4, rowY, BUTTON_WIDTH, ROW_HEIGHT)
                     .build();
             loadButtons.add(loadBtn);
@@ -86,6 +92,16 @@ public class P2SSessionListScreen extends Screen {
                 refreshRows();
             }
         }).bounds(left + 56, bottomY, 60, 20).build());
+
+        addRenderableWidget(Button.builder(Component.literal("New Session"), btn -> {
+            ClientAgentManager.newSession();
+            onClose();
+        }).bounds(left + 124, bottomY, 90, 20).build());
+
+        addRenderableWidget(Button.builder(Component.literal("Close"), btn -> {
+            ClientAgentManager.closeCurrentSession();
+            onClose();
+        }).bounds(left + 220, bottomY, 60, 20).build());
 
         addRenderableWidget(Button.builder(Component.literal("Back"), btn -> onClose())
                 .bounds(left + panelWidth - 60, bottomY, 60, 20).build());
@@ -145,7 +161,9 @@ public class P2SSessionListScreen extends Screen {
         SessionPersistence.SessionIndexEntry entry = sessions.get(idx);
         boolean ok = SessionPersistence.deleteSession(entry.id());
         if (ok) {
-            sessions = SessionPersistence.listSessions();
+            sessions = projectId == null || projectId.isBlank()
+                    ? new ArrayList<>()
+                    : SessionPersistence.listSessions(projectId);
             statusText = "Deleted";
             statusColor = 0x55FF55;
         } else {
@@ -160,8 +178,7 @@ public class P2SSessionListScreen extends Screen {
             return "?";
         }
         try {
-            SimpleDateFormat sdf = new SimpleDateFormat("MM-dd HH:mm");
-            return sdf.format(new Date(millis));
+            return new SimpleDateFormat("MM-dd HH:mm").format(new Date(millis));
         } catch (Exception e) {
             return "?";
         }
@@ -172,9 +189,10 @@ public class P2SSessionListScreen extends Screen {
         super.renderBackground(gfx, mouseX, mouseY, delta);
         super.render(gfx, mouseX, mouseY, delta);
 
-        int panelWidth = Math.min(600, this.width - 40);
+        int panelWidth = Math.min(640, this.width - 40);
         int left = (this.width - panelWidth) / 2;
-        gfx.drawString(this.font, "Session History (" + sessions.size() + ")", left, 24, 0xFFFFFF, true);
+        String headerProject = projectName == null || projectName.isBlank() ? "No Project" : projectName;
+        gfx.drawString(this.font, "Sessions · " + headerProject + " (" + sessions.size() + ")", left, 24, 0xFFFFFF, true);
 
         if (statusText != null && !statusText.isBlank()) {
             gfx.drawString(this.font, statusText, left, this.height - 20, statusColor, false);

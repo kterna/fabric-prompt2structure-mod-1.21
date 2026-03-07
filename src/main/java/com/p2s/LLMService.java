@@ -827,7 +827,7 @@ public final class LLMService {
             projectTool.addProperty("type", "function");
             JsonObject projectFn = new JsonObject();
             projectFn.addProperty("name", "get_project_state");
-            projectFn.addProperty("description", "Get the current project overview, workspace file list, pending workspace ids, and summary.");
+            projectFn.addProperty("description", "Get the current project overview, workspace file list, pending paths, and summary.");
             JsonObject projectParams = new JsonObject();
             projectParams.addProperty("type", "object");
             projectParams.add("properties", new JsonObject());
@@ -849,10 +849,10 @@ public final class LLMService {
             readParams.addProperty("type", "object");
             JsonObject readProps = new JsonObject();
 
-            JsonObject workspaceIdProp = new JsonObject();
-            workspaceIdProp.addProperty("type", "string");
-            workspaceIdProp.addProperty("description", "Workspace file id to read.");
-            readProps.add("workspace_id", workspaceIdProp);
+            JsonObject pathProp = new JsonObject();
+            pathProp.addProperty("type", "string");
+            pathProp.addProperty("description", "Workspace file path to read.");
+            readProps.add("path", pathProp);
 
             JsonObject committedProp = new JsonObject();
             committedProp.addProperty("type", "boolean");
@@ -861,42 +861,8 @@ public final class LLMService {
 
             readParams.add("properties", readProps);
             JsonArray readRequired = new JsonArray();
-            readRequired.add("workspace_id");
+            readRequired.add("path");
             readParams.add("required", readRequired);
-            readParams.addProperty("additionalProperties", false);
-            readFn.add("parameters", readParams);
-            readTool.add("function", readFn);
-            tools.add(readTool);
-        }
-
-        if (allowsTool(allowedTools, "read_workspace_state")) {
-            JsonObject readTool = new JsonObject();
-            readTool.addProperty("type", "function");
-            JsonObject readFn = new JsonObject();
-            readFn.addProperty("name", "read_workspace_state");
-            readFn.addProperty("description",
-                    "Legacy alias of read_workspace_file. Read workspace size and existing blocks script. " +
-                    "Returns a full script JSON when small, otherwise truncated=true with script_json.");
-            JsonObject readParams = new JsonObject();
-            readParams.addProperty("type", "object");
-            JsonObject readProps = new JsonObject();
-
-            JsonObject readWorkspaceId = new JsonObject();
-            readWorkspaceId.addProperty("type", "string");
-            readWorkspaceId.addProperty("description", "Optional workspace file id. Prefer workspace_id over doc_id.");
-            readProps.add("workspace_id", readWorkspaceId);
-
-            JsonObject committedProp = new JsonObject();
-            committedProp.addProperty("type", "boolean");
-            committedProp.addProperty("description", "Defaults to true (committed script). Set false only when staged script is needed for UI diff.");
-            readProps.add("committed", committedProp);
-
-            JsonObject readDocId = new JsonObject();
-            readDocId.addProperty("type", "string");
-            readDocId.addProperty("description", "Optional document id. If omitted, reads current active document.");
-            readProps.add("doc_id", readDocId);
-
-            readParams.add("properties", readProps);
             readParams.addProperty("additionalProperties", false);
             readFn.add("parameters", readParams);
             readTool.add("function", readFn);
@@ -938,11 +904,6 @@ public final class LLMService {
             createType.addProperty("description", "Workspace file type.");
             createProps.add("type", createType);
 
-            JsonObject copyFrom = new JsonObject();
-            copyFrom.addProperty("type", "string");
-            copyFrom.addProperty("description", "Optional source workspace id to copy content/origin/size from.");
-            createProps.add("copy_from_workspace_id", copyFrom);
-
             createParams.add("properties", createProps);
             JsonArray createRequired = new JsonArray();
             createRequired.add("name");
@@ -965,25 +926,20 @@ public final class LLMService {
             renameParams.addProperty("type", "object");
             JsonObject renameProps = new JsonObject();
 
-            JsonObject renameWorkspaceId = new JsonObject();
-            renameWorkspaceId.addProperty("type", "string");
-            renameWorkspaceId.addProperty("description", "Workspace file id.");
-            renameProps.add("workspace_id", renameWorkspaceId);
-
-            JsonObject renameName = new JsonObject();
-            renameName.addProperty("type", "string");
-            renameName.addProperty("description", "New display name.");
-            renameProps.add("name", renameName);
-
             JsonObject renamePath = new JsonObject();
             renamePath.addProperty("type", "string");
-            renamePath.addProperty("description", "Optional new logical path.");
+            renamePath.addProperty("description", "Current workspace file path.");
             renameProps.add("path", renamePath);
+
+            JsonObject renameNewPath = new JsonObject();
+            renameNewPath.addProperty("type", "string");
+            renameNewPath.addProperty("description", "New workspace file path.");
+            renameProps.add("new_path", renameNewPath);
 
             renameParams.add("properties", renameProps);
             JsonArray renameRequired = new JsonArray();
-            renameRequired.add("workspace_id");
-            renameRequired.add("name");
+            renameRequired.add("path");
+            renameRequired.add("new_path");
             renameParams.add("required", renameRequired);
             renameParams.addProperty("additionalProperties", false);
             renameFn.add("parameters", renameParams);
@@ -1001,14 +957,14 @@ public final class LLMService {
             deleteParams.addProperty("type", "object");
             JsonObject deleteProps = new JsonObject();
 
-            JsonObject deleteWorkspaceId = new JsonObject();
-            deleteWorkspaceId.addProperty("type", "string");
-            deleteWorkspaceId.addProperty("description", "Workspace file id.");
-            deleteProps.add("workspace_id", deleteWorkspaceId);
+            JsonObject deletePath = new JsonObject();
+            deletePath.addProperty("type", "string");
+            deletePath.addProperty("description", "Workspace file path.");
+            deleteProps.add("path", deletePath);
 
             deleteParams.add("properties", deleteProps);
             JsonArray deleteRequired = new JsonArray();
-            deleteRequired.add("workspace_id");
+            deleteRequired.add("path");
             deleteParams.add("required", deleteRequired);
             deleteParams.addProperty("additionalProperties", false);
             deleteFn.add("parameters", deleteParams);
@@ -1067,15 +1023,10 @@ public final class LLMService {
             baseRevision.addProperty("description", "Workspace revision this patch is based on.");
             properties.add("base_revision", baseRevision);
 
-            JsonObject patchWorkspaceId = new JsonObject();
-            patchWorkspaceId.addProperty("type", "string");
-            patchWorkspaceId.addProperty("description", "Workspace file id this patch applies to.");
-            properties.add("workspace_id", patchWorkspaceId);
-
-            JsonObject patchDocId = new JsonObject();
-            patchDocId.addProperty("type", "string");
-            patchDocId.addProperty("description", "Legacy alias of workspace_id.");
-            properties.add("doc_id", patchDocId);
+            JsonObject patchPath = new JsonObject();
+            patchPath.addProperty("type", "string");
+            patchPath.addProperty("description", "Workspace file path this patch applies to.");
+            properties.add("path", patchPath);
 
             JsonObject intent = new JsonObject();
             intent.addProperty("type", "string");
@@ -1194,7 +1145,7 @@ public final class LLMService {
 
             params.add("properties", properties);
             JsonArray required = new JsonArray();
-            required.add("workspace_id");
+            required.add("path");
             required.add("operations");
             params.add("required", required);
             patchFn.add("parameters", params);

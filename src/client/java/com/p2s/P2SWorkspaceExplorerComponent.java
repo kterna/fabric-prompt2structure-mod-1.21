@@ -31,18 +31,18 @@ final class P2SWorkspaceExplorerComponent {
                 .bounds(config.leftX() + explorerCreateWidth + explorerActionGap + explorerRenameWidth + explorerActionGap,
                         config.row1Y(), explorerDeleteWidth, config.inputHeight()).build());
 
-        boolean hasSelectedWorkspace = config.selectedWorkspaceId() != null && !config.selectedWorkspaceId().isBlank();
-        ClientSessionState.WorkspaceDocInfo selectedWorkspace = null;
-        for (ClientSessionState.WorkspaceDocInfo doc : config.docs()) {
-            if (doc != null && doc.id().equals(config.selectedWorkspaceId())) {
-                selectedWorkspace = doc;
+        boolean hasSelectedWorkspace = config.selectedWorkspacePath() != null && !config.selectedWorkspacePath().isBlank();
+        ClientSessionState.WorkspaceFileInfo selectedWorkspace = null;
+        for (ClientSessionState.WorkspaceFileInfo file : config.files()) {
+            if (file != null && file.path().equals(config.selectedWorkspacePath())) {
+                selectedWorkspace = file;
                 break;
             }
         }
 
         renameButton.active = hasSelectedWorkspace && !config.renameMode();
         deleteButton.active = hasSelectedWorkspace
-                && config.docs().size() > 1
+                && config.files().size() > 1
                 && selectedWorkspace != null
                 && !selectedWorkspace.hasPendingPatch()
                 && !config.renameMode();
@@ -50,7 +50,7 @@ final class P2SWorkspaceExplorerComponent {
         EditBox renameInput = null;
         Button renameOkButton = null;
         Button renameCancelButton = null;
-        int docY = config.row1Y() + config.inputHeight() + explorerActionGap;
+        int fileY = config.row1Y() + config.inputHeight() + explorerActionGap;
         if (config.renameMode()) {
             int renameActionWidth = 22;
             int renameInputWidth = Math.max(60, config.explorerWidth() - renameActionWidth * 2 - explorerActionGap * 2);
@@ -67,35 +67,35 @@ final class P2SWorkspaceExplorerComponent {
                     .bounds(config.leftX() + renameInputWidth + explorerActionGap + renameActionWidth + explorerActionGap,
                             config.row2Y(), renameActionWidth, config.inputHeight()).build());
 
-            docY = config.row2Y() + config.inputHeight() + explorerActionGap;
+            fileY = config.row2Y() + config.inputHeight() + explorerActionGap;
         }
 
-        List<Button> docButtons = new ArrayList<>();
-        int docBottom = host.screenHeight() - config.contextFooterHeight() - PADDING;
-        for (ClientSessionState.WorkspaceDocInfo doc : config.docs()) {
-            if (doc == null) {
+        List<Button> fileButtons = new ArrayList<>();
+        int fileBottom = host.screenHeight() - config.contextFooterHeight() - PADDING;
+        for (ClientSessionState.WorkspaceFileInfo file : config.files()) {
+            if (file == null) {
                 continue;
             }
-            if (docY + config.inputHeight() > docBottom) {
+            if (fileY + config.inputHeight() > fileBottom) {
                 break;
             }
-            String docName = doc.path() == null || doc.path().isBlank()
-                    ? (doc.name() == null || doc.name().isBlank() ? doc.id() : doc.name())
-                    : doc.path();
-            int slash = docName.lastIndexOf('/');
-            String label = slash >= 0 ? docName.substring(slash + 1) : docName;
-            if (doc.hasPendingPatch()) {
+            String fileName = file.path() == null || file.path().isBlank()
+                    ? (file.name() == null || file.name().isBlank() ? "(unnamed)" : file.name())
+                    : file.path();
+            int slash = fileName.lastIndexOf('/');
+            String label = slash >= 0 ? fileName.substring(slash + 1) : fileName;
+            if (file.hasPendingPatch()) {
                 label = label + " *";
             }
 
-            Button docButton = host.addButton(Button.builder(Component.literal(label), btn -> config.onSwitch().accept(doc.id()))
-                    .bounds(config.leftX(), docY, config.explorerWidth(), config.inputHeight()).build());
-            docButton.active = !doc.id().equals(config.selectedWorkspaceId());
-            docButtons.add(docButton);
-            docY += config.inputHeight() + 1;
+            Button fileButton = host.addButton(Button.builder(Component.literal(label), btn -> config.onSwitch().accept(file.path()))
+                    .bounds(config.leftX(), fileY, config.explorerWidth(), config.inputHeight()).build());
+            fileButton.active = !file.path().equals(config.selectedWorkspacePath());
+            fileButtons.add(fileButton);
+            fileY += config.inputHeight() + 1;
         }
 
-        return new BuildResult(createButton, renameButton, deleteButton, renameInput, renameOkButton, renameCancelButton, docButtons);
+        return new BuildResult(createButton, renameButton, deleteButton, renameInput, renameOkButton, renameCancelButton, fileButtons);
     }
 
     interface Host {
@@ -117,8 +117,8 @@ final class P2SWorkspaceExplorerComponent {
             int contextFooterHeight,
             boolean renameMode,
             String renameDraft,
-            String selectedWorkspaceId,
-            List<ClientSessionState.WorkspaceDocInfo> docs,
+            String selectedWorkspacePath,
+            List<ClientSessionState.WorkspaceFileInfo> files,
             Runnable onCreate,
             Runnable onEnterRename,
             Runnable onDelete,
@@ -135,7 +135,7 @@ final class P2SWorkspaceExplorerComponent {
             EditBox renameInput,
             Button renameOkButton,
             Button renameCancelButton,
-            List<Button> docButtons
+            List<Button> fileButtons
     ) {
     }
 }

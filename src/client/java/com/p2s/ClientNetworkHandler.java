@@ -29,25 +29,15 @@ public final class ClientNetworkHandler {
 
         ClientPlayNetworking.registerGlobalReceiver(S2CSessionSyncPayload.TYPE, (payload, context) -> {
             if (P2SMod.DEBUG) {
-                P2SMod.LOGGER.info("[DEBUG] C->S2CSessionSync received -> active={}, sessionId={}, turnCount={}, partCount={}, revision={}, hasPendingPatch={}", payload.active(), payload.sessionId(), payload.turnCount(), payload.partCount(), payload.revision(), payload.hasPendingPatch());
+                P2SMod.LOGGER.info("[DEBUG] C->S2CSessionSync received -> hasProject={}, sessionActive={}, sessionId={}, partCount={}, revision={}, hasPendingPatch={}", payload.hasProject(), payload.sessionActive(), payload.sessionId(), payload.partCount(), payload.revision(), payload.hasPendingPatch());
             }
             context.client().execute(() -> ClientSessionState.onSessionSync(
-                    payload.active(),
+                    payload.hasProject(),
+                    payload.sessionActive(),
                     payload.sessionId(),
                     payload.projectId(),
                     payload.projectName(),
                     payload.projectDescription(),
-                    payload.turnCount(),
-                    payload.partCount(),
-                    payload.totalBlocks(),
-                    payload.partsSummary(),
-                    payload.structureSummary(),
-                    payload.runtimeState(),
-                    payload.revision(),
-                    payload.hasPendingPatch(),
-                    payload.pendingSummary(),
-                    payload.pendingRisk(),
-                    payload.pendingChangedBlocks(),
                     payload.originX(),
                     payload.originY(),
                     payload.originZ(),
@@ -55,11 +45,21 @@ public final class ClientNetworkHandler {
                     payload.sizeX(),
                     payload.sizeY(),
                     payload.sizeZ(),
+                    payload.selectedWorkspacePath(),
+                    payload.partCount(),
+                    payload.totalBlocks(),
+                    payload.partsSummary(),
+                    payload.structureSummary(),
+                    payload.runtimeState(),
+                    payload.revision(),
+                    payload.hasPendingPatch(),
+                    payload.pendingPath(),
+                    payload.pendingSummary(),
+                    payload.pendingRisk(),
+                    payload.pendingChangedBlocks(),
                     payload.checkpointsJson(),
                     payload.currentScriptJson(),
-                    payload.activeDocId(),
-                    payload.activeDocName(),
-                    payload.docsSummaryJson()
+                    payload.workspaceFilesJson()
             ));
         });
 

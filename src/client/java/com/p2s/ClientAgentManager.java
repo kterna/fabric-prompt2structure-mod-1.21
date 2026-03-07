@@ -34,7 +34,7 @@ public final class ClientAgentManager {
     private static final int MAX_CHOICE_OPTIONS = 3;
     private static final String CLIENT_TOOL_CONTRACT = """
             ## Client Agent Contract
-            - Start with get_project_state for project-level context before editing specific workspace files.
+            - Start with get_project_state for current-project context before editing files.
             - Use list_skills to inspect available player skills by name/description.
             - Read full skill text only when needed via read_skill.
             - Read focused skill sub-documents via read_subdoc when read_skill exposes subdocs.
@@ -42,10 +42,10 @@ public final class ClientAgentManager {
             - Keep an explicit todo list with the todo tool (actions: get/set/upsert/delete/clear).
             - Before asking the user to choose among alternatives, call request_user_choice.
             - After request_user_choice, wait for user selection before continuing execution.
-            - Use read_workspace_file when workspace size/current blocks context is required (set workspace_id explicitly when reading a specific file).
-            - read_workspace_state is a compatibility alias of read_workspace_file; prefer the canonical name.
+            - Tool calls operate on the current project implicitly; never send project_id.
+            - File tools target workspace files by path only. Always pass path explicitly to read_workspace_file and propose_patch.
             - Use create_workspace_file / rename_workspace_file / delete_workspace_file for file management.
-            - Propose edits with propose_patch and wait for user apply/discard decision; always set workspace_id explicitly.
+            - Propose edits with propose_patch and wait for user apply/discard decision.
             - Use search_block_ids when unsure about block id names.
             - Use list_profiles/get_profile before creating subagents when profile choice matters.
             - Use create_subagent for delegated tasks, then poll with get_subagent.
@@ -62,7 +62,7 @@ public final class ClientAgentManager {
     private static final Set<String> PARALLEL_SAFE_TOOLS = Set.of(
             "list_skills", "read_skill", "read_subdoc", "search_skill",
             "todo", "get_todo",
-            "get_project_state", "read_workspace_file", "read_workspace_state", "search_block_ids", "explain_plan",
+            "get_project_state", "read_workspace_file", "search_block_ids", "explain_plan",
             "list_subagents", "get_subagent", "list_profiles", "get_profile"
     );
 
@@ -105,6 +105,9 @@ public final class ClientAgentManager {
         LocalSession session;
         synchronized (LOCK) {
             session = ensureSessionLocked();
+            if (session == null) {
+                return;
+            }
             if (session.inFlight) {
                 postToClient(() -> ClientSessionState.setStatus("busy"));
                 return;
@@ -131,9 +134,14 @@ public final class ClientAgentManager {
             return;
         }
         String summary = ClientSessionState.getPendingSummary();
+        String pendingPath = ClientSessionState.getPendingPath();
         ClientSessionState.clearPendingPatch();
 
-        ClientPlayNetworking.send(new C2SSessionActionPayload("apply", ""));
+        JsonObject payload = new JsonObject();
+        if (pendingPath != null && !pendingPath.isBlank()) {
+            payload.addProperty("path", pendingPath);
+        }
+        ClientPlayNetworking.send(new C2SSessionActionPayload("apply", payload.toString()));
 
         String historyContent = "User APPLIED the proposed patch. Summary: " + summary + " Continue with the next step.";
         String userMessageText = "Applied patch: " + summary;
@@ -141,6 +149,9 @@ public final class ClientAgentManager {
         LocalSession session;
         synchronized (LOCK) {
             session = ensureSessionLocked();
+            if (session == null) {
+                return;
+            }
             if (session.inFlight) {
                 postToClient(() -> ClientSessionState.setStatus("busy"));
                 return;
@@ -167,10 +178,18 @@ public final class ClientAgentManager {
             return;
         }
         String summary = ClientSessionState.getPendingSummary();
+        String pendingPath = ClientSessionState.getPendingPath();
         ClientSessionState.clearPendingPatch();
 
         String safeReason = reason == null ? "" : reason.trim();
-        ClientPlayNetworking.send(new C2SSessionActionPayload("discard", safeReason));
+        JsonObject payload = new JsonObject();
+        if (pendingPath != null && !pendingPath.isBlank()) {
+            payload.addProperty("path", pendingPath);
+        }
+        if (!safeReason.isBlank()) {
+            payload.addProperty("reason", safeReason);
+        }
+        ClientPlayNetworking.send(new C2SSessionActionPayload("discard", payload.toString()));
 
         String historyContent = "User DISCARDED the proposed patch. Summary: " + summary;
         if (!safeReason.isEmpty()) {
@@ -186,6 +205,9 @@ public final class ClientAgentManager {
         LocalSession session;
         synchronized (LOCK) {
             session = ensureSessionLocked();
+            if (session == null) {
+                return;
+            }
             if (session.inFlight) {
                 postToClient(() -> ClientSessionState.setStatus("busy"));
                 return;
@@ -236,6 +258,9 @@ public final class ClientAgentManager {
         LocalSession session;
         synchronized (LOCK) {
             session = ensureSessionLocked();
+            if (session == null) {
+                return;
+            }
             if (session.inFlight) {
                 postToClient(() -> ClientSessionState.setStatus("busy"));
                 return;
@@ -497,7 +522,7 @@ public final class ClientAgentManager {
                 ok.addProperty("accepted", true);
                 yield ok;
             }
-            case "get_project_state", "read_workspace_file", "read_workspace_state",
+            case "get_project_state", "read_workspace_file",
                     "create_workspace_file", "rename_workspace_file", "delete_workspace_file",
                     "propose_patch", "search_block_ids" ->
                     callServerTool(toolName, normalizeArgsObject(call.arguments()));
@@ -1003,6 +1028,21 @@ public final class ClientAgentManager {
         return payload;
     }
 
+    private static String formatAgentError(Throwable ex) {
+        Throwable cause = ex;
+        while (cause != null && cause.getCause() != null && cause.getCause() != cause) {
+            cause = cause.getCause();
+        }
+        if (cause instanceof TimeoutException) {
+            return "Timed out";
+        }
+        String message = cause == null ? null : cause.getMessage();
+        if (message == null || message.isBlank()) {
+            message = ex == null ? "" : ex.getMessage();
+        }
+        return message == null || message.isBlank() ? "Unknown error" : message;
+    }
+
     private static JsonObject buildToolMessage(LLMService.ToolCall call, JsonObject payload) {
         JsonObject toolMsg = new JsonObject();
         toolMsg.addProperty("role", "tool");
@@ -1018,72 +1058,6 @@ public final class ClientAgentManager {
             return "default";
         }
         return session.id;
-    }
-
-    private static LocalSession ensureSessionLocked() {
-        if (currentSession != null) {
-            return currentSession;
-        }
-        LocalSession session = new LocalSession();
-        session.id = UUID.randomUUID().toString();
-        session.history = new ArrayList<>();
-        session.inFlight = false;
-        session.createdAt = System.currentTimeMillis();
-
-        JsonObject system = new JsonObject();
-        system.addProperty("role", "system");
-        system.addProperty("content", P2SClientConfig.getSystemPrompt() + "\n\n" + CLIENT_TOOL_CONTRACT);
-        session.history.add(system);
-
-        currentSession = session;
-        if (!session.serverSessionStarted) {
-            String payload = buildStartPayload(session);
-            ClientPlayNetworking.send(new C2SSessionActionPayload("start", payload));
-            session.serverSessionStarted = true;
-        }
-        return session;
-    }
-
-    private static String buildStartPayload(LocalSession session) {
-        boolean hasSpatial = session.originX != 0 || session.originY != 0 || session.originZ != 0 || session.hasSize;
-        boolean hasScript = session.currentScriptJson != null && !session.currentScriptJson.isBlank();
-        boolean hasWorkspaceDocs = session.workspaceDocsJson != null && !session.workspaceDocsJson.isBlank();
-        if (!hasSpatial && !hasScript && !hasWorkspaceDocs) {
-            return "";
-        }
-        JsonObject json = new JsonObject();
-        json.addProperty("originX", session.originX);
-        json.addProperty("originY", session.originY);
-        json.addProperty("originZ", session.originZ);
-        json.addProperty("hasSize", session.hasSize);
-        json.addProperty("sizeX", session.sizeX);
-        json.addProperty("sizeY", session.sizeY);
-        json.addProperty("sizeZ", session.sizeZ);
-        if (session.projectId != null && !session.projectId.isBlank()) {
-            json.addProperty("projectId", session.projectId);
-        }
-        if (session.projectName != null && !session.projectName.isBlank()) {
-            json.addProperty("projectName", session.projectName);
-        }
-        if (session.projectDescription != null && !session.projectDescription.isBlank()) {
-            json.addProperty("projectDescription", session.projectDescription);
-        }
-        if (session.activeDocId != null && !session.activeDocId.isBlank()) {
-            json.addProperty("activeDocId", session.activeDocId);
-        }
-        if (hasWorkspaceDocs) {
-            try {
-                JsonElement docsElem = JsonParser.parseString(session.workspaceDocsJson);
-                if (docsElem.isJsonArray()) {
-                    json.add("workspaceDocs", docsElem.getAsJsonArray());
-                }
-            } catch (Exception ignored) {
-            }
-        }
-        if (hasScript) {
-            json.addProperty("currentScriptJson", session.currentScriptJson);
-        }
-        return GSON.toJson(json);
     }
 
     private static void trimHistoryLocked(LocalSession session) {
@@ -1145,51 +1119,20 @@ public final class ClientAgentManager {
     }
 
     private static List<JsonObject> deepCopyMessages(List<JsonObject> source) {
-        List<JsonObject> copy = new ArrayList<>();
-        if (source == null) {
-            return copy;
+        if (source == null || source.isEmpty()) {
+            return new ArrayList<>();
         }
-        for (JsonObject msg : source) {
-            copy.add(msg == null ? new JsonObject() : msg.deepCopy());
+        List<JsonObject> copy = new ArrayList<>(source.size());
+        for (JsonObject message : source) {
+            copy.add(message == null ? null : message.deepCopy());
         }
         return copy;
-    }
-
-    private static String formatAgentError(Throwable ex) {
-        Throwable cause = ex;
-        while (cause != null && cause.getCause() != null && cause.getCause() != cause) {
-            cause = cause.getCause();
-        }
-        if (cause instanceof TimeoutException) {
-            return "Timed out";
-        }
-        String message = cause == null ? null : cause.getMessage();
-        if (message == null || message.isBlank()) {
-            message = ex == null ? "" : ex.getMessage();
-        }
-        return message == null || message.isBlank() ? "Unknown error" : message;
-    }
-
-    private static void syncSpatialFromClientState(LocalSession session) {
-        if (session == null) {
-            return;
-        }
-        if (ClientSessionState.isActive()) {
-            session.originX = ClientSessionState.getOriginX();
-            session.originY = ClientSessionState.getOriginY();
-            session.originZ = ClientSessionState.getOriginZ();
-            session.hasSize = ClientSessionState.hasSize();
-            session.sizeX = ClientSessionState.getSizeX();
-            session.sizeY = ClientSessionState.getSizeY();
-            session.sizeZ = ClientSessionState.getSizeZ();
-        }
     }
 
     private static void autoSaveSession(LocalSession session) {
         if (session == null || session.id == null || session.id.isBlank()) {
             return;
         }
-        syncSpatialFromClientState(session);
         try {
             List<JsonObject> historyCopy;
             synchronized (LOCK) {
@@ -1198,71 +1141,43 @@ public final class ClientAgentManager {
 
             List<ClientSessionState.ChatMessage> chatMessages = ClientSessionState.getMessages();
             List<SessionPersistence.ChatMessageEntry> chatLog = new ArrayList<>();
-            for (ClientSessionState.ChatMessage msg : chatMessages) {
-                chatLog.add(new SessionPersistence.ChatMessageEntry(msg.role(), msg.text()));
+            for (ClientSessionState.ChatMessage message : chatMessages) {
+                chatLog.add(new SessionPersistence.ChatMessageEntry(message.role(), message.text()));
             }
 
-            List<ClientSessionState.TodoItem> todoItems = ClientSessionState.getTodoItems();
             List<SessionPersistence.TodoItemEntry> todoEntries = new ArrayList<>();
-            for (ClientSessionState.TodoItem item : todoItems) {
+            for (ClientSessionState.TodoItem item : ClientSessionState.getTodoItems()) {
                 todoEntries.add(new SessionPersistence.TodoItemEntry(item.id(), item.content(), item.status()));
             }
 
             String title = "";
-            for (ClientSessionState.ChatMessage msg : chatMessages) {
-                if ("You".equals(msg.role()) && msg.text() != null && !msg.text().isBlank()) {
-                    title = msg.text().trim();
-                    if (title.length() > 60) {
-                        title = title.substring(0, 57) + "...";
-                    }
-                    break;
-                }
-            }
-            if (title.isBlank()) {
-                title = "Session " + session.id.substring(0, 8);
-            }
-
-            JsonArray workspaceDocsArray = new JsonArray();
-            List<ClientSessionState.WorkspaceDocInfo> workspaceDocs = ClientSessionState.getWorkspaceDocs();
-            Map<String, String> workspaceDocScripts = ClientSessionState.getWorkspaceDocScripts();
-            String activeDocId = ClientSessionState.getSelectedWorkspaceId();
-            String activeScriptJson = ClientSessionState.getCurrentScriptJson();
-            for (ClientSessionState.WorkspaceDocInfo doc : workspaceDocs) {
-                if (doc == null || doc.id() == null || doc.id().isBlank()) {
+            for (ClientSessionState.ChatMessage message : chatMessages) {
+                if (!"You".equals(message.role()) || message.text() == null || message.text().isBlank()) {
                     continue;
                 }
-                JsonObject docObj = new JsonObject();
-                docObj.addProperty("id", doc.id());
-                docObj.addProperty("name", doc.name() == null ? "" : doc.name());
-                docObj.addProperty("path", doc.path() == null ? "" : doc.path());
-                docObj.addProperty("type", doc.type() == null ? "" : doc.type());
-                docObj.addProperty("areaTag", doc.areaTag() == null ? "" : doc.areaTag());
-                docObj.addProperty("summary", doc.summary() == null ? "" : doc.summary());
-                docObj.addProperty("revision", doc.revision() == null ? "" : doc.revision());
-                docObj.addProperty("originX", doc.originX());
-                docObj.addProperty("originY", doc.originY());
-                docObj.addProperty("originZ", doc.originZ());
-                docObj.addProperty("hasSize", doc.hasSize());
-                docObj.addProperty("sizeX", doc.sizeX());
-                docObj.addProperty("sizeY", doc.sizeY());
-                docObj.addProperty("sizeZ", doc.sizeZ());
-
-                String scriptJson = workspaceDocScripts.get(doc.id());
-                if ((scriptJson == null || scriptJson.isBlank()) && doc.id().equals(activeDocId)) {
-                    scriptJson = activeScriptJson;
+                title = message.text().trim();
+                if (title.length() > 60) {
+                    title = title.substring(0, 57) + "...";
                 }
-                if (scriptJson != null && !scriptJson.isBlank()) {
-                    docObj.addProperty("currentScriptJson", scriptJson);
-                }
-                workspaceDocsArray.add(docObj);
+                break;
             }
-            String workspaceDocsJson = workspaceDocsArray.size() <= 0 ? "" : GSON.toJson(workspaceDocsArray);
-            session.activeDocId = activeDocId == null ? "" : activeDocId;
-            session.workspaceDocsJson = workspaceDocsJson;
-            session.currentScriptJson = activeScriptJson == null ? "" : activeScriptJson;
+            if (title.isBlank()) {
+                title = "Session " + session.id.substring(0, Math.min(8, session.id.length()));
+            }
+
+            String projectId = session.projectId == null || session.projectId.isBlank()
+                    ? ClientSessionState.getProjectId()
+                    : session.projectId;
+            String selectedWorkspacePath = ClientSessionState.getSelectedWorkspacePath();
+            if (selectedWorkspacePath == null || selectedWorkspacePath.isBlank()) {
+                selectedWorkspacePath = session.selectedWorkspacePath == null ? "" : session.selectedWorkspacePath;
+            }
+            session.projectId = projectId == null ? "" : projectId;
+            session.selectedWorkspacePath = selectedWorkspacePath == null ? "" : selectedWorkspacePath;
 
             SessionPersistence.SavedSession saved = new SessionPersistence.SavedSession(
                     session.id,
+                    session.projectId,
                     title,
                     session.createdAt,
                     System.currentTimeMillis(),
@@ -1271,21 +1186,8 @@ public final class ClientAgentManager {
                     chatLog,
                     todoEntries,
                     ClientSessionState.getTodoTitle(),
-                    ClientSessionState.getProjectId(),
-                    ClientSessionState.getProjectName(),
-                    ClientSessionState.getProjectDescription(),
-                    session.originX,
-                    session.originY,
-                    session.originZ,
-                    session.hasSize,
-                    session.sizeX,
-                    session.sizeY,
-                    session.sizeZ,
-                    session.activeDocId,
-                    session.workspaceDocsJson,
-                    session.currentScriptJson
+                    session.selectedWorkspacePath
             );
-
             CompletableFuture.runAsync(() -> SessionPersistence.saveSession(saved));
         } catch (Exception e) {
             P2SMod.LOGGER.warn("Auto-save session failed: {}", e.getMessage());
@@ -1318,41 +1220,28 @@ public final class ClientAgentManager {
             return;
         }
 
+        closeCurrentSessionInternal(true);
+
+        LocalSession session = new LocalSession();
+        session.id = saved.id();
+        session.history = new ArrayList<>(saved.llmHistory());
+        session.inFlight = false;
+        session.createdAt = saved.createdAt();
+        session.serverSessionStarted = false;
+        session.projectId = saved.projectId() == null ? "" : saved.projectId();
+        session.selectedWorkspacePath = saved.selectedWorkspacePath() == null ? "" : saved.selectedWorkspacePath();
+
         synchronized (LOCK) {
-            LocalSession session = new LocalSession();
-            session.id = saved.id();
-            session.history = new ArrayList<>(saved.llmHistory());
-            session.inFlight = false;
-            session.createdAt = saved.createdAt();
-            session.serverSessionStarted = false;
-            session.projectId = saved.projectId() == null ? "" : saved.projectId();
-            session.projectName = saved.projectName() == null ? "" : saved.projectName();
-            session.projectDescription = saved.projectDescription() == null ? "" : saved.projectDescription();
-            session.originX = saved.originX();
-            session.originY = saved.originY();
-            session.originZ = saved.originZ();
-            session.hasSize = saved.hasSize();
-            session.sizeX = saved.sizeX();
-            session.sizeY = saved.sizeY();
-            session.sizeZ = saved.sizeZ();
-            session.activeDocId = saved.activeDocId() == null ? "" : saved.activeDocId();
-            session.workspaceDocsJson = saved.workspaceDocsJson() == null ? "" : saved.workspaceDocsJson();
-            session.currentScriptJson = saved.currentScriptJson() == null ? "" : saved.currentScriptJson();
             currentSession = session;
         }
 
         postToClient(() -> {
-            ClientSessionState.clearMessages();
-            ClientSessionState.clearTodo();
-            ClientSessionState.clearPendingChoice();
-            ClientSessionState.endStreaming();
-
+            clearLocalSessionView();
             if (saved.chatLog() != null) {
                 for (SessionPersistence.ChatMessageEntry entry : saved.chatLog()) {
                     ClientSessionState.addMessage(entry.role(), entry.text());
                 }
             }
-
             if (saved.todoItems() != null && !saved.todoItems().isEmpty()) {
                 List<ClientSessionState.TodoItem> items = new ArrayList<>();
                 for (SessionPersistence.TodoItemEntry entry : saved.todoItems()) {
@@ -1360,9 +1249,12 @@ public final class ClientAgentManager {
                 }
                 ClientSessionState.setTodo(saved.todoTitle(), items);
             }
-
             ClientSessionState.setStatus("restored");
         });
+
+        String payload = buildStartPayload(session);
+        ClientPlayNetworking.send(new C2SSessionActionPayload("start", payload));
+        session.serverSessionStarted = true;
     }
 
     public static void newSession() {
@@ -1375,19 +1267,121 @@ public final class ClientAgentManager {
                 ));
                 return;
             }
-            if (currentSession != null) {
-                autoSaveSession(currentSession);
+        }
+        closeCurrentSessionInternal(true);
+    }
+
+    public static void closeCurrentSession() {
+        synchronized (LOCK) {
+            if (currentSession != null && currentSession.inFlight) {
+                postToClient(() -> ClientSessionState.onChatResponse(
+                        "Cannot close session while agent is running.",
+                        false,
+                        "busy"
+                ));
+                return;
             }
+        }
+        closeCurrentSessionInternal(true);
+    }
+
+    public static void onProjectChanged() {
+        synchronized (LOCK) {
+            if (currentSession != null && currentSession.inFlight) {
+                postToClient(() -> ClientSessionState.onChatResponse(
+                        "Cannot switch project while agent is running.",
+                        false,
+                        "busy"
+                ));
+                return;
+            }
+        }
+        closeCurrentSessionInternal(false);
+    }
+
+    private static void closeCurrentSessionInternal(boolean clearStatus) {
+        LocalSession previous;
+        synchronized (LOCK) {
+            previous = currentSession;
             currentSession = null;
         }
-
+        if (previous != null) {
+            autoSaveSession(previous);
+            if (previous.serverSessionStarted) {
+                ClientPlayNetworking.send(new C2SSessionActionPayload("end", ""));
+            }
+        }
         postToClient(() -> {
-            ClientSessionState.clearMessages();
-            ClientSessionState.clearTodo();
-            ClientSessionState.clearPendingChoice();
-            ClientSessionState.endStreaming();
-            ClientSessionState.setStatus("");
+            clearLocalSessionView();
+            if (clearStatus) {
+                ClientSessionState.setStatus("");
+            }
         });
+    }
+
+    private static void clearLocalSessionView() {
+        ClientSessionState.clearMessages();
+        ClientSessionState.clearTodo();
+        ClientSessionState.clearPendingChoice();
+        ClientSessionState.clearPendingPatch();
+        ClientSessionState.endStreaming();
+    }
+
+    private static String buildStartPayload(LocalSession session) {
+        JsonObject json = new JsonObject();
+        if (session != null && session.id != null && !session.id.isBlank()) {
+            json.addProperty("sessionId", session.id);
+        }
+        String projectId = session == null ? "" : session.projectId;
+        if ((projectId == null || projectId.isBlank()) && ClientSessionState.hasProject()) {
+            projectId = ClientSessionState.getProjectId();
+        }
+        if (projectId != null && !projectId.isBlank()) {
+            json.addProperty("projectId", projectId);
+        }
+        String selectedWorkspacePath = session == null ? "" : session.selectedWorkspacePath;
+        if ((selectedWorkspacePath == null || selectedWorkspacePath.isBlank()) && ClientSessionState.isActive()) {
+            selectedWorkspacePath = ClientSessionState.getSelectedWorkspacePath();
+        }
+        if (selectedWorkspacePath != null && !selectedWorkspacePath.isBlank()) {
+            json.addProperty("selectedWorkspacePath", selectedWorkspacePath);
+        }
+        return GSON.toJson(json);
+    }
+
+    private static LocalSession ensureSessionLocked() {
+        if (currentSession != null) {
+            return currentSession;
+        }
+        String projectId = ClientSessionState.getProjectId();
+        if (projectId == null || projectId.isBlank()) {
+            postToClient(() -> ClientSessionState.onChatResponse(
+                    "No project is open. Open or create a project first.",
+                    false,
+                    "error"
+            ));
+            return null;
+        }
+
+        LocalSession session = new LocalSession();
+        String existingSessionId = ClientSessionState.isActive() ? ClientSessionState.getSessionId() : "";
+        session.id = existingSessionId == null || existingSessionId.isBlank() ? UUID.randomUUID().toString() : existingSessionId;
+        session.history = new ArrayList<>();
+        session.inFlight = false;
+        session.createdAt = System.currentTimeMillis();
+        session.projectId = projectId;
+        session.selectedWorkspacePath = ClientSessionState.getSelectedWorkspacePath();
+
+        JsonObject system = new JsonObject();
+        system.addProperty("role", "system");
+        system.addProperty("content", P2SClientConfig.getSystemPrompt() + "\n\n" + CLIENT_TOOL_CONTRACT);
+        session.history.add(system);
+
+        currentSession = session;
+        String payload = buildStartPayload(session);
+        ClientPlayNetworking.send(new C2SSessionActionPayload("start", payload));
+        session.serverSessionStarted = true;
+        return session;
     }
 
     private static void postToClient(Runnable action) {
@@ -1405,13 +1399,6 @@ public final class ClientAgentManager {
         long createdAt;
         List<JsonObject> history;
         String projectId = "";
-        String projectName = "";
-        String projectDescription = "";
-        int originX, originY, originZ;
-        boolean hasSize;
-        int sizeX, sizeY, sizeZ;
-        String activeDocId = "";
-        String workspaceDocsJson = "";
-        String currentScriptJson = "";
+        String selectedWorkspacePath = "";
     }
 }

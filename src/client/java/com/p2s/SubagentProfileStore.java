@@ -39,7 +39,6 @@ public final class SubagentProfileStore {
             "create_workspace_file",
             "rename_workspace_file",
             "delete_workspace_file",
-            "read_workspace_state",
             "propose_patch",
             "search_block_ids"
     );

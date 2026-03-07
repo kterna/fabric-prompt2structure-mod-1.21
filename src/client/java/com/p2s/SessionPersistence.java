@@ -16,19 +16,22 @@ import java.util.List;
 
 public final class SessionPersistence {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-    private static final Path BASE_DIR = FabricLoader.getInstance().getConfigDir().resolve("p2s_sessions");
+    private static final Path BASE_DIR = FabricLoader.getInstance().getConfigDir().resolve("p2s_sessions_v2");
     private static final Path INDEX_PATH = BASE_DIR.resolve("index.json");
     private static final Path SESSIONS_DIR = BASE_DIR.resolve("sessions");
-    private static final int MAX_SAVED_SESSIONS = 50;
+    private static final Path LEGACY_DIR = FabricLoader.getInstance().getConfigDir().resolve("p2s_sessions");
+    private static final int MAX_SAVED_SESSIONS = 100;
+    private static boolean legacyWarned = false;
 
     private SessionPersistence() {
     }
 
-    public record SessionIndexEntry(String id, String title, long createdAt, long updatedAt, int messageCount) {
+    public record SessionIndexEntry(String id, String projectId, String title, long createdAt, long updatedAt, int messageCount) {
     }
 
     public record SavedSession(
             String id,
+            String projectId,
             String title,
             long createdAt,
             long updatedAt,
@@ -37,15 +40,7 @@ public final class SessionPersistence {
             List<ChatMessageEntry> chatLog,
             List<TodoItemEntry> todoItems,
             String todoTitle,
-            String projectId,
-            String projectName,
-            String projectDescription,
-            int originX, int originY, int originZ,
-            boolean hasSize,
-            int sizeX, int sizeY, int sizeZ,
-            String activeDocId,
-            String workspaceDocsJson,
-            String currentScriptJson
+            String selectedWorkspacePath
     ) {
     }
 
@@ -56,22 +51,21 @@ public final class SessionPersistence {
     }
 
     public static synchronized void saveSession(SavedSession session) {
+        warnIfLegacyDataExists();
         if (session == null || session.id() == null || session.id().isBlank()) {
             return;
         }
         try {
             ensureDirectories();
-
             JsonObject sessionJson = new JsonObject();
             sessionJson.addProperty("id", session.id());
+            sessionJson.addProperty("projectId", session.projectId() == null ? "" : session.projectId());
             sessionJson.addProperty("title", session.title() == null ? "" : session.title());
             sessionJson.addProperty("createdAt", session.createdAt());
             sessionJson.addProperty("updatedAt", session.updatedAt());
             sessionJson.addProperty("messageCount", session.messageCount());
             sessionJson.addProperty("todoTitle", session.todoTitle() == null ? "" : session.todoTitle());
-            sessionJson.addProperty("projectId", session.projectId() == null ? "" : session.projectId());
-            sessionJson.addProperty("projectName", session.projectName() == null ? "" : session.projectName());
-            sessionJson.addProperty("projectDescription", session.projectDescription() == null ? "" : session.projectDescription());
+            sessionJson.addProperty("selectedWorkspacePath", session.selectedWorkspacePath() == null ? "" : session.selectedWorkspacePath());
 
             JsonArray historyArray = new JsonArray();
             if (session.llmHistory() != null) {
@@ -104,20 +98,7 @@ public final class SessionPersistence {
             }
             sessionJson.add("todoItems", todoArray);
 
-            sessionJson.addProperty("originX", session.originX());
-            sessionJson.addProperty("originY", session.originY());
-            sessionJson.addProperty("originZ", session.originZ());
-            sessionJson.addProperty("hasSize", session.hasSize());
-            sessionJson.addProperty("sizeX", session.sizeX());
-            sessionJson.addProperty("sizeY", session.sizeY());
-            sessionJson.addProperty("sizeZ", session.sizeZ());
-            sessionJson.addProperty("activeDocId", session.activeDocId() == null ? "" : session.activeDocId());
-            sessionJson.addProperty("workspaceDocsJson", session.workspaceDocsJson() == null ? "" : session.workspaceDocsJson());
-            sessionJson.addProperty("currentScriptJson", session.currentScriptJson() == null ? "" : session.currentScriptJson());
-
-            Path sessionFile = SESSIONS_DIR.resolve(session.id() + ".json");
-            Files.writeString(sessionFile, GSON.toJson(sessionJson));
-
+            Files.writeString(SESSIONS_DIR.resolve(session.id() + ".json"), GSON.toJson(sessionJson));
             updateIndex(session);
         } catch (Exception e) {
             P2SMod.LOGGER.warn("Failed saving session {}: {}", session.id(), e.getMessage());
@@ -125,14 +106,18 @@ public final class SessionPersistence {
     }
 
     public static synchronized List<SessionIndexEntry> listSessions() {
+        warnIfLegacyDataExists();
+        ensureDirectories();
         List<SessionIndexEntry> entries = new ArrayList<>();
         try {
             if (!Files.exists(INDEX_PATH)) {
                 return entries;
             }
-            String content = Files.readString(INDEX_PATH);
-            JsonArray arr = JsonParser.parseString(content).getAsJsonArray();
-            for (JsonElement elem : arr) {
+            JsonElement root = JsonParser.parseString(Files.readString(INDEX_PATH));
+            if (!root.isJsonArray()) {
+                return entries;
+            }
+            for (JsonElement elem : root.getAsJsonArray()) {
                 if (!elem.isJsonObject()) {
                     continue;
                 }
@@ -143,6 +128,7 @@ public final class SessionPersistence {
                 }
                 entries.add(new SessionIndexEntry(
                         id,
+                        getStr(obj, "projectId"),
                         getStr(obj, "title"),
                         getLong(obj, "createdAt"),
                         getLong(obj, "updatedAt"),
@@ -152,10 +138,27 @@ public final class SessionPersistence {
         } catch (Exception e) {
             P2SMod.LOGGER.warn("Failed reading session index: {}", e.getMessage());
         }
+        entries.sort(Comparator.comparingLong(SessionIndexEntry::updatedAt).reversed());
         return entries;
     }
 
+    public static synchronized List<SessionIndexEntry> listSessions(String projectId) {
+        String normalizedProjectId = projectId == null ? "" : projectId.trim();
+        if (normalizedProjectId.isBlank()) {
+            return List.of();
+        }
+        List<SessionIndexEntry> filtered = new ArrayList<>();
+        for (SessionIndexEntry entry : listSessions()) {
+            if (entry != null && normalizedProjectId.equals(entry.projectId())) {
+                filtered.add(entry);
+            }
+        }
+        return filtered;
+    }
+
     public static synchronized SavedSession loadSession(String id) {
+        warnIfLegacyDataExists();
+        ensureDirectories();
         if (id == null || id.isBlank()) {
             return null;
         }
@@ -164,8 +167,7 @@ public final class SessionPersistence {
             if (!Files.exists(sessionFile)) {
                 return null;
             }
-            String content = Files.readString(sessionFile);
-            JsonObject root = JsonParser.parseString(content).getAsJsonObject();
+            JsonObject root = JsonParser.parseString(Files.readString(sessionFile)).getAsJsonObject();
 
             List<JsonObject> llmHistory = new ArrayList<>();
             if (root.has("llmHistory") && root.get("llmHistory").isJsonArray()) {
@@ -194,16 +196,13 @@ public final class SessionPersistence {
                         continue;
                     }
                     JsonObject obj = elem.getAsJsonObject();
-                    todoItems.add(new TodoItemEntry(
-                            getStr(obj, "id"),
-                            getStr(obj, "content"),
-                            getStr(obj, "status")
-                    ));
+                    todoItems.add(new TodoItemEntry(getStr(obj, "id"), getStr(obj, "content"), getStr(obj, "status")));
                 }
             }
 
             return new SavedSession(
                     getStr(root, "id"),
+                    getStr(root, "projectId"),
                     getStr(root, "title"),
                     getLong(root, "createdAt"),
                     getLong(root, "updatedAt"),
@@ -212,19 +211,7 @@ public final class SessionPersistence {
                     chatLog,
                     todoItems,
                     getStr(root, "todoTitle"),
-                    getStr(root, "projectId"),
-                    getStr(root, "projectName"),
-                    getStr(root, "projectDescription"),
-                    getInt(root, "originX"),
-                    getInt(root, "originY"),
-                    getInt(root, "originZ"),
-                    getBool(root, "hasSize"),
-                    getInt(root, "sizeX"),
-                    getInt(root, "sizeY"),
-                    getInt(root, "sizeZ"),
-                    getStr(root, "activeDocId"),
-                    getStr(root, "workspaceDocsJson"),
-                    getStr(root, "currentScriptJson")
+                    getStr(root, "selectedWorkspacePath")
             );
         } catch (Exception e) {
             P2SMod.LOGGER.warn("Failed loading session {}: {}", id, e.getMessage());
@@ -233,15 +220,15 @@ public final class SessionPersistence {
     }
 
     public static synchronized boolean deleteSession(String id) {
+        warnIfLegacyDataExists();
+        ensureDirectories();
         if (id == null || id.isBlank()) {
             return false;
         }
         try {
-            Path sessionFile = SESSIONS_DIR.resolve(id + ".json");
-            Files.deleteIfExists(sessionFile);
-
+            Files.deleteIfExists(SESSIONS_DIR.resolve(id + ".json"));
             List<SessionIndexEntry> entries = listSessions();
-            entries.removeIf(e -> id.equals(e.id()));
+            entries.removeIf(entry -> id.equals(entry.id()));
             writeIndex(entries);
             return true;
         } catch (Exception e) {
@@ -250,27 +237,41 @@ public final class SessionPersistence {
         }
     }
 
+    public static synchronized boolean hasLegacyData() {
+        try {
+            if (!Files.exists(LEGACY_DIR) || !Files.isDirectory(LEGACY_DIR)) {
+                return false;
+            }
+            try (var entries = Files.list(LEGACY_DIR)) {
+                return entries.findAny().isPresent();
+            }
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    public static synchronized String legacyWarningMessage() {
+        return "Legacy P2S session data is not supported by this version. Clear old p2s session data before use.";
+    }
+
     private static void updateIndex(SavedSession session) {
         List<SessionIndexEntry> entries = listSessions();
-
-        entries.removeIf(e -> session.id().equals(e.id()));
-        entries.add(0, new SessionIndexEntry(
+        entries.removeIf(entry -> session.id().equals(entry.id()));
+        entries.add(new SessionIndexEntry(
                 session.id(),
-                session.title(),
+                session.projectId() == null ? "" : session.projectId(),
+                session.title() == null ? "" : session.title(),
                 session.createdAt(),
                 session.updatedAt(),
                 session.messageCount()
         ));
-
         while (entries.size() > MAX_SAVED_SESSIONS) {
             SessionIndexEntry oldest = entries.remove(entries.size() - 1);
             try {
-                Path sessionFile = SESSIONS_DIR.resolve(oldest.id() + ".json");
-                Files.deleteIfExists(sessionFile);
+                Files.deleteIfExists(SESSIONS_DIR.resolve(oldest.id() + ".json"));
             } catch (Exception ignored) {
             }
         }
-
         writeIndex(entries);
     }
 
@@ -278,29 +279,42 @@ public final class SessionPersistence {
         try {
             ensureDirectories();
             JsonArray arr = new JsonArray();
-            for (SessionIndexEntry entry : entries) {
-                JsonObject obj = new JsonObject();
-                obj.addProperty("id", entry.id());
-                obj.addProperty("title", entry.title());
-                obj.addProperty("createdAt", entry.createdAt());
-                obj.addProperty("updatedAt", entry.updatedAt());
-                obj.addProperty("messageCount", entry.messageCount());
-                arr.add(obj);
-            }
+            entries.stream()
+                    .sorted(Comparator.comparingLong(SessionIndexEntry::updatedAt).reversed())
+                    .forEach(entry -> {
+                        JsonObject obj = new JsonObject();
+                        obj.addProperty("id", entry.id());
+                        obj.addProperty("projectId", entry.projectId());
+                        obj.addProperty("title", entry.title());
+                        obj.addProperty("createdAt", entry.createdAt());
+                        obj.addProperty("updatedAt", entry.updatedAt());
+                        obj.addProperty("messageCount", entry.messageCount());
+                        arr.add(obj);
+                    });
             Files.writeString(INDEX_PATH, GSON.toJson(arr));
         } catch (Exception e) {
             P2SMod.LOGGER.warn("Failed writing session index: {}", e.getMessage());
         }
     }
 
-    private static void ensureDirectories() throws Exception {
-        if (!Files.exists(SESSIONS_DIR)) {
+    private static void ensureDirectories() {
+        try {
             Files.createDirectories(SESSIONS_DIR);
+        } catch (Exception e) {
+            P2SMod.LOGGER.warn("Failed creating session directories: {}", e.getMessage());
         }
     }
 
+    private static void warnIfLegacyDataExists() {
+        if (legacyWarned || !hasLegacyData()) {
+            return;
+        }
+        legacyWarned = true;
+        P2SMod.LOGGER.warn(legacyWarningMessage());
+    }
+
     private static String getStr(JsonObject obj, String key) {
-        if (obj == null || key == null || !obj.has(key) || obj.get(key).isJsonNull()) {
+        if (obj == null || key == null || !obj.has(key) || !obj.get(key).isJsonPrimitive()) {
             return "";
         }
         try {
@@ -310,19 +324,8 @@ public final class SessionPersistence {
         }
     }
 
-    private static long getLong(JsonObject obj, String key) {
-        if (obj == null || key == null || !obj.has(key)) {
-            return 0;
-        }
-        try {
-            return obj.get(key).getAsLong();
-        } catch (Exception e) {
-            return 0;
-        }
-    }
-
     private static int getInt(JsonObject obj, String key) {
-        if (obj == null || key == null || !obj.has(key)) {
+        if (obj == null || key == null || !obj.has(key) || !obj.get(key).isJsonPrimitive()) {
             return 0;
         }
         try {
@@ -332,14 +335,14 @@ public final class SessionPersistence {
         }
     }
 
-    private static boolean getBool(JsonObject obj, String key) {
-        if (obj == null || key == null || !obj.has(key)) {
-            return false;
+    private static long getLong(JsonObject obj, String key) {
+        if (obj == null || key == null || !obj.has(key) || !obj.get(key).isJsonPrimitive()) {
+            return 0L;
         }
         try {
-            return obj.get(key).getAsBoolean();
+            return obj.get(key).getAsLong();
         } catch (Exception e) {
-            return false;
+            return 0L;
         }
     }
 }
