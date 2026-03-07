@@ -13,6 +13,7 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.util.FormattedCharSequence;
 import org.lwjgl.glfw.GLFW;
 
@@ -129,11 +130,11 @@ public class P2SChatScreen extends Screen {
     private final List<DiffViewLine> contextDiffLines = new ArrayList<>();
     private final List<Integer> contextDiffChangeRows = new ArrayList<>();
     private int contextDiffNavIndex = -1;
-    private String contextStatus = "";
+    private Component contextStatus = Component.empty();
     private int contextStatusColor = 0xAAAAAA;
 
     public P2SChatScreen() {
-        super(Component.literal("P2S Workspace"));
+        super(P2SI18n.tr("screen.p2s.chat.title"));
     }
 
     @Override
@@ -160,7 +161,7 @@ public class P2SChatScreen extends Screen {
         int inputY = getInputY();
         int inputWidth = panelWidth - PADDING * 2 - BUTTON_WIDTH - 4;
 
-        input = new EditBox(this.font, panelX + PADDING, inputY, inputWidth, INPUT_HEIGHT, Component.literal(""));
+        input = new EditBox(this.font, panelX + PADDING, inputY, inputWidth, INPUT_HEIGHT, Component.empty());
         input.setMaxLength(512);
         input.setFocused(!contextEditorFocused);
         addRenderableWidget(input);
@@ -173,19 +174,19 @@ public class P2SChatScreen extends Screen {
         int topRowY = PADDING;
         int navX = panelX + PADDING;
 
-        Button projectsButton = Button.builder(Component.literal("Projects"), btn -> this.minecraft.setScreen(new P2SProjectListScreen(this)))
+        Button projectsButton = Button.builder(P2SI18n.tr("screen.p2s.chat.projects"), btn -> this.minecraft.setScreen(new P2SProjectListScreen(this)))
                 .bounds(navX, topRowY, 60, INPUT_HEIGHT)
                 .build();
         addRenderableWidget(projectsButton);
         navX += 64;
 
-        Button sessionsButton = Button.builder(Component.literal("Sessions"), btn -> this.minecraft.setScreen(new P2SSessionListScreen(this)))
+        Button sessionsButton = Button.builder(P2SI18n.tr("screen.p2s.chat.sessions"), btn -> this.minecraft.setScreen(new P2SSessionListScreen(this)))
                 .bounds(navX, topRowY, 60, INPUT_HEIGHT)
                 .build();
         addRenderableWidget(sessionsButton);
         navX += 64;
 
-        Button newButton = Button.builder(Component.literal("New"), btn -> ClientAgentManager.newSession())
+        Button newButton = Button.builder(P2SI18n.tr("screen.p2s.common.new"), btn -> ClientAgentManager.newSession())
                 .bounds(navX, topRowY, 40, INPUT_HEIGHT)
                 .build();
         addRenderableWidget(newButton);
@@ -199,7 +200,7 @@ public class P2SChatScreen extends Screen {
                 .build();
         addRenderableWidget(infoButton);
 
-        configButton = Button.builder(Component.literal("Config"), btn -> this.minecraft.setScreen(new P2SConfigScreen(this)))
+        configButton = Button.builder(P2SI18n.tr("screen.p2s.chat.config"), btn -> this.minecraft.setScreen(new P2SConfigScreen(this)))
                 .bounds(panelX + panelWidth - PADDING - 56, topRowY, 56, INPUT_HEIGHT)
                 .build();
         addRenderableWidget(configButton);
@@ -207,29 +208,29 @@ public class P2SChatScreen extends Screen {
         int rowY = PADDING + TOP_BUTTON_HEIGHT + 4;
         int rowStart = panelX + panelWidth - PADDING - (SMALL_BUTTON_WIDTH * 4 + 6);
 
-        applyButton = Button.builder(Component.literal("Apply"), btn -> ClientAgentManager.submitPatchApply())
+        applyButton = Button.builder(P2SI18n.tr("screen.p2s.chat.apply"), btn -> ClientAgentManager.submitPatchApply())
                 .bounds(rowStart, rowY, SMALL_BUTTON_WIDTH, TOP_BUTTON_HEIGHT)
                 .build();
         addRenderableWidget(applyButton);
 
-        discardButton = Button.builder(Component.literal("Discard"), btn -> enterDiscardReasonMode())
+        discardButton = Button.builder(P2SI18n.tr("screen.p2s.chat.discard"), btn -> enterDiscardReasonMode())
                 .bounds(rowStart + SMALL_BUTTON_WIDTH + 2, rowY, SMALL_BUTTON_WIDTH, TOP_BUTTON_HEIGHT)
                 .build();
         addRenderableWidget(discardButton);
 
-        undoButton = Button.builder(Component.literal("Undo"), btn -> sendSessionAction("undo", ""))
+        undoButton = Button.builder(P2SI18n.tr("screen.p2s.chat.undo"), btn -> sendSessionAction("undo", ""))
                 .bounds(rowStart + (SMALL_BUTTON_WIDTH + 2) * 2, rowY, SMALL_BUTTON_WIDTH, TOP_BUTTON_HEIGHT)
                 .build();
         addRenderableWidget(undoButton);
 
-        redoButton = Button.builder(Component.literal("Redo"), btn -> sendSessionAction("redo", ""))
+        redoButton = Button.builder(P2SI18n.tr("screen.p2s.chat.redo"), btn -> sendSessionAction("redo", ""))
                 .bounds(rowStart + (SMALL_BUTTON_WIDTH + 2) * 3, rowY, SMALL_BUTTON_WIDTH, TOP_BUTTON_HEIGHT)
                 .build();
         addRenderableWidget(redoButton);
 
         int cpY = rowY + TOP_BUTTON_HEIGHT + 2;
         int cpX = panelX + PADDING;
-        checkpointCreateButton = Button.builder(Component.literal("CP+"), btn -> createCheckpoint())
+        checkpointCreateButton = Button.builder(P2SI18n.tr("screen.p2s.chat.checkpoint.create_short"), btn -> createCheckpoint())
                 .bounds(cpX, cpY, 36, TOP_BUTTON_HEIGHT)
                 .build();
         addRenderableWidget(checkpointCreateButton);
@@ -244,7 +245,7 @@ public class P2SChatScreen extends Screen {
                 .build();
         addRenderableWidget(checkpointNextButton);
 
-        checkpointRollbackButton = Button.builder(Component.literal("RB"), btn -> rollbackSelectedCheckpoint())
+        checkpointRollbackButton = Button.builder(P2SI18n.tr("screen.p2s.chat.checkpoint.rollback_short"), btn -> rollbackSelectedCheckpoint())
                 .bounds(cpX + 82, cpY, 30, TOP_BUTTON_HEIGHT)
                 .build();
         addRenderableWidget(checkpointRollbackButton);
@@ -266,7 +267,7 @@ public class P2SChatScreen extends Screen {
         int choiceWidth = (actionWidth - choiceGap * (CHOICE_BUTTON_COUNT - 1)) / CHOICE_BUTTON_COUNT;
         for (int i = 0; i < CHOICE_BUTTON_COUNT; i++) {
             final int index = i;
-            Button choiceBtn = Button.builder(Component.literal(""), btn -> submitChoice(index))
+            Button choiceBtn = Button.builder(Component.empty(), btn -> submitChoice(index))
                     .bounds(rowStart + i * (choiceWidth + choiceGap), choiceY, choiceWidth, TOP_BUTTON_HEIGHT)
                     .build();
             choiceBtn.visible = false;
@@ -277,13 +278,13 @@ public class P2SChatScreen extends Screen {
 
         int discardRowY = choiceY + TOP_BUTTON_HEIGHT + 2;
         int discardInputWidth = actionWidth - BUTTON_WIDTH * 2 - 8;
-        discardReasonInput = new EditBox(this.font, rowStart, discardRowY, discardInputWidth, INPUT_HEIGHT, Component.literal(""));
+        discardReasonInput = new EditBox(this.font, rowStart, discardRowY, discardInputWidth, INPUT_HEIGHT, Component.empty());
         discardReasonInput.setMaxLength(256);
-        discardReasonInput.setHint(Component.literal("Reason (optional)"));
+        discardReasonInput.setHint(P2SI18n.tr("screen.p2s.chat.discard_reason_hint"));
         discardReasonInput.visible = false;
         addRenderableWidget(discardReasonInput);
 
-        discardOkButton = Button.builder(Component.literal("OK"), btn -> confirmDiscard())
+        discardOkButton = Button.builder(P2SI18n.tr("screen.p2s.common.ok"), btn -> confirmDiscard())
                 .bounds(rowStart + discardInputWidth + 4, discardRowY, BUTTON_WIDTH, INPUT_HEIGHT)
                 .build();
         discardOkButton.visible = false;
@@ -389,15 +390,15 @@ public class P2SChatScreen extends Screen {
         int row1ButtonCount = 4;
         int row1BtnWidth = Math.max(52, (editorWidth - rowGap * (row1ButtonCount - 1)) / row1ButtonCount);
         int row1X = editorXBase;
-        contextTabScriptButton = addRenderableWidget(Button.builder(Component.literal("Script"), btn -> switchContextTab(ContextTab.SCRIPT))
+        contextTabScriptButton = addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.chat.context.script"), btn -> switchContextTab(ContextTab.SCRIPT))
                 .bounds(row1X, row1Y, row1BtnWidth, INPUT_HEIGHT).build());
         contextTabScriptButton.active = activeContextTab != ContextTab.SCRIPT;
         row1X += row1BtnWidth + rowGap;
-        contextTabDiffButton = addRenderableWidget(Button.builder(Component.literal("Diff"), btn -> switchContextTab(ContextTab.DIFF))
+        contextTabDiffButton = addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.chat.context.diff"), btn -> switchContextTab(ContextTab.DIFF))
                 .bounds(row1X, row1Y, row1BtnWidth, INPUT_HEIGHT).build());
         contextTabDiffButton.active = activeContextTab != ContextTab.DIFF;
         row1X += row1BtnWidth + rowGap;
-        contextLoadButton = addRenderableWidget(Button.builder(Component.literal(activeContextTab == ContextTab.DIFF ? "Refresh" : "Fetch"), btn -> {
+        contextLoadButton = addRenderableWidget(Button.builder(P2SI18n.tr(activeContextTab == ContextTab.DIFF ? "screen.p2s.common.refresh" : "screen.p2s.chat.context.fetch"), btn -> {
                     if (activeContextTab == ContextTab.DIFF) {
                         loadWorkspaceDiff();
                     } else {
@@ -406,7 +407,7 @@ public class P2SChatScreen extends Screen {
                 })
                 .bounds(row1X, row1Y, row1BtnWidth, INPUT_HEIGHT).build());
         row1X += row1BtnWidth + rowGap;
-        contextClearQueueButton = addRenderableWidget(Button.builder(Component.literal("Clear Ctx"), btn -> clearContextQueue())
+        contextClearQueueButton = addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.chat.context.clear_queue"), btn -> clearContextQueue())
                 .bounds(row1X, row1Y, row1BtnWidth, INPUT_HEIGHT).build());
 
         // Row 2: Editor-specific actions
@@ -415,10 +416,10 @@ public class P2SChatScreen extends Screen {
         int row2X = editorXBase;
         switch (activeContextTab) {
             case SCRIPT -> {
-                contextFormatButton = addRenderableWidget(Button.builder(Component.literal("Format"), btn -> formatContextJson())
+                contextFormatButton = addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.chat.context.format"), btn -> formatContextJson())
                         .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
                 row2X += row2BtnWidth + rowGap;
-                contextClearJsonButton = addRenderableWidget(Button.builder(Component.literal("Clear"), btn -> clearContextJson())
+                contextClearJsonButton = addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.chat.context.clear"), btn -> clearContextJson())
                         .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
                 row2X += row2BtnWidth + rowGap;
                 contextDiffPrevButton = addRenderableWidget(Button.builder(Component.literal("<D"), btn -> navigateContextDiffChange(-1))
@@ -434,10 +435,10 @@ public class P2SChatScreen extends Screen {
                 contextDiffNextButton = addRenderableWidget(Button.builder(Component.literal("D>"), btn -> navigateContextDiffChange(1))
                         .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
                 row2X += row2BtnWidth + rowGap;
-                contextFormatButton = addRenderableWidget(Button.builder(Component.literal("Format"), btn -> formatContextJson())
+                contextFormatButton = addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.chat.context.format"), btn -> formatContextJson())
                         .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
                 row2X += row2BtnWidth + rowGap;
-                contextClearJsonButton = addRenderableWidget(Button.builder(Component.literal("Clear"), btn -> clearContextJson())
+                contextClearJsonButton = addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.chat.context.clear"), btn -> clearContextJson())
                         .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
             }
             default -> {
@@ -449,17 +450,17 @@ public class P2SChatScreen extends Screen {
         int endWidth = 52;
         int addWidth = Math.max(80, editorWidth - startWidth - endWidth - rowGap * 2);
 
-        contextStartInput = new EditBox(this.font, editorXBase, row3Y, startWidth, INPUT_HEIGHT, Component.literal("start line"));
+        contextStartInput = new EditBox(this.font, editorXBase, row3Y, startWidth, INPUT_HEIGHT, P2SI18n.tr("screen.p2s.chat.context.start_line"));
         contextStartInput.setMaxLength(8);
-        contextStartInput.setHint(Component.literal("start"));
+        contextStartInput.setHint(P2SI18n.tr("screen.p2s.chat.context.start"));
         addRenderableWidget(contextStartInput);
 
-        contextEndInput = new EditBox(this.font, editorXBase + startWidth + rowGap, row3Y, endWidth, INPUT_HEIGHT, Component.literal("end line"));
+        contextEndInput = new EditBox(this.font, editorXBase + startWidth + rowGap, row3Y, endWidth, INPUT_HEIGHT, P2SI18n.tr("screen.p2s.chat.context.end_line"));
         contextEndInput.setMaxLength(8);
-        contextEndInput.setHint(Component.literal("end"));
+        contextEndInput.setHint(P2SI18n.tr("screen.p2s.chat.context.end"));
         addRenderableWidget(contextEndInput);
 
-        contextAddRangeButton = addRenderableWidget(Button.builder(Component.literal("Add Range -> Ctx"), btn -> addSelectedRangeAsContext())
+        contextAddRangeButton = addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.chat.context.add_range"), btn -> addSelectedRangeAsContext())
                 .bounds(editorXBase + startWidth + endWidth + rowGap * 2, row3Y, addWidth, INPUT_HEIGHT).build());
 
         if (activeContextTab == ContextTab.DIFF) {
@@ -513,7 +514,7 @@ public class P2SChatScreen extends Screen {
 
     private void loadWorkspaceStateJson() {
         setContextJsonText(buildWorkspaceStateJson());
-        setContextStatus("Loaded current project state", 0x55FF55);
+        setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.loaded_project_state"), 0x55FF55);
     }
 
     private void createWorkspaceDoc() {
@@ -529,7 +530,9 @@ public class P2SChatScreen extends Screen {
         contextLoadedDocId = "";
         workspaceRenameMode = false;
         workspaceRenameDraft = "";
-        setContextStatus(hasSelection ? "Creating file from selection..." : "Creating empty file...", 0xAAAAAA);
+        setContextStatus(P2SI18n.tr(hasSelection
+                ? "screen.p2s.chat.context.status.creating_from_selection"
+                : "screen.p2s.chat.context.status.creating_empty"), 0xAAAAAA);
         createWidgets();
     }
 
@@ -551,7 +554,7 @@ public class P2SChatScreen extends Screen {
         activeContextTab = ContextTab.SCRIPT;
         contextLoadedDocId = "";
         clearContextDiffView();
-        setContextStatus("Switched file context", 0x55FF55);
+        setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.switched_file"), 0x55FF55);
         createWidgets();
     }
 
@@ -697,11 +700,11 @@ public class P2SChatScreen extends Screen {
 
     private void fetchWorkspaceScript() {
         if (scriptLoading) {
-            setContextStatus("Already fetching script...", 0xFFAA55);
+            setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.already_fetching"), 0xFFAA55);
             return;
         }
         scriptLoading = true;
-        setContextStatus("Fetching script...", 0xAAAAAA);
+        setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.fetching_script"), 0xAAAAAA);
 
         String selectedWorkspacePath = ClientSessionState.getSelectedWorkspacePath();
         ClientToolBridge.call("read_workspace_file", workspaceReadArgs(true))
@@ -713,9 +716,9 @@ public class P2SChatScreen extends Screen {
                             String scriptText = extractWorkspaceScriptText(result);
                             if (scriptText.isBlank()) {
                                 scriptText = "{\n}\n";
-                                setContextStatus("No script data found in workspace file", 0xFFAA55);
+                                setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.no_script_data"), 0xFFAA55);
                             } else {
-                                setContextStatus("Script loaded", 0x55FF55);
+                                setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.script_loaded"), 0x55FF55);
                             }
                             if (selectedWorkspacePath != null && !selectedWorkspacePath.isBlank()) {
                                 ClientSessionState.setWorkspaceFileScriptJson(selectedWorkspacePath, scriptText);
@@ -746,7 +749,7 @@ public class P2SChatScreen extends Screen {
                     if (mc != null) {
                         mc.execute(() -> {
                             scriptLoading = false;
-                            setContextStatus("Script fetch failed: " + shortError(ex.getMessage()), 0xFF5555);
+                            setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.script_fetch_failed", shortError(ex.getMessage())), 0xFF5555);
                         });
                     }
                     return null;
@@ -755,7 +758,7 @@ public class P2SChatScreen extends Screen {
 
 
     private void loadWorkspaceDiff() {
-        setContextStatus("Loading workspace diff...", 0xAAAAAA);
+        setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.loading_diff"), 0xAAAAAA);
 
         JsonObject committedArgs = workspaceReadArgs(true);
         JsonObject stagedArgs = workspaceReadArgs(false);
@@ -777,7 +780,7 @@ public class P2SChatScreen extends Screen {
                 .exceptionally(ex -> {
                     Minecraft mc = this.minecraft;
                     if (mc != null) {
-                        mc.execute(() -> setContextStatus("Diff failed: " + shortError(ex.getMessage()), 0xFF5555));
+                        mc.execute(() -> setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.diff_failed", shortError(ex.getMessage())), 0xFF5555));
                     }
                     return null;
                 });
@@ -946,7 +949,7 @@ public class P2SChatScreen extends Screen {
 
     private void applyContextDiffView(DiffBuildResult diff) {
         if (diff == null) {
-            setContextStatus("Diff failed: empty result", 0xFF5555);
+            setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.diff_failed_empty"), 0xFF5555);
             return;
         }
         contextDiffMode = true;
@@ -972,22 +975,19 @@ public class P2SChatScreen extends Screen {
         clampContextScroll();
         setContextEditorFocused(true);
 
-        String status = "Diff loaded: " + diff.committedLineCount() + " -> " + diff.stagedLineCount()
-                + " lines, " + diff.changeRows().size() + " changed rows";
-        if (diff.truncated()) {
-            status += " (truncated)";
-        }
-        status += " [F7/Shift+F7]";
-        setContextStatus(status, 0x55FF55);
+        setContextStatus(P2SI18n.tr(diff.truncated()
+                ? "screen.p2s.chat.context.status.diff_loaded_truncated"
+                : "screen.p2s.chat.context.status.diff_loaded",
+                diff.committedLineCount(), diff.stagedLineCount(), diff.changeRows().size()), 0x55FF55);
     }
 
     private void navigateContextDiffChange(int direction) {
         if (!contextDiffMode) {
-            setContextStatus("Diff mode is not active", 0xFFAA55);
+            setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.diff_not_active"), 0xFFAA55);
             return;
         }
         if (contextDiffChangeRows.isEmpty()) {
-            setContextStatus("No changed rows in current diff", 0xFFAA55);
+            setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.diff_no_changes"), 0xFFAA55);
             return;
         }
         int size = contextDiffChangeRows.size();
@@ -999,7 +999,7 @@ public class P2SChatScreen extends Screen {
         int row = contextDiffChangeRows.get(contextDiffNavIndex);
         contextScroll = Math.max(0, row - Math.max(1, contextVisibleRows) / 2);
         clampContextScroll();
-        setContextStatus("Diff change " + (contextDiffNavIndex + 1) + "/" + size, 0xAAD5FF);
+        setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.diff_change", contextDiffNavIndex + 1, size), 0xAAD5FF);
     }
 
     private void focusNearestDiffChange(int rowIndex) {
@@ -1023,31 +1023,31 @@ public class P2SChatScreen extends Screen {
 
     private void formatContextJson() {
         if (contextDiffMode) {
-            setContextStatus("Diff view is read-only. Load/Clear to edit JSON.", 0xFFAA55);
+            setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.diff_read_only"), 0xFFAA55);
             return;
         }
         String raw = contextLinesToText();
         if (raw.isBlank()) {
-            setContextStatus("Nothing to format", 0xFFAA55);
+            setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.nothing_to_format"), 0xFFAA55);
             return;
         }
         try {
             String formatted = CONTEXT_GSON.toJson(JsonParser.parseString(raw));
             setContextJsonText(formatted);
-            setContextStatus("JSON formatted", 0x55FF55);
+            setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.json_formatted"), 0x55FF55);
         } catch (Exception e) {
-            setContextStatus("Invalid JSON: " + shortError(e.getMessage()), 0xFF5555);
+            setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.invalid_json", shortError(e.getMessage())), 0xFF5555);
         }
     }
 
     private void clearContextJson() {
         setContextJsonText("{\n}\n");
-        setContextStatus("JSON cleared", 0x55FF55);
+        setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.json_cleared"), 0x55FF55);
     }
 
     private void clearContextQueue() {
         queuedContexts.clear();
-        setContextStatus("Context queue cleared", 0x55FF55);
+        setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.queue_cleared"), 0x55FF55);
     }
 
     private void setContextJsonText(String text) {
@@ -1431,15 +1431,15 @@ public class P2SChatScreen extends Screen {
 
     private void addSelectedRangeAsContext() {
         if (contextDiffMode) {
-            setContextStatus("Range attach is disabled in diff view", 0xFFAA55);
+            setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.range_disabled_in_diff"), 0xFFAA55);
             return;
         }
         if (queuedContexts.size() >= CONTEXT_MAX_SNIPPETS) {
-            setContextStatus("Too many snippets queued (" + CONTEXT_MAX_SNIPPETS + " max)", 0xFF5555);
+            setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.too_many_snippets", CONTEXT_MAX_SNIPPETS), 0xFF5555);
             return;
         }
         if (contextJsonLines.isEmpty()) {
-            setContextStatus("No JSON lines available", 0xFF5555);
+            setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.no_json_lines"), 0xFF5555);
             return;
         }
 
@@ -1464,22 +1464,22 @@ public class P2SChatScreen extends Screen {
 
         String snippetText = buildContextRangeText(start, end);
         if (snippetText.isBlank()) {
-            setContextStatus("Selected range is empty", 0xFF5555);
+            setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.empty_range"), 0xFF5555);
             return;
         }
         if (snippetText.length() > CONTEXT_MAX_SNIPPET_CHARS) {
-            setContextStatus("Selection too large (" + snippetText.length() + " chars). Narrow the range.", 0xFF5555);
+            setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.selection_too_large", snippetText.length()), 0xFF5555);
             return;
         }
         if (totalQueuedContextChars() + snippetText.length() > CONTEXT_MAX_TOTAL_CHARS) {
-            setContextStatus("Context queue exceeds " + CONTEXT_MAX_TOTAL_CHARS + " chars", 0xFF5555);
+            setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.queue_too_large", CONTEXT_MAX_TOTAL_CHARS), 0xFF5555);
             return;
         }
 
         String fileName = activeContextFileName();
         String label = fileName + ":" + start + "-" + end;
         queuedContexts.add(new ContextSnippet(label, snippetText));
-        setContextStatus("Added context " + label, 0x55FF55);
+        setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.added_context", label), 0x55FF55);
     }
 
     private void addSelectionAsContext() {
@@ -1680,14 +1680,14 @@ public class P2SChatScreen extends Screen {
 
     private String shortError(String message) {
         if (message == null || message.isBlank()) {
-            return "unknown";
+            return P2SI18n.tr("screen.p2s.common.unknown").getString();
         }
         String text = message.trim();
         return text.length() <= 80 ? text : text.substring(0, 77) + "...";
     }
 
-    private void setContextStatus(String text, int color) {
-        contextStatus = text == null ? "" : text;
+    private void setContextStatus(Component text, int color) {
+        contextStatus = text == null ? Component.empty() : text;
         contextStatusColor = color;
     }
 
@@ -2180,16 +2180,16 @@ public class P2SChatScreen extends Screen {
 
         int x = PADDING;
         int y = PADDING;
-        gfx.drawString(this.font, "Workspace Files", x, y, 0xE8F0FF, true);
+        gfx.drawString(this.font, P2SI18n.tr("screen.p2s.chat.context.workspace_files"), x, y, 0xE8F0FF, true);
         y += this.font.lineHeight + 2;
         String docName = ClientSessionState.getSelectedWorkspaceLabel();
         if (docName == null || docName.isBlank()) {
             docName = "workspace/main.json";
         }
         String modeHint = switch (activeContextTab) {
-            case STATE -> "State view";
-            case SCRIPT -> docName + " (script)";
-            case DIFF -> docName + " diff (committed vs staged) [F7 nav]";
+            case STATE -> P2SI18n.tr("screen.p2s.chat.context.mode.state").getString();
+            case SCRIPT -> P2SI18n.tr("screen.p2s.chat.context.mode.script", docName).getString();
+            case DIFF -> P2SI18n.tr("screen.p2s.chat.context.mode.diff", docName).getString();
         };
         gfx.drawString(this.font, modeHint, x, y, 0x9CAECC, false);
 
@@ -2204,7 +2204,7 @@ public class P2SChatScreen extends Screen {
         drawContextEditor(gfx, start, end);
 
         int infoY = contextQueueTopY;
-        gfx.drawString(this.font, "Next message context (" + queuedContexts.size() + "/" + CONTEXT_MAX_SNIPPETS + ")", x, infoY, 0xE8F0FF, true);
+        gfx.drawString(this.font, P2SI18n.tr("screen.p2s.chat.context.next_message", queuedContexts.size(), CONTEXT_MAX_SNIPPETS), x, infoY, 0xE8F0FF, true);
         infoY += this.font.lineHeight + 2;
 
         if (queuedContexts.isEmpty()) {
@@ -2214,7 +2214,7 @@ public class P2SChatScreen extends Screen {
             int maxRows = 6;
             for (int i = 0; i < queuedContexts.size() && i < maxRows; i++) {
                 ContextSnippet snippet = queuedContexts.get(i);
-                String line = (i + 1) + ". " + snippet.label() + " (" + snippet.content().length() + " chars)";
+                String line = P2SI18n.tr("screen.p2s.chat.context.snippet", i + 1, snippet.label(), snippet.content().length()).getString();
                 List<FormattedCharSequence> wrapped = this.font.split(Component.literal(line), Math.max(100, panelX - PADDING * 3));
                 for (FormattedCharSequence text : wrapped) {
                     gfx.drawString(this.font, text, x, infoY, 0xC9D4EB, false);
@@ -2225,12 +2225,12 @@ public class P2SChatScreen extends Screen {
                 }
             }
             if (queuedContexts.size() > maxRows) {
-                gfx.drawString(this.font, "... +" + (queuedContexts.size() - maxRows) + " more", x, infoY, 0x8A99B8, false);
+                gfx.drawString(this.font, P2SI18n.tr("screen.p2s.common.more", queuedContexts.size() - maxRows), x, infoY, 0x8A99B8, false);
                 infoY += this.font.lineHeight + 1;
             }
         }
 
-        if (contextStatus != null && !contextStatus.isBlank()) {
+        if (contextStatus != null && !contextStatus.getString().isBlank()) {
             gfx.drawString(this.font, contextStatus, x, this.height - 14, contextStatusColor, false);
         }
     }
@@ -2444,24 +2444,27 @@ public class P2SChatScreen extends Screen {
 
     private void drawHeader(GuiGraphics gfx, int panelX, int panelWidth) {
         int y = PADDING;
-        gfx.drawString(this.font, "P2S Workspace", panelX + PADDING, y, 0xFFFFFF, true);
+        gfx.drawString(this.font, P2SI18n.tr("screen.p2s.chat.title"), panelX + PADDING, y, 0xFFFFFF, true);
         y += this.font.lineHeight + 2;
 
         String projectName = ClientSessionState.getProjectName();
         if (projectName != null && !projectName.isBlank()) {
-            gfx.drawString(this.font, "Project " + projectName, panelX + PADDING, y, 0xCFE1FF, true);
+            gfx.drawString(this.font, P2SI18n.tr("screen.p2s.chat.project", projectName), panelX + PADDING, y, 0xCFE1FF, true);
             y += this.font.lineHeight + 2;
         }
         if (ClientSessionState.isActive()) {
-            String info = "Session " + ClientSessionState.getSessionId() + " | Turns " + ClientSessionState.getTurnCount();
+            String info = P2SI18n.tr("screen.p2s.chat.session_info", ClientSessionState.getSessionId(), ClientSessionState.getTurnCount()).getString();
             gfx.drawString(this.font, info, panelX + PADDING, y, 0xAAAAAA, true);
             y += this.font.lineHeight + 2;
 
             String regionInfo;
             if (ClientSessionState.hasSize()) {
-                regionInfo = "Origin: (" + ClientSessionState.getOriginX() + ", " + ClientSessionState.getOriginY() + ", " + ClientSessionState.getOriginZ() + ") | Size: " + ClientSessionState.getSizeX() + "x" + ClientSessionState.getSizeY() + "x" + ClientSessionState.getSizeZ();
+                regionInfo = P2SI18n.tr("screen.p2s.chat.region_with_size",
+                        ClientSessionState.getOriginX(), ClientSessionState.getOriginY(), ClientSessionState.getOriginZ(),
+                        ClientSessionState.getSizeX(), ClientSessionState.getSizeY(), ClientSessionState.getSizeZ()).getString();
             } else {
-                regionInfo = "Origin: (" + ClientSessionState.getOriginX() + ", " + ClientSessionState.getOriginY() + ", " + ClientSessionState.getOriginZ() + ") | No bounds";
+                regionInfo = P2SI18n.tr("screen.p2s.chat.region_without_bounds",
+                        ClientSessionState.getOriginX(), ClientSessionState.getOriginY(), ClientSessionState.getOriginZ()).getString();
             }
             gfx.drawString(this.font, regionInfo, panelX + PADDING, y, 0xFFCC66, true);
             y += this.font.lineHeight + 2;
@@ -2469,10 +2472,10 @@ public class P2SChatScreen extends Screen {
             String runtime = ClientSessionState.getRuntimeState();
             String revision = ClientSessionState.getRevision();
             if (runtime != null && !runtime.isBlank()) {
-                gfx.drawString(this.font, "State " + runtime + " | Rev " + revision, panelX + PADDING, y, 0x9999FF, true);
+                gfx.drawString(this.font, P2SI18n.tr("screen.p2s.chat.state", P2SI18n.statusComponent(runtime), revision), panelX + PADDING, y, 0x9999FF, true);
             }
         } else {
-            gfx.drawString(this.font, "No active session (send a message to start)", panelX + PADDING, y, 0xAAAAAA, true);
+            gfx.drawString(this.font, P2SI18n.tr("screen.p2s.chat.no_active_session"), panelX + PADDING, y, 0xAAAAAA, true);
         }
     }
 
@@ -2511,7 +2514,7 @@ public class P2SChatScreen extends Screen {
 
         List<FormattedCharSequence> choicePromptLines = getChoicePromptLines(cw);
         if (!choicePromptLines.isEmpty()) {
-            allLines.add(new OverlayLine(null, 0xFFCC66, true, "Action Required"));
+            allLines.add(new OverlayLine(null, 0xFFCC66, true, P2SI18n.tr("screen.p2s.chat.overlay.action_required").getString()));
             for (FormattedCharSequence line : choicePromptLines) {
                 allLines.add(new OverlayLine(line, 0xFFE6AA, false, null));
             }
@@ -2528,7 +2531,7 @@ public class P2SChatScreen extends Screen {
             else if ("medium".equalsIgnoreCase(risk)) color = 0xFFAA55;
             int changed = ClientSessionState.getPreviewChangedBlocks();
             if (changed <= 0) changed = ClientSessionState.getPendingChangedBlocks();
-            allLines.add(new OverlayLine(null, color, true, "Pending Patch (" + changed + " blocks, " + risk + ")"));
+            allLines.add(new OverlayLine(null, color, true, P2SI18n.tr("screen.p2s.chat.overlay.pending_patch", changed, P2SI18n.riskComponent(risk)).getString()));
             for (FormattedCharSequence line : previewLines) {
                 allLines.add(new OverlayLine(line, 0xE0E0E0, false, null));
             }
@@ -2537,7 +2540,7 @@ public class P2SChatScreen extends Screen {
 
         List<FormattedCharSequence> summaryLines = getSummaryLines(cw);
         if (!summaryLines.isEmpty()) {
-            allLines.add(new OverlayLine(null, 0xAAAAAA, true, "Current Structure"));
+            allLines.add(new OverlayLine(null, 0xAAAAAA, true, P2SI18n.tr("screen.p2s.chat.overlay.current_structure").getString()));
             for (FormattedCharSequence line : summaryLines) {
                 allLines.add(new OverlayLine(line, 0xCCCCCC, false, null));
             }
@@ -2546,7 +2549,7 @@ public class P2SChatScreen extends Screen {
 
         List<FormattedCharSequence> todoLines = getTodoLines(cw);
         if (!todoLines.isEmpty()) {
-            allLines.add(new OverlayLine(null, 0x99CCFF, true, "Todo"));
+            allLines.add(new OverlayLine(null, 0x99CCFF, true, P2SI18n.tr("screen.p2s.chat.overlay.todo").getString()));
             for (FormattedCharSequence line : todoLines) {
                 allLines.add(new OverlayLine(line, 0xCCDDEE, false, null));
             }
@@ -2555,14 +2558,14 @@ public class P2SChatScreen extends Screen {
 
         List<FormattedCharSequence> checkpointLines = getCheckpointLines(cw);
         if (!checkpointLines.isEmpty()) {
-            allLines.add(new OverlayLine(null, 0x99FFCC, true, "Checkpoints [mode=" + modeLabel() + "]"));
+            allLines.add(new OverlayLine(null, 0x99FFCC, true, P2SI18n.tr("screen.p2s.chat.overlay.checkpoints", modeLabel()).getString()));
             for (FormattedCharSequence line : checkpointLines) {
                 allLines.add(new OverlayLine(line, 0xCCFFEE, false, null));
             }
         }
 
         if (allLines.isEmpty()) {
-            gfx.drawString(this.font, "No info available", overlayLeft + PADDING, overlayTop + PADDING + this.font.lineHeight, 0x888888, true);
+            gfx.drawString(this.font, P2SI18n.tr("screen.p2s.chat.overlay.no_info"), overlayLeft + PADDING, overlayTop + PADDING + this.font.lineHeight, 0x888888, true);
             return;
         }
 
@@ -2603,7 +2606,7 @@ public class P2SChatScreen extends Screen {
         if (status == null || status.isBlank()) {
             return;
         }
-        gfx.drawString(this.font, "Status: " + status, panelX + PADDING, getStatusY(), 0xAAAAAA, true);
+        gfx.drawString(this.font, P2SI18n.tr("screen.p2s.chat.status", P2SI18n.statusComponent(status)), panelX + PADDING, getStatusY(), 0xAAAAAA, true);
     }
 
     private void drawMessages(GuiGraphics gfx, int panelX, int panelWidth) {
@@ -2622,7 +2625,7 @@ public class P2SChatScreen extends Screen {
         boolean isStreaming = ClientSessionState.isStreaming();
         String streamingText = isStreaming ? ClientSessionState.getStreamingText() : null;
         if (isStreaming && streamingText != null && !streamingText.isBlank()) {
-            String streamPrefix = "AI: ";
+            String streamPrefix = P2SI18n.rolePrefix(P2SI18n.ROLE_ASSISTANT);
             List<FormattedCharSequence> streamLines = this.font.split(Component.literal(streamPrefix + streamingText), contentWidth);
             for (int li = streamLines.size() - 1; li >= 0; li--) {
                 y -= this.font.lineHeight + LINE_SPACING;
@@ -2665,7 +2668,7 @@ public class P2SChatScreen extends Screen {
         if (ClientSessionState.isStreaming()) {
             String streamingText = ClientSessionState.getStreamingText();
             if (streamingText != null && !streamingText.isBlank()) {
-                int lines = this.font.split(Component.literal("AI: " + streamingText), contentWidth).size();
+                int lines = this.font.split(Component.literal(P2SI18n.rolePrefix(P2SI18n.ROLE_ASSISTANT) + streamingText), contentWidth).size();
                 total += lines * (this.font.lineHeight + LINE_SPACING);
                 total += LINE_SPACING;
             }
@@ -2783,18 +2786,14 @@ public class P2SChatScreen extends Screen {
         int limit = Math.min(8, items.size());
         for (int i = 0; i < limit; i++) {
             ClientSessionState.TodoItem item = items.get(i);
-            String mark = switch (item.status()) {
-                case "done" -> "[x]";
-                case "in_progress" -> "[~]";
-                case "blocked" -> "[!]";
-                default -> "[ ]";
-            };
-            String text = mark + " " + item.id() + " " + item.content();
-            lines.addAll(this.font.split(Component.literal(text), contentWidth));
+            MutableComponent line = Component.literal("[")
+                    .append(P2SI18n.statusComponent(item.status()))
+                    .append(Component.literal("] " + item.id() + " " + item.content()));
+            lines.addAll(this.font.split(line, contentWidth));
         }
         int more = items.size() - limit;
         if (more > 0) {
-            lines.add(Component.literal("... +" + more + " more").getVisualOrderText());
+            lines.add(P2SI18n.tr("screen.p2s.common.more", more).getVisualOrderText());
         }
         return lines;
     }
@@ -2812,9 +2811,12 @@ public class P2SChatScreen extends Screen {
             ClientSessionState.CheckpointInfo cp = checkpoints.get(i);
             boolean isSelected = selected != null && cp.id().equals(selected.id());
             String marker = isSelected ? ">" : "-";
-            String text = marker + " " + shortId(cp.id()) + " " + (cp.label() == null ? "" : cp.label()) +
-                    (cp.revision() == null || cp.revision().isBlank() ? "" : " [" + cp.revision() + "]");
-            lines.addAll(this.font.split(Component.literal(text), contentWidth));
+            MutableComponent line = Component.literal(marker + " " + shortId(cp.id()) + " ")
+                    .append(P2SI18n.checkpointLabelComponent(cp.label()));
+            if (cp.revision() != null && !cp.revision().isBlank()) {
+                line.append(Component.literal(" [" + cp.revision() + "]"));
+            }
+            lines.addAll(this.font.split(line, contentWidth));
         }
         return lines;
     }
@@ -2828,7 +2830,7 @@ public class P2SChatScreen extends Screen {
     }
 
     private String modeLabel() {
-        return "session_only".equals(ClientSessionState.getRollbackMode()) ? "Chat" : "All";
+        return P2SI18n.rollbackModeComponent(ClientSessionState.getRollbackMode()).getString();
     }
 
     private void createCheckpoint() {
@@ -2852,7 +2854,7 @@ public class P2SChatScreen extends Screen {
         if (input != null) {
             input.setFocused(false);
         }
-        setContextStatus("Rename selected workspace file", 0xAAD5FF);
+        setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.rename_workspace"), 0xAAD5FF);
     }
 
     private void exitWorkspaceRenameMode() {
@@ -2872,7 +2874,7 @@ public class P2SChatScreen extends Screen {
         }
         String value = workspaceRenameInput != null ? workspaceRenameInput.getValue() : workspaceRenameDraft;
         if (value == null || value.trim().isEmpty()) {
-            setContextStatus("Workspace file name cannot be empty", 0xFF5555);
+            setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.workspace_name_empty"), 0xFF5555);
             return;
         }
         JsonObject payload = new JsonObject();
@@ -2880,7 +2882,7 @@ public class P2SChatScreen extends Screen {
         payload.addProperty("new_path", value.trim());
         exitWorkspaceRenameMode();
         sendSessionAction("workspace_file_rename", payload.toString());
-        setContextStatus("Renaming workspace file...", 0xAAAAAA);
+        setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.renaming_workspace"), 0xAAAAAA);
     }
 
     private void deleteSelectedWorkspaceDoc() {
@@ -2895,7 +2897,7 @@ public class P2SChatScreen extends Screen {
         workspaceRenameDraft = "";
         contextLoadedDocId = "";
         clearContextDiffView();
-        setContextStatus("Deleting workspace file...", 0xAAAAAA);
+        setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.deleting_workspace"), 0xAAAAAA);
         createWidgets();
     }
 
@@ -2926,7 +2928,7 @@ public class P2SChatScreen extends Screen {
             } else {
                 button.visible = false;
                 button.active = false;
-                button.setMessage(Component.literal(""));
+                button.setMessage(Component.empty());
             }
         }
     }
@@ -2947,28 +2949,17 @@ public class P2SChatScreen extends Screen {
         if (role == null) {
             return 0xFFFFFF;
         }
-        String lower = role.toLowerCase();
-        if (lower.contains("you") || lower.contains("user")) {
+        if (P2SI18n.isUserRole(role)) {
             return 0xFFFFFF;
         }
-        if (lower.contains("ai") || lower.contains("assistant")) {
+        if (P2SI18n.isAssistantRole(role)) {
             return 0x55FF55;
         }
         return 0xAAAAAA;
     }
 
     private static String rolePrefix(String role) {
-        if (role == null) {
-            return "";
-        }
-        String lower = role.toLowerCase();
-        if (lower.contains("you") || lower.contains("user")) {
-            return "You: ";
-        }
-        if (lower.contains("ai") || lower.contains("assistant")) {
-            return "AI: ";
-        }
-        return role + ": ";
+        return P2SI18n.rolePrefix(role);
     }
 
     private static double clamp(double value, double min, double max) {
@@ -3027,7 +3018,7 @@ public class P2SChatScreen extends Screen {
 
         if (!queuedContexts.isEmpty()) {
             queuedContexts.clear();
-            setContextStatus("Context sent with message", 0x55FF55);
+            setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.sent_with_message"), 0x55FF55);
         }
 
         input.setValue("");

@@ -46,8 +46,8 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         if (player == null) {
             return;
         }
-        sendChatResponse(player,
-                "Server chat mode is not available in the new project/session architecture. Use the client chat panel.",
+        sendChatResponseLocalized(player,
+                "message.p2s.session.server_chat_unavailable",
                 false,
                 "error");
     }
@@ -79,7 +79,7 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
             case "create_checkpoint" -> createCheckpoint(player, payload);
             case "rollback_checkpoint" -> rollbackCheckpoint(player, payload);
             case "session_select_workspace" -> selectWorkspacePath(player, payload);
-            default -> player.displayClientMessage(Component.literal("Unknown session action: " + action), false);
+            default -> player.displayClientMessage(P2SI18n.tr("message.p2s.session.unknown_action", action), false);
         }
     }
 
@@ -117,7 +117,7 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
                 case "propose_patch" -> handleProposePatchTool(player, arguments);
                 case "search_block_ids" -> handleSearchBlockIds(arguments);
                 case "explain_plan" -> handleExplainPlan();
-                default -> buildToolError(normalizedTool, "Unknown tool");
+                default -> buildToolErrorKey(normalizedTool, "message.p2s.tool.unknown_tool");
             };
             sendSessionSync(player, sessions.get(player.getUUID()));
             ProjectPersistence.ProjectRecord project = currentProject(player, sessions.get(player.getUUID()));
@@ -145,14 +145,14 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
             projectId = currentProjectIds.getOrDefault(player.getUUID(), "");
         }
         if (projectId.isBlank()) {
-            player.displayClientMessage(Component.literal("No project open. Create or open a project first."), false);
+            player.displayClientMessage(P2SI18n.tr("message.p2s.session.no_project_open"), false);
             sendSessionSync(player, null);
             return null;
         }
 
         ProjectPersistence.ProjectRecord project = loadProject(projectId);
         if (project == null) {
-            player.displayClientMessage(Component.literal("Project not found: " + projectId), false);
+            player.displayClientMessage(P2SI18n.tr("message.p2s.project.not_found", projectId), false);
             sendSessionSync(player, null);
             return null;
         }
@@ -166,7 +166,7 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         sessions.put(player.getUUID(), session);
         sendSessionSync(player, session);
         sendPatchPreview(player, null);
-        player.displayClientMessage(Component.literal("Session opened: " + session.id), false);
+        player.displayClientMessage(P2SI18n.tr("message.p2s.session.opened", session.id), false);
         return session;
     }
 
@@ -177,7 +177,7 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         sessions.remove(player.getUUID());
         sendPatchPreview(player, null);
         sendSessionSync(player, null);
-        player.displayClientMessage(Component.literal("Session closed"), false);
+        player.displayClientMessage(P2SI18n.tr("message.p2s.session.closed"), false);
     }
 
     public static void undo(ServerPlayer player) {
@@ -196,11 +196,11 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         ProjectPersistence.ProjectRecord project = currentProject(player, session);
         ProjectPersistence.WorkspaceFileRecord workspace = selectedWorkspace(project, session);
         if (workspace == null || workspace.current == null) {
-            player.displayClientMessage(Component.literal("No selected workspace with structure content"), false);
+            player.displayClientMessage(P2SI18n.tr("message.p2s.workspace.no_selected_content"), false);
             return;
         }
         String saved = ScriptStorage.saveV2(workspace.path, workspace.current, workspace.summary, name);
-        player.displayClientMessage(Component.literal("Saved workspace as " + saved), false);
+        player.displayClientMessage(P2SI18n.tr("message.p2s.workspace.saved_as", saved), false);
     }
 
     private static JsonObject handleListProjectsTool() {
@@ -228,7 +228,7 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         }
         payload.add("projects", projects);
         if (ProjectPersistence.hasLegacyData()) {
-            payload.addProperty("warning", ProjectPersistence.legacyWarningMessage());
+            addToolWarning(payload, "message.p2s.project.legacy_warning");
             payload.addProperty("legacy_data_detected", true);
         }
         return payload;
@@ -240,7 +240,7 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         String description = getString(args, "description");
         SelectionManager.Selection selection = SelectionManager.get(player.getUUID());
         if (selection == null || !selection.isComplete()) {
-            return buildToolError("create_project", "Create project requires a complete selection");
+            return buildToolErrorKey("create_project", "message.p2s.project.create_requires_selection");
         }
         ProjectPersistence.ProjectRecord project = ProjectPersistence.createProject(
                 name.isBlank() ? DEFAULT_PROJECT_NAME : name,
@@ -249,7 +249,7 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
                 selection.size()
         );
         if (project == null) {
-            return buildToolError("create_project", "Failed to create project");
+            return buildToolErrorKey("create_project", "message.p2s.project.create_failed");
         }
         loadedProjects.put(project.id, project);
         currentProjectIds.put(player.getUUID(), project.id);
@@ -265,11 +265,11 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         JsonObject args = normalizeArgsObject(argsElem);
         String projectId = getString(args, "id");
         if (projectId.isBlank()) {
-            return buildToolError("open_project", "Open project requires id");
+            return buildToolErrorKey("open_project", "message.p2s.project.open_requires_id");
         }
         ProjectPersistence.ProjectRecord project = loadProject(projectId);
         if (project == null) {
-            return buildToolError("open_project", "Project not found: " + projectId);
+            return buildToolErrorKey("open_project", "message.p2s.project.not_found", projectId);
         }
         currentProjectIds.put(player.getUUID(), project.id);
         sessions.remove(player.getUUID());
@@ -284,7 +284,7 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
     private static JsonObject handleGetProjectState(ServerPlayer player) {
         ProjectPersistence.ProjectRecord project = currentProject(player, sessions.get(player.getUUID()));
         if (project == null) {
-            return buildToolError("get_project_state", "No current project");
+            return buildToolErrorKey("get_project_state", "message.p2s.project.no_current_project");
         }
         JsonObject payload = buildToolSuccess("get_project_state");
         payload.add("project", buildProjectPayload(project));
@@ -303,15 +303,15 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
     private static JsonObject handleReadWorkspaceFile(ServerPlayer player, JsonElement argsElem) {
         ProjectPersistence.ProjectRecord project = currentProject(player, sessions.get(player.getUUID()));
         if (project == null) {
-            return buildToolError("read_workspace_file", "No current project");
+            return buildToolErrorKey("read_workspace_file", "message.p2s.project.no_current_project");
         }
         ReadWorkspaceArgs args = parseReadWorkspaceArgs(argsElem);
         if (args.path.isBlank()) {
-            return buildToolError("read_workspace_file", "Read workspace file requires path");
+            return buildToolErrorKey("read_workspace_file", "message.p2s.workspace.read_requires_path");
         }
         ProjectPersistence.WorkspaceFileRecord workspace = findWorkspace(project, args.path);
         if (workspace == null) {
-            return buildToolError("read_workspace_file", "Unknown path: " + args.path);
+            return buildToolErrorKey("read_workspace_file", "message.p2s.workspace.unknown_path", args.path);
         }
         JsonObject payload = buildToolSuccess("read_workspace_file");
         payload.addProperty("path", workspace.path);
@@ -325,20 +325,20 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
     private static JsonObject handleCreateWorkspaceFileTool(ServerPlayer player, JsonElement argsElem) {
         ProjectPersistence.ProjectRecord project = currentProject(player, sessions.get(player.getUUID()));
         if (project == null) {
-            return buildToolError("create_workspace_file", "No current project");
+            return buildToolErrorKey("create_workspace_file", "message.p2s.project.no_current_project");
         }
         JsonObject args = normalizeArgsObject(argsElem);
         String path = ProjectPersistence.normalizeWorkspacePath(getString(args, "path"));
         String type = ProjectPersistence.normalizeWorkspaceType(getString(args, "type"));
         String name = getString(args, "name");
         if (path.isBlank()) {
-            return buildToolError("create_workspace_file", "Create workspace file requires path");
+            return buildToolErrorKey("create_workspace_file", "message.p2s.workspace.create_requires_path");
         }
         if (project.workspaceFiles.size() >= MAX_WORKSPACE_FILES) {
-            return buildToolError("create_workspace_file", "Maximum workspace file count reached");
+            return buildToolErrorKey("create_workspace_file", "message.p2s.workspace.max_files");
         }
         if (project.workspaceFiles.containsKey(path)) {
-            return buildToolError("create_workspace_file", "Path already exists: " + path);
+            return buildToolErrorKey("create_workspace_file", "message.p2s.workspace.path_exists", path);
         }
         ProjectPersistence.WorkspaceFileRecord workspace = new ProjectPersistence.WorkspaceFileRecord();
         workspace.path = path;
@@ -362,20 +362,20 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
     private static JsonObject handleRenameWorkspaceFileTool(ServerPlayer player, JsonElement argsElem) {
         ProjectPersistence.ProjectRecord project = currentProject(player, sessions.get(player.getUUID()));
         if (project == null) {
-            return buildToolError("rename_workspace_file", "No current project");
+            return buildToolErrorKey("rename_workspace_file", "message.p2s.project.no_current_project");
         }
         JsonObject args = normalizeArgsObject(argsElem);
         String path = ProjectPersistence.normalizeWorkspacePath(getString(args, "path"));
         String newPath = ProjectPersistence.normalizeWorkspacePath(getString(args, "new_path"));
         if (path.isBlank() || newPath.isBlank()) {
-            return buildToolError("rename_workspace_file", "Rename requires path and new_path");
+            return buildToolErrorKey("rename_workspace_file", "message.p2s.workspace.rename_requires_paths");
         }
         ProjectPersistence.WorkspaceFileRecord workspace = findWorkspace(project, path);
         if (workspace == null) {
-            return buildToolError("rename_workspace_file", "Unknown path: " + path);
+            return buildToolErrorKey("rename_workspace_file", "message.p2s.workspace.unknown_path", path);
         }
         if (!path.equals(newPath) && project.workspaceFiles.containsKey(newPath)) {
-            return buildToolError("rename_workspace_file", "Target path already exists: " + newPath);
+            return buildToolErrorKey("rename_workspace_file", "message.p2s.workspace.target_path_exists", newPath);
         }
         project.workspaceFiles.remove(path);
         workspace.path = newPath;
@@ -395,22 +395,22 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
     private static JsonObject handleDeleteWorkspaceFileTool(ServerPlayer player, JsonElement argsElem) {
         ProjectPersistence.ProjectRecord project = currentProject(player, sessions.get(player.getUUID()));
         if (project == null) {
-            return buildToolError("delete_workspace_file", "No current project");
+            return buildToolErrorKey("delete_workspace_file", "message.p2s.project.no_current_project");
         }
         JsonObject args = normalizeArgsObject(argsElem);
         String path = ProjectPersistence.normalizeWorkspacePath(getString(args, "path"));
         if (path.isBlank()) {
-            return buildToolError("delete_workspace_file", "Delete requires path");
+            return buildToolErrorKey("delete_workspace_file", "message.p2s.workspace.delete_requires_path");
         }
         if (project.workspaceFiles.size() <= 1) {
-            return buildToolError("delete_workspace_file", "Cannot delete the last workspace file");
+            return buildToolErrorKey("delete_workspace_file", "message.p2s.workspace.delete_last_forbidden");
         }
         ProjectPersistence.WorkspaceFileRecord workspace = findWorkspace(project, path);
         if (workspace == null) {
-            return buildToolError("delete_workspace_file", "Unknown path: " + path);
+            return buildToolErrorKey("delete_workspace_file", "message.p2s.workspace.unknown_path", path);
         }
         if (workspace.pendingPatch != null) {
-            return buildToolError("delete_workspace_file", "Cannot delete workspace file with pending patch");
+            return buildToolErrorKey("delete_workspace_file", "message.p2s.workspace.delete_pending_forbidden");
         }
         project.workspaceFiles.remove(path);
         Session session = sessions.get(player.getUUID());
@@ -428,20 +428,20 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         ProjectPersistence.ProjectRecord project = currentProject(player, sessions.get(player.getUUID()));
         Session session = sessions.get(player.getUUID());
         if (project == null || session == null) {
-            return buildToolError("propose_patch", "No active session/project");
+            return buildToolErrorKey("propose_patch", "message.p2s.session.no_active_project");
         }
         JsonObject args = normalizeArgsObject(argsElem);
         String path = ProjectPersistence.normalizeWorkspacePath(getString(args, "path"));
         if (path.isBlank()) {
-            return buildToolError("propose_patch", "propose_patch requires path");
+            return buildToolErrorKey("propose_patch", "message.p2s.patch.propose_requires_path");
         }
         ProjectPersistence.WorkspaceFileRecord workspace = findWorkspace(project, path);
         if (workspace == null) {
-            return buildToolError("propose_patch", "Unknown path: " + path);
+            return buildToolErrorKey("propose_patch", "message.p2s.workspace.unknown_path", path);
         }
         PatchModels.StructurePatch patch = parsePatchArguments(argsElem);
         if (patch == null) {
-            return buildToolError("propose_patch", "Invalid patch arguments");
+            return buildToolErrorKey("propose_patch", "message.p2s.patch.invalid_arguments");
         }
         normalizePatch(patch);
 
@@ -457,7 +457,7 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
 
         String patchBase = patch.baseRevision == null ? "" : patch.baseRevision.trim();
         if (!patchBase.isBlank() && !patchBase.equals(committedRevision) && !patchBase.equals(stagedRevision)) {
-            return buildToolError("propose_patch", "Patch base_revision mismatch");
+            return buildToolErrorKey("propose_patch", "message.p2s.patch.base_revision_mismatch");
         }
 
         StructureBuilder.VbsScriptV2 committedBase = copyScript(workspace.current);
@@ -541,7 +541,7 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
     private static JsonObject handleSearchBlockIds(JsonElement argsElem) {
         SearchBlockArgs args = parseSearchBlockArgs(argsElem);
         if (args == null || args.query == null || args.query.isBlank()) {
-            return buildToolError("search_block_ids", "Missing query");
+            return buildToolErrorKey("search_block_ids", "message.p2s.search.missing_query");
         }
         List<String> matches = StructureBuilder.searchBlockIds(args.query, args.limit);
         String closest = StructureBuilder.closestBlockId(args.query);
@@ -557,7 +557,7 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
             payload.addProperty("closest", closest);
         }
         if (matches.isEmpty()) {
-            payload.addProperty("warning", "No matches");
+            addToolWarning(payload, "message.p2s.search.no_matches");
         }
         return payload;
     }
@@ -572,22 +572,22 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         ProjectPersistence.ProjectRecord project = currentProject(player, sessions.get(player.getUUID()));
         Session session = sessions.get(player.getUUID());
         if (project == null || session == null) {
-            player.displayClientMessage(Component.literal("No active session/project"), false);
+            displayMessage(player, "message.p2s.session.no_active_project");
             return;
         }
         JsonObject args = parsePayloadObject(payload);
         String path = ProjectPersistence.normalizeWorkspacePath(getString(args, "path"));
         String type = ProjectPersistence.normalizeWorkspaceType(getString(args, "type"));
         if (path.isBlank()) {
-            player.displayClientMessage(Component.literal("Workspace create requires path"), false);
+            displayMessage(player, "message.p2s.workspace.create_requires_path");
             return;
         }
         if (project.workspaceFiles.size() >= MAX_WORKSPACE_FILES) {
-            player.displayClientMessage(Component.literal("Maximum workspace file count reached"), false);
+            displayMessage(player, "message.p2s.workspace.max_files");
             return;
         }
         if (project.workspaceFiles.containsKey(path)) {
-            player.displayClientMessage(Component.literal("Workspace path already exists: " + path), false);
+            displayMessage(player, "message.p2s.workspace.path_exists", path);
             return;
         }
         ProjectPersistence.WorkspaceFileRecord workspace = new ProjectPersistence.WorkspaceFileRecord();
@@ -598,11 +598,11 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         if (fromSelection) {
             SelectionManager.Selection selection = SelectionManager.get(player.getUUID());
             if (selection == null || !selection.isComplete()) {
-                player.displayClientMessage(Component.literal("Selection required to create workspace from selection"), false);
+                displayMessage(player, "message.p2s.workspace.create_from_selection_requires_selection");
                 return;
             }
             if (!isSelectionWithinProject(selection, project)) {
-                player.displayClientMessage(Component.literal("Selection must stay inside project bounds"), false);
+                displayMessage(player, "message.p2s.workspace.selection_out_of_bounds");
                 return;
             }
             workspace.origin = ProjectPersistence.Vec3Data.of(selection.min());
@@ -613,30 +613,30 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         saveProject(project);
         sendSessionSync(player, session);
         sendPatchPreview(player, null);
-        player.displayClientMessage(Component.literal("Workspace file created: " + path), false);
+        displayMessage(player, "message.p2s.workspace.created", path);
     }
 
     private static void renameWorkspaceFileAction(ServerPlayer player, String payload) {
         ProjectPersistence.ProjectRecord project = currentProject(player, sessions.get(player.getUUID()));
         Session session = sessions.get(player.getUUID());
         if (project == null || session == null) {
-            player.displayClientMessage(Component.literal("No active session/project"), false);
+            displayMessage(player, "message.p2s.session.no_active_project");
             return;
         }
         JsonObject args = parsePayloadObject(payload);
         String path = ProjectPersistence.normalizeWorkspacePath(getString(args, "path"));
         String newPath = ProjectPersistence.normalizeWorkspacePath(getString(args, "new_path"));
         if (path.isBlank() || newPath.isBlank()) {
-            player.displayClientMessage(Component.literal("Rename requires path and new_path"), false);
+            displayMessage(player, "message.p2s.workspace.rename_requires_paths");
             return;
         }
         ProjectPersistence.WorkspaceFileRecord workspace = findWorkspace(project, path);
         if (workspace == null) {
-            player.displayClientMessage(Component.literal("Workspace not found: " + path), false);
+            displayMessage(player, "message.p2s.workspace.unknown_path", path);
             return;
         }
         if (!path.equals(newPath) && project.workspaceFiles.containsKey(newPath)) {
-            player.displayClientMessage(Component.literal("Target path already exists: " + newPath), false);
+            displayMessage(player, "message.p2s.workspace.target_path_exists", newPath);
             return;
         }
         project.workspaceFiles.remove(path);
@@ -648,33 +648,33 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         }
         saveProject(project);
         sendSessionSync(player, session);
-        player.displayClientMessage(Component.literal("Workspace renamed: " + newPath), false);
+        displayMessage(player, "message.p2s.workspace.renamed", newPath);
     }
 
     private static void deleteWorkspaceFileAction(ServerPlayer player, String payload) {
         ProjectPersistence.ProjectRecord project = currentProject(player, sessions.get(player.getUUID()));
         Session session = sessions.get(player.getUUID());
         if (project == null || session == null) {
-            player.displayClientMessage(Component.literal("No active session/project"), false);
+            displayMessage(player, "message.p2s.session.no_active_project");
             return;
         }
         JsonObject args = parsePayloadObject(payload);
         String path = ProjectPersistence.normalizeWorkspacePath(getString(args, "path"));
         if (path.isBlank()) {
-            player.displayClientMessage(Component.literal("Delete requires path"), false);
+            displayMessage(player, "message.p2s.workspace.delete_requires_path");
             return;
         }
         if (project.workspaceFiles.size() <= 1) {
-            player.displayClientMessage(Component.literal("Cannot delete the last workspace file"), false);
+            displayMessage(player, "message.p2s.workspace.delete_last_forbidden");
             return;
         }
         ProjectPersistence.WorkspaceFileRecord workspace = findWorkspace(project, path);
         if (workspace == null) {
-            player.displayClientMessage(Component.literal("Workspace not found: " + path), false);
+            displayMessage(player, "message.p2s.workspace.unknown_path", path);
             return;
         }
         if (workspace.pendingPatch != null) {
-            player.displayClientMessage(Component.literal("Cannot delete workspace file with pending patch"), false);
+            displayMessage(player, "message.p2s.workspace.delete_pending_forbidden");
             return;
         }
         project.workspaceFiles.remove(path);
@@ -684,7 +684,7 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         saveProject(project);
         sendSessionSync(player, session);
         sendPatchPreview(player, null);
-        player.displayClientMessage(Component.literal("Workspace deleted: " + path), false);
+        displayMessage(player, "message.p2s.workspace.deleted", path);
     }
 
     private static void selectWorkspacePath(ServerPlayer player, String payload) {
@@ -698,7 +698,7 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
             return;
         }
         if (!project.workspaceFiles.containsKey(path)) {
-            player.displayClientMessage(Component.literal("Workspace not found: " + path), false);
+            displayMessage(player, "message.p2s.workspace.unknown_path", path);
             return;
         }
         session.selectedWorkspacePath = path;
@@ -711,12 +711,12 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         Session session = sessions.get(player.getUUID());
         ProjectPersistence.ProjectRecord project = currentProject(player, session);
         if (session == null || project == null) {
-            player.displayClientMessage(Component.literal("No active session/project"), false);
+            displayMessage(player, "message.p2s.session.no_active_project");
             return;
         }
         ProjectPersistence.WorkspaceFileRecord workspace = resolveWorkspace(project, session, path);
         if (workspace == null || workspace.pendingPatch == null) {
-            player.displayClientMessage(Component.literal("No pending patch for selected workspace"), false);
+            displayMessage(player, "message.p2s.patch.no_pending_patch");
             return;
         }
 
@@ -740,7 +740,7 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         addCheckpoint(workspace, "apply:" + commit.summary, workspace.revision);
         session.runtimeState = RuntimeState.IDLE;
         saveProject(project);
-        sendChatResponse(player, "Patch applied: " + commit.summary, true, "committed");
+        sendChatResponseLocalized(player, "message.p2s.patch.applied", true, "committed", commit.summary);
         sendPatchPreview(player, null);
         sendSessionSync(player, session);
     }
@@ -749,7 +749,7 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         Session session = sessions.get(player.getUUID());
         ProjectPersistence.ProjectRecord project = currentProject(player, session);
         if (session == null || project == null) {
-            player.displayClientMessage(Component.literal("No active session/project"), false);
+            displayMessage(player, "message.p2s.session.no_active_project");
             return;
         }
         JsonObject args = parsePayloadObject(payload);
@@ -760,7 +760,7 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         }
         ProjectPersistence.WorkspaceFileRecord workspace = resolveWorkspace(project, session, path);
         if (workspace == null || workspace.pendingPatch == null) {
-            player.displayClientMessage(Component.literal("No pending patch for selected workspace"), false);
+            displayMessage(player, "message.p2s.patch.no_pending_patch");
             return;
         }
         workspace.pendingPatch = null;
@@ -768,27 +768,28 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         saveProject(project);
         sendPatchPreview(player, null);
         sendSessionSync(player, session);
-        sendChatResponse(player,
-                reason == null || reason.isBlank() ? "Patch discarded" : "Patch discarded: " + reason,
-                false,
-                "cancelled");
+        if (reason == null || reason.isBlank()) {
+            sendChatResponseLocalized(player, "message.p2s.patch.discarded", false, "cancelled");
+        } else {
+            sendChatResponseLocalized(player, "message.p2s.patch.discarded_with_reason", false, "cancelled", reason);
+        }
     }
 
     private static void undo(ServerPlayer player, String path) {
         Session session = sessions.get(player.getUUID());
         ProjectPersistence.ProjectRecord project = currentProject(player, session);
         if (session == null || project == null) {
-            player.displayClientMessage(Component.literal("No active session/project"), false);
+            displayMessage(player, "message.p2s.session.no_active_project");
             return;
         }
         ProjectPersistence.WorkspaceFileRecord workspace = resolveWorkspace(project, session, path);
         if (workspace == null || workspace.undoStack == null || workspace.undoStack.isEmpty()) {
-            player.displayClientMessage(Component.literal("Nothing to undo"), false);
+            displayMessage(player, "message.p2s.history.nothing_to_undo");
             return;
         }
         ProjectPersistence.CommitRecord commit = popCommit(workspace.undoStack);
         if (commit == null) {
-            player.displayClientMessage(Component.literal("Nothing to undo"), false);
+            displayMessage(player, "message.p2s.history.nothing_to_undo");
             return;
         }
         StructurePatchEngine.DiffResult diff = StructurePatchEngine.diff(copyScript(workspace.current), copyScript(commit.beforeScript));
@@ -802,24 +803,24 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         saveProject(project);
         sendPatchPreview(player, null);
         sendSessionSync(player, session);
-        player.displayClientMessage(Component.literal("Undo applied: " + safeSummary(commit.summary)), false);
+        displayMessage(player, "message.p2s.history.undo_applied", safeSummary(commit.summary));
     }
 
     private static void redo(ServerPlayer player, String path) {
         Session session = sessions.get(player.getUUID());
         ProjectPersistence.ProjectRecord project = currentProject(player, session);
         if (session == null || project == null) {
-            player.displayClientMessage(Component.literal("No active session/project"), false);
+            displayMessage(player, "message.p2s.session.no_active_project");
             return;
         }
         ProjectPersistence.WorkspaceFileRecord workspace = resolveWorkspace(project, session, path);
         if (workspace == null || workspace.redoStack == null || workspace.redoStack.isEmpty()) {
-            player.displayClientMessage(Component.literal("Nothing to redo"), false);
+            displayMessage(player, "message.p2s.history.nothing_to_redo");
             return;
         }
         ProjectPersistence.CommitRecord commit = popCommit(workspace.redoStack);
         if (commit == null) {
-            player.displayClientMessage(Component.literal("Nothing to redo"), false);
+            displayMessage(player, "message.p2s.history.nothing_to_redo");
             return;
         }
         StructurePatchEngine.DiffResult diff = StructurePatchEngine.diff(copyScript(workspace.current), copyScript(commit.afterScript));
@@ -833,14 +834,14 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         saveProject(project);
         sendPatchPreview(player, null);
         sendSessionSync(player, session);
-        player.displayClientMessage(Component.literal("Redo applied: " + safeSummary(commit.summary)), false);
+        displayMessage(player, "message.p2s.history.redo_applied", safeSummary(commit.summary));
     }
 
     private static void createCheckpoint(ServerPlayer player, String payload) {
         Session session = sessions.get(player.getUUID());
         ProjectPersistence.ProjectRecord project = currentProject(player, session);
         if (session == null || project == null) {
-            player.displayClientMessage(Component.literal("No active session/project"), false);
+            displayMessage(player, "message.p2s.session.no_active_project");
             return;
         }
         JsonObject args = parsePayloadObject(payload);
@@ -848,20 +849,20 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         String label = getString(args, "label");
         ProjectPersistence.WorkspaceFileRecord workspace = resolveWorkspace(project, session, path);
         if (workspace == null) {
-            player.displayClientMessage(Component.literal("Workspace not found"), false);
+            displayMessage(player, "message.p2s.workspace.not_found");
             return;
         }
         addCheckpoint(workspace, label.isBlank() ? "manual" : label, workspace.revision);
         saveProject(project);
         sendSessionSync(player, session);
-        player.displayClientMessage(Component.literal("Checkpoint created"), false);
+        displayMessage(player, "message.p2s.checkpoint.created");
     }
 
     private static void rollbackCheckpoint(ServerPlayer player, String payload) {
         Session session = sessions.get(player.getUUID());
         ProjectPersistence.ProjectRecord project = currentProject(player, session);
         if (session == null || project == null) {
-            player.displayClientMessage(Component.literal("No active session/project"), false);
+            displayMessage(player, "message.p2s.session.no_active_project");
             return;
         }
         JsonObject args = parsePayloadObject(payload);
@@ -869,12 +870,12 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         String checkpointId = getString(args, "checkpoint_id");
         ProjectPersistence.WorkspaceFileRecord workspace = resolveWorkspace(project, session, path);
         if (workspace == null || workspace.checkpoints == null || workspace.checkpoints.isEmpty()) {
-            player.displayClientMessage(Component.literal("No checkpoints available"), false);
+            displayMessage(player, "message.p2s.checkpoint.none_available");
             return;
         }
         ProjectPersistence.CheckpointRecord checkpoint = findCheckpoint(workspace, checkpointId);
         if (checkpoint == null || checkpoint.script == null) {
-            player.displayClientMessage(Component.literal("Checkpoint not found"), false);
+            displayMessage(player, "message.p2s.checkpoint.not_found");
             return;
         }
         StructureBuilder.VbsScriptV2 before = copyScript(workspace.current);
@@ -896,7 +897,7 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         saveProject(project);
         sendPatchPreview(player, null);
         sendSessionSync(player, session);
-        player.displayClientMessage(Component.literal("Rolled back to checkpoint: " + checkpoint.id), false);
+        displayMessage(player, "message.p2s.checkpoint.rolled_back", checkpoint.id);
     }
 
     private static ProjectPersistence.CheckpointRecord findCheckpoint(ProjectPersistence.WorkspaceFileRecord workspace, String checkpointId) {
@@ -1646,6 +1647,29 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         return payload;
     }
 
+    private static JsonObject buildToolErrorKey(String tool, String errorKey, Object... args) {
+        JsonObject payload = buildToolError(tool, P2SI18n.tr(errorKey, args).getString());
+        payload.addProperty("error_key", errorKey == null ? "" : errorKey);
+        payload.add("error_args", GSON.toJsonTree(args == null ? new Object[0] : args));
+        return payload;
+    }
+
+    private static void addToolWarning(JsonObject payload, String warningKey, Object... args) {
+        if (payload == null) {
+            return;
+        }
+        payload.addProperty("warning", P2SI18n.tr(warningKey, args).getString());
+        payload.addProperty("warning_key", warningKey == null ? "" : warningKey);
+        payload.add("warning_args", GSON.toJsonTree(args == null ? new Object[0] : args));
+    }
+
+    private static void displayMessage(ServerPlayer player, String key, Object... args) {
+        if (player == null) {
+            return;
+        }
+        player.displayClientMessage(P2SI18n.tr(key, args), false);
+    }
+
     private static void sendToolBridgeResponse(ServerPlayer player, String requestId, boolean ok, JsonObject payload, String error) {
         JsonObject safePayload = payload == null ? new JsonObject() : payload;
         ServerNetworkHandler.sendToClient(player, new S2CToolBridgePayload(
@@ -1678,6 +1702,16 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
                 text == null ? "" : text,
                 hasStructure,
                 status == null ? "" : status
+        ));
+    }
+
+    private static void sendChatResponseLocalized(ServerPlayer player, String messageKey, boolean hasStructure, String status, Object... args) {
+        ServerNetworkHandler.sendToClient(player, new S2CChatResponsePayload(
+                P2SI18n.tr(messageKey, args).getString(),
+                hasStructure,
+                status == null ? "" : status,
+                messageKey == null ? "" : messageKey,
+                GSON.toJson(args == null ? new Object[0] : args)
         ));
     }
 

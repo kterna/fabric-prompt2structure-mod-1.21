@@ -24,7 +24,7 @@ public final class ClientNetworkHandler {
             if (P2SMod.DEBUG) {
                 P2SMod.LOGGER.info("[DEBUG] C->S2CChatResponse received -> textLen={}, hasStructure={}, status={}", payload.assistantText() == null ? 0 : payload.assistantText().length(), payload.hasStructure(), payload.status());
             }
-            context.client().execute(() -> ClientSessionState.onChatResponse(payload.assistantText(), payload.hasStructure(), payload.status()));
+            context.client().execute(() -> ClientSessionState.onChatResponse(payload.assistantText(), payload.hasStructure(), payload.status(), payload.messageKey(), payload.messageArgsJson()));
         });
 
         ClientPlayNetworking.registerGlobalReceiver(S2CSessionSyncPayload.TYPE, (payload, context) -> {

@@ -165,8 +165,13 @@ public final class ClientSessionState {
     }
 
     public static synchronized void onChatResponse(String text, boolean hasStructure, String newStatus) {
-        if (text != null && !text.isBlank()) {
-            addMessage("AI", text.trim());
+        onChatResponse(text, hasStructure, newStatus, "", "");
+    }
+
+    public static synchronized void onChatResponse(String text, boolean hasStructure, String newStatus, String messageKey, String messageArgsJson) {
+        String resolved = P2SI18n.resolve(messageKey, messageArgsJson, text).getString();
+        if (resolved != null && !resolved.isBlank()) {
+            addMessage(P2SI18n.ROLE_ASSISTANT, resolved.trim());
         }
         if (newStatus != null) {
             status = newStatus;
@@ -206,7 +211,7 @@ public final class ClientSessionState {
 
     public static synchronized void addUserMessage(String text) {
         if (text != null && !text.isBlank()) {
-            addMessage("You", text.trim());
+            addMessage(P2SI18n.ROLE_USER, text.trim());
         }
     }
 
@@ -348,7 +353,7 @@ public final class ClientSessionState {
     }
 
     static synchronized void addMessage(String role, String text) {
-        messages.add(new ChatMessage(role, text));
+        messages.add(new ChatMessage(P2SI18n.normalizeRole(role), text));
         if (messages.size() > 200) {
             messages.remove(0);
         }
@@ -377,7 +382,7 @@ public final class ClientSessionState {
     public static synchronized int getTurnCount() {
         int count = 0;
         for (ChatMessage message : messages) {
-            if (message != null && "You".equals(message.role())) {
+            if (message != null && P2SI18n.isUserRole(message.role())) {
                 count++;
             }
         }

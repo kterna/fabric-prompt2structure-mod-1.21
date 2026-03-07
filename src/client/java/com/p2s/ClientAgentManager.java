@@ -249,7 +249,7 @@ public final class ClientAgentManager {
             }
         }
         if (selected == null) {
-            postToClient(() -> ClientSessionState.setStatus("Invalid choice option"));
+            postToClient(() -> ClientSessionState.setStatus("error"));
             return;
         }
         ClientSessionState.clearPendingChoice();
@@ -1152,7 +1152,7 @@ public final class ClientAgentManager {
 
             String title = "";
             for (ClientSessionState.ChatMessage message : chatMessages) {
-                if (!"You".equals(message.role()) || message.text() == null || message.text().isBlank()) {
+                if (!P2SI18n.isUserRole(message.role()) || message.text() == null || message.text().isBlank()) {
                     continue;
                 }
                 title = message.text().trim();
@@ -1162,7 +1162,7 @@ public final class ClientAgentManager {
                 break;
             }
             if (title.isBlank()) {
-                title = "Session " + session.id.substring(0, Math.min(8, session.id.length()));
+                title = P2SI18n.tr("screen.p2s.sessions.default_title", session.id.substring(0, Math.min(8, session.id.length()))).getString();
             }
 
             String projectId = session.projectId == null || session.projectId.isBlank()

@@ -11,56 +11,35 @@ import java.util.function.Consumer;
 
 final class P2SWorkspaceExplorerComponent {
     private static final int PADDING = 8;
+    private static final int explorerActionGap = 2;
 
     private P2SWorkspaceExplorerComponent() {
     }
 
     static BuildResult build(Host host, Config config) {
-        int explorerActionGap = 2;
-        int explorerRenameWidth = 42;
-        int explorerDeleteWidth = 42;
-        int explorerCreateWidth = Math.max(72, config.explorerWidth() - explorerRenameWidth - explorerDeleteWidth - explorerActionGap * 2);
+        Button createButton = host.addButton(Button.builder(P2SI18n.tr("screen.p2s.workspace.new_file"), btn -> config.onCreate().run())
+                .bounds(config.leftX(), config.row1Y(), 58, config.inputHeight()).build());
 
-        Button createButton = host.addButton(Button.builder(Component.literal("+ New File"), btn -> config.onCreate().run())
-                .bounds(config.leftX(), config.row1Y(), explorerCreateWidth, config.inputHeight()).build());
+        Button renameButton = host.addButton(Button.builder(P2SI18n.tr("screen.p2s.workspace.rename_short"), btn -> config.onEnterRename().run())
+                .bounds(config.leftX() + 60, config.row1Y(), 38, config.inputHeight()).build());
 
-        Button renameButton = host.addButton(Button.builder(Component.literal("Ren"), btn -> config.onEnterRename().run())
-                .bounds(config.leftX() + explorerCreateWidth + explorerActionGap, config.row1Y(), explorerRenameWidth, config.inputHeight()).build());
-
-        Button deleteButton = host.addButton(Button.builder(Component.literal("Del"), btn -> config.onDelete().run())
-                .bounds(config.leftX() + explorerCreateWidth + explorerActionGap + explorerRenameWidth + explorerActionGap,
-                        config.row1Y(), explorerDeleteWidth, config.inputHeight()).build());
-
-        boolean hasSelectedWorkspace = config.selectedWorkspacePath() != null && !config.selectedWorkspacePath().isBlank();
-        ClientSessionState.WorkspaceFileInfo selectedWorkspace = null;
-        for (ClientSessionState.WorkspaceFileInfo file : config.files()) {
-            if (file != null && file.path().equals(config.selectedWorkspacePath())) {
-                selectedWorkspace = file;
-                break;
-            }
-        }
-
-        renameButton.active = hasSelectedWorkspace && !config.renameMode();
-        deleteButton.active = hasSelectedWorkspace
-                && config.files().size() > 1
-                && selectedWorkspace != null
-                && !selectedWorkspace.hasPendingPatch()
-                && !config.renameMode();
+        Button deleteButton = host.addButton(Button.builder(P2SI18n.tr("screen.p2s.workspace.delete_short"), btn -> config.onDelete().run())
+                .bounds(config.leftX() + 100, config.row1Y(), 38, config.inputHeight()).build());
 
         EditBox renameInput = null;
         Button renameOkButton = null;
         Button renameCancelButton = null;
-        int fileY = config.row1Y() + config.inputHeight() + explorerActionGap;
+        int fileY = config.row2Y();
+
         if (config.renameMode()) {
-            int renameActionWidth = 22;
-            int renameInputWidth = Math.max(60, config.explorerWidth() - renameActionWidth * 2 - explorerActionGap * 2);
+            int renameInputWidth = config.explorerWidth() - 2 * 20 - explorerActionGap * 2;
+            int renameActionWidth = 20;
             renameInput = host.addEditBox(new EditBox(host.font(), config.leftX(), config.row2Y(), renameInputWidth,
-                    config.inputHeight(), Component.literal("workspace path")));
-            renameInput.setMaxLength(256);
-            renameInput.setHint(Component.literal("workspace/file.json"));
+                    config.inputHeight(), P2SI18n.tr("screen.p2s.workspace.path")));
+            renameInput.setHint(P2SI18n.tr("screen.p2s.workspace.path_hint"));
             renameInput.setValue(config.renameDraft() == null ? "" : config.renameDraft());
 
-            renameOkButton = host.addButton(Button.builder(Component.literal("OK"), btn -> config.onConfirmRename().run())
+            renameOkButton = host.addButton(Button.builder(P2SI18n.tr("screen.p2s.common.ok"), btn -> config.onConfirmRename().run())
                     .bounds(config.leftX() + renameInputWidth + explorerActionGap, config.row2Y(), renameActionWidth, config.inputHeight()).build());
 
             renameCancelButton = host.addButton(Button.builder(Component.literal("X"), btn -> config.onCancelRename().run())
@@ -80,7 +59,7 @@ final class P2SWorkspaceExplorerComponent {
                 break;
             }
             String fileName = file.path() == null || file.path().isBlank()
-                    ? (file.name() == null || file.name().isBlank() ? "(unnamed)" : file.name())
+                    ? (file.name() == null || file.name().isBlank() ? P2SI18n.tr("screen.p2s.workspace.unnamed").getString() : file.name())
                     : file.path();
             int slash = fileName.lastIndexOf('/');
             String label = slash >= 0 ? fileName.substring(slash + 1) : fileName;

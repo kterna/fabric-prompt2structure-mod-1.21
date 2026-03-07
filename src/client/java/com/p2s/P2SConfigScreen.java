@@ -17,7 +17,7 @@ public class P2SConfigScreen extends Screen {
 
     private final Screen parent;
     private Tab currentTab = Tab.GENERAL;
-    private String statusText = "";
+    private Component statusText = Component.empty();
     private int statusColor = 0xAAAAAA;
 
     // General tab
@@ -48,7 +48,7 @@ public class P2SConfigScreen extends Screen {
     private Button activeButton;
 
     public P2SConfigScreen(Screen parent) {
-        super(Component.literal("P2S Config"));
+        super(P2SI18n.tr("screen.p2s.config.title"));
         this.parent = parent;
     }
 
@@ -59,7 +59,7 @@ public class P2SConfigScreen extends Screen {
     @Override
     protected void init() {
         super.init();
-        statusText = "";
+        statusText = Component.empty();
 
         int panelWidth = Math.min(760, this.width - 24);
         int left = (this.width - panelWidth) / 2;
@@ -72,7 +72,7 @@ public class P2SConfigScreen extends Screen {
         for (Tab tab : Tab.values()) {
             final Tab t = tab;
             boolean active = (t == currentTab);
-            Button tabBtn = Button.builder(Component.literal(tabLabel(t)), btn -> switchTab(t))
+            Button tabBtn = Button.builder(tabLabel(t), btn -> switchTab(t))
                     .bounds(tabX, tabY, tabWidth, 20)
                     .build();
             tabBtn.active = !active;
@@ -89,18 +89,18 @@ public class P2SConfigScreen extends Screen {
         }
     }
 
-    private String tabLabel(Tab tab) {
+    private Component tabLabel(Tab tab) {
         return switch (tab) {
-            case GENERAL -> "General";
-            case LLM -> "LLM";
-            case SKILLS -> "Skills";
+            case GENERAL -> P2SI18n.tr("screen.p2s.config.tab.general");
+            case LLM -> P2SI18n.tr("screen.p2s.config.tab.llm");
+            case SKILLS -> P2SI18n.tr("screen.p2s.config.tab.skills");
         };
     }
 
     private void switchTab(Tab tab) {
         if (tab == currentTab) return;
         currentTab = tab;
-        statusText = "";
+        statusText = Component.empty();
         rebuildWidgets();
     }
 
@@ -109,19 +109,19 @@ public class P2SConfigScreen extends Screen {
     private void initGeneralTab(int left, int top, int panelWidth) {
         int inputWidth = panelWidth - 20;
 
-        selectionItemInput = new EditBox(this.font, left + 10, top + 14, inputWidth, 20, Component.literal("selection item"));
+        selectionItemInput = new EditBox(this.font, left + 10, top + 14, inputWidth, 20, P2SI18n.tr("screen.p2s.config.selection_item"));
         selectionItemInput.setMaxLength(128);
         selectionItemInput.setValue(P2SClientConfig.getSelectionItemId());
         selectionItemInput.setFocused(true);
         addRenderableWidget(selectionItemInput);
 
-        addRenderableWidget(Button.builder(Component.literal("Save"), btn -> saveSelectionItem())
+        addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.common.save"), btn -> saveSelectionItem())
                 .bounds(left + 10, top + 50, 80, 20).build());
 
-        addRenderableWidget(Button.builder(Component.literal("Reset Default"), btn -> resetSelectionItem())
+        addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.common.reset_default"), btn -> resetSelectionItem())
                 .bounds(left + 98, top + 50, 130, 20).build());
 
-        addRenderableWidget(Button.builder(Component.literal("Back"), btn -> onClose())
+        addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.common.back"), btn -> onClose())
                 .bounds(left + 10, top + 110, 80, 20).build());
     }
 
@@ -130,10 +130,10 @@ public class P2SConfigScreen extends Screen {
         String inputValue = selectionItemInput.getValue();
         if (P2SClientConfig.setSelectionItemId(inputValue, true)) {
             selectionItemInput.setValue(P2SClientConfig.getSelectionItemId());
-            statusText = "Saved";
+            statusText = P2SI18n.tr("screen.p2s.status.saved");
             statusColor = 0x55FF55;
         } else {
-            statusText = "Invalid item id";
+            statusText = P2SI18n.tr("screen.p2s.config.status.invalid_item_id");
             statusColor = 0xFF5555;
         }
     }
@@ -143,7 +143,7 @@ public class P2SConfigScreen extends Screen {
         if (selectionItemInput != null) {
             selectionItemInput.setValue(P2SClientConfig.getSelectionItemId());
         }
-        statusText = "Reset to default";
+        statusText = P2SI18n.tr("screen.p2s.status.reset_to_default");
         statusColor = 0x55FF55;
     }
 
@@ -153,26 +153,26 @@ public class P2SConfigScreen extends Screen {
         int inputWidth = panelWidth - 20;
         int y = top;
 
-        apiUrlInput = new EditBox(this.font, left + 10, y + 14, inputWidth, 20, Component.literal("api url"));
+        apiUrlInput = new EditBox(this.font, left + 10, y + 14, inputWidth, 20, P2SI18n.tr("screen.p2s.config.llm.api_url"));
         apiUrlInput.setMaxLength(512);
         apiUrlInput.setValue(P2SClientConfig.getApiUrl());
         apiUrlInput.setFocused(true);
         addRenderableWidget(apiUrlInput);
         y += 50;
 
-        apiKeyInput = new EditBox(this.font, left + 10, y + 14, inputWidth, 20, Component.literal("api key"));
+        apiKeyInput = new EditBox(this.font, left + 10, y + 14, inputWidth, 20, P2SI18n.tr("screen.p2s.config.llm.api_key"));
         apiKeyInput.setMaxLength(1024);
         apiKeyInput.setValue(P2SClientConfig.getApiKey());
         addRenderableWidget(apiKeyInput);
         y += 50;
 
-        modelInput = new EditBox(this.font, left + 10, y + 14, inputWidth, 20, Component.literal("model"));
+        modelInput = new EditBox(this.font, left + 10, y + 14, inputWidth, 20, P2SI18n.tr("screen.p2s.config.llm.model"));
         modelInput.setMaxLength(256);
         modelInput.setValue(P2SClientConfig.getModel());
         addRenderableWidget(modelInput);
         y += 50;
 
-        timeoutInput = new EditBox(this.font, left + 10, y + 14, 120, 20, Component.literal("timeout seconds"));
+        timeoutInput = new EditBox(this.font, left + 10, y + 14, 120, 20, P2SI18n.tr("screen.p2s.config.llm.timeout"));
         timeoutInput.setMaxLength(8);
         timeoutInput.setValue(Integer.toString(P2SClientConfig.getHttpTimeoutSeconds()));
         addRenderableWidget(timeoutInput);
@@ -190,26 +190,28 @@ public class P2SConfigScreen extends Screen {
         }).bounds(left + 310, y + 14, 160, 20).build());
         y += 50;
 
-        systemPromptInput = new EditBox(this.font, left + 10, y + 14, inputWidth, 20, Component.literal("system prompt"));
+        systemPromptInput = new EditBox(this.font, left + 10, y + 14, inputWidth, 20, P2SI18n.tr("screen.p2s.config.llm.system_prompt"));
         systemPromptInput.setMaxLength(2048);
         systemPromptInput.setValue(P2SClientConfig.getSystemPrompt());
         addRenderableWidget(systemPromptInput);
         y += 50;
 
-        addRenderableWidget(Button.builder(Component.literal("Save"), btn -> saveLlmConfig())
+        addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.common.save"), btn -> saveLlmConfig())
                 .bounds(left + 10, y, 80, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("Reset Default"), btn -> resetLlmDefaults())
+        addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.common.reset_default"), btn -> resetLlmDefaults())
                 .bounds(left + 98, y, 130, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("Back"), btn -> onClose())
+        addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.common.back"), btn -> onClose())
                 .bounds(left + panelWidth - 80, y, 70, 20).build());
     }
 
     private Component toolCallLabel() {
-        return Component.literal("useToolCall: " + (useToolCall ? "ON" : "OFF"));
+        return P2SI18n.tr("screen.p2s.config.toggle.use_tool_call",
+                P2SI18n.tr(useToolCall ? "screen.p2s.common.on" : "screen.p2s.common.off"));
     }
 
     private Component streamingLabel() {
-        return Component.literal("useStreaming: " + (useStreaming ? "ON" : "OFF"));
+        return P2SI18n.tr("screen.p2s.config.toggle.use_streaming",
+                P2SI18n.tr(useStreaming ? "screen.p2s.common.on" : "screen.p2s.common.off"));
     }
 
     private void saveLlmConfig() {
@@ -225,10 +227,10 @@ public class P2SConfigScreen extends Screen {
         );
         P2SClientConfig.setUseStreaming(useStreaming, true);
         if (ok) {
-            statusText = "Saved";
+            statusText = P2SI18n.tr("screen.p2s.status.saved");
             statusColor = 0x55FF55;
         } else {
-            statusText = "Invalid config values";
+            statusText = P2SI18n.tr("screen.p2s.config.status.invalid_values");
             statusColor = 0xFF5555;
         }
     }
@@ -244,7 +246,7 @@ public class P2SConfigScreen extends Screen {
         if (toolCallButton != null) toolCallButton.setMessage(toolCallLabel());
         useStreaming = P2SClientConfig.getUseStreaming();
         if (streamingButton != null) streamingButton.setMessage(streamingLabel());
-        statusText = "Reset to defaults";
+        statusText = P2SI18n.tr("screen.p2s.status.reset_to_defaults");
         statusColor = 0x55FF55;
     }
 
@@ -270,21 +272,21 @@ public class P2SConfigScreen extends Screen {
 
         for (int i = 0; i < VISIBLE_ROWS; i++) {
             final int row = i;
-            Button rowBtn = Button.builder(Component.literal(""), btn -> selectRow(row))
+            Button rowBtn = Button.builder(Component.empty(), btn -> selectRow(row))
                     .bounds(rowX, rowY + i * (rowH + 2), listWidth, rowH)
                     .build();
             skillRowButtons.add(rowBtn);
             addRenderableWidget(rowBtn);
         }
 
-        upButton = addRenderableWidget(Button.builder(Component.literal("Up"), btn -> {
+        upButton = addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.common.up"), btn -> {
             if (scroll > 0) {
                 scroll -= 1;
                 refreshRows();
             }
         }).bounds(rowX, rowY + VISIBLE_ROWS * (rowH + 2), 48, 20).build());
 
-        downButton = addRenderableWidget(Button.builder(Component.literal("Down"), btn -> {
+        downButton = addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.common.down"), btn -> {
             int maxScroll = Math.max(0, skills.size() - VISIBLE_ROWS);
             if (scroll < maxScroll) {
                 scroll += 1;
@@ -294,27 +296,27 @@ public class P2SConfigScreen extends Screen {
 
         int actionX = left + panelWidth - 200;
         int actionY = rowY;
-        addRenderableWidget(Button.builder(Component.literal("New"), btn -> openEditor(P2SSkillEditorScreen.Mode.CREATE))
+        addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.common.new"), btn -> openEditor(P2SSkillEditorScreen.Mode.CREATE))
                 .bounds(actionX, actionY, 180, 20).build());
 
-        editButton = addRenderableWidget(Button.builder(Component.literal("Edit"), btn -> openEditor(P2SSkillEditorScreen.Mode.EDIT))
+        editButton = addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.common.edit"), btn -> openEditor(P2SSkillEditorScreen.Mode.EDIT))
                 .bounds(actionX, actionY + 24, 180, 20).build());
 
-        renameButton = addRenderableWidget(Button.builder(Component.literal("Rename"), btn -> openEditor(P2SSkillEditorScreen.Mode.RENAME))
+        renameButton = addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.common.rename"), btn -> openEditor(P2SSkillEditorScreen.Mode.RENAME))
                 .bounds(actionX, actionY + 48, 180, 20).build());
 
-        activeButton = addRenderableWidget(Button.builder(Component.literal("Set Active"), btn -> setActiveSelected())
+        activeButton = addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.config.skills.set_active"), btn -> setActiveSelected())
                 .bounds(actionX, actionY + 72, 180, 20).build());
 
-        deleteButton = addRenderableWidget(Button.builder(Component.literal("Delete"), btn -> deleteSelected())
+        deleteButton = addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.common.delete"), btn -> deleteSelected())
                 .bounds(actionX, actionY + 96, 180, 20).build());
 
-        addRenderableWidget(Button.builder(Component.literal("Refresh"), btn -> {
+        addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.common.refresh"), btn -> {
             reloadSkills();
             refreshRows();
         }).bounds(actionX, actionY + 120, 180, 20).build());
 
-        addRenderableWidget(Button.builder(Component.literal("Back"), btn -> onClose())
+        addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.common.back"), btn -> onClose())
                 .bounds(actionX, actionY + 168, 180, 20).build());
 
         refreshRows();
@@ -410,10 +412,10 @@ public class P2SConfigScreen extends Screen {
         if (selectedId == null || selectedId.isBlank()) return;
         boolean ok = SkillStore.setActiveSkill(selectedId);
         if (ok) {
-            statusText = "Active skill set: " + selectedId;
+            statusText = P2SI18n.tr("screen.p2s.config.skills.status.active_set", selectedId);
             statusColor = 0x55FF55;
         } else {
-            statusText = "Failed setting active skill";
+            statusText = P2SI18n.tr("screen.p2s.config.skills.status.active_failed");
             statusColor = 0xFF5555;
         }
         reloadSkills();
@@ -425,11 +427,11 @@ public class P2SConfigScreen extends Screen {
         String deleting = selectedId;
         boolean ok = SkillStore.deleteSkill(deleting);
         if (ok) {
-            statusText = "Deleted skill: " + deleting;
+            statusText = P2SI18n.tr("screen.p2s.config.skills.status.deleted", deleting);
             statusColor = 0x55FF55;
             selectedId = "";
         } else {
-            statusText = "Delete failed: " + deleting;
+            statusText = P2SI18n.tr("screen.p2s.config.skills.status.delete_failed", deleting);
             statusColor = 0xFF5555;
         }
         reloadSkills();
@@ -439,7 +441,7 @@ public class P2SConfigScreen extends Screen {
     public void onSkillSaved(String skillId) {
         setPreferredSelection(skillId);
         currentTab = Tab.SKILLS;
-        statusText = "Saved";
+        statusText = P2SI18n.tr("screen.p2s.status.saved");
         statusColor = 0x55FF55;
     }
 
@@ -499,48 +501,48 @@ public class P2SConfigScreen extends Screen {
         }
 
         // Status text at bottom
-        if (statusText != null && !statusText.isBlank()) {
+        if (statusText != null && !statusText.getString().isBlank()) {
             gfx.drawString(this.font, statusText, left + 10, this.height - 20, statusColor, false);
         }
     }
 
     private void renderGeneralTab(GuiGraphics gfx, int left, int top) {
-        gfx.drawString(this.font, "Selection tool item id", left + 10, top, 0xCCCCCC, false);
-        gfx.drawString(this.font, "Default: " + P2SClientConfig.defaultSelectionItemId(), left + 10, top + 38, 0x888888, false);
-        gfx.drawString(this.font, "Skills are stored under config/p2s_skills/skills/ (client-global)", left + 10, top + 76, 0x888888, false);
-        gfx.drawString(this.font, "LLM apiUrl/apiKey/model are in p2s_client.json (LLM tab)", left + 10, top + 88, 0x888888, false);
+        gfx.drawString(this.font, P2SI18n.tr("screen.p2s.config.general.selection_item"), left + 10, top, 0xCCCCCC, false);
+        gfx.drawString(this.font, P2SI18n.tr("screen.p2s.config.general.default_value", P2SClientConfig.defaultSelectionItemId()), left + 10, top + 38, 0x888888, false);
+        gfx.drawString(this.font, P2SI18n.tr("screen.p2s.config.general.skills_path"), left + 10, top + 76, 0x888888, false);
+        gfx.drawString(this.font, P2SI18n.tr("screen.p2s.config.general.llm_path"), left + 10, top + 88, 0x888888, false);
     }
 
     private void renderLlmTab(GuiGraphics gfx, int left, int top) {
         int y = top;
-        gfx.drawString(this.font, "apiUrl", left + 10, y, 0xBBBBBB, false);
+        gfx.drawString(this.font, P2SI18n.tr("screen.p2s.config.llm.api_url"), left + 10, y, 0xBBBBBB, false);
         y += 50;
-        gfx.drawString(this.font, "apiKey", left + 10, y, 0xBBBBBB, false);
+        gfx.drawString(this.font, P2SI18n.tr("screen.p2s.config.llm.api_key"), left + 10, y, 0xBBBBBB, false);
         y += 50;
-        gfx.drawString(this.font, "model", left + 10, y, 0xBBBBBB, false);
+        gfx.drawString(this.font, P2SI18n.tr("screen.p2s.config.llm.model"), left + 10, y, 0xBBBBBB, false);
         y += 50;
-        gfx.drawString(this.font, "httpTimeoutSeconds", left + 10, y, 0xBBBBBB, false);
+        gfx.drawString(this.font, P2SI18n.tr("screen.p2s.config.llm.timeout"), left + 10, y, 0xBBBBBB, false);
         y += 50;
-        gfx.drawString(this.font, "systemPrompt", left + 10, y, 0xBBBBBB, false);
+        gfx.drawString(this.font, P2SI18n.tr("screen.p2s.config.llm.system_prompt"), left + 10, y, 0xBBBBBB, false);
     }
 
     private void renderSkillsTab(GuiGraphics gfx, int left, int top, int panelWidth) {
-        gfx.drawString(this.font, "Client-global skills: config/p2s_skills/skills/", left + 8, top + 6, 0xBBBBBB, false);
-        gfx.drawString(this.font, "Total skills: " + skills.size(), left + 8, top + 18, 0xAAAAAA, false);
+        gfx.drawString(this.font, P2SI18n.tr("screen.p2s.config.skills.path"), left + 8, top + 6, 0xBBBBBB, false);
+        gfx.drawString(this.font, P2SI18n.tr("screen.p2s.config.skills.total", skills.size()), left + 8, top + 18, 0xAAAAAA, false);
 
         SkillStore.SkillMeta selected = skills.stream().filter(s -> s.id().equals(selectedId)).findFirst().orElse(null);
         int detailsX = left + panelWidth - 200;
         int detailsY = top + 220;
-        gfx.drawString(this.font, "Selected", detailsX, detailsY, 0xFFFFFF, true);
+        gfx.drawString(this.font, P2SI18n.tr("screen.p2s.config.skills.selected"), detailsX, detailsY, 0xFFFFFF, true);
         detailsY += this.font.lineHeight + 2;
         if (selected == null) {
-            gfx.drawString(this.font, "-", detailsX, detailsY, 0xAAAAAA, false);
+            gfx.drawString(this.font, Component.literal("-"), detailsX, detailsY, 0xAAAAAA, false);
         } else {
-            gfx.drawString(this.font, "id: " + selected.id(), detailsX, detailsY, 0xCCCCCC, false);
+            gfx.drawString(this.font, P2SI18n.tr("screen.p2s.config.skills.id", selected.id()), detailsX, detailsY, 0xCCCCCC, false);
             detailsY += this.font.lineHeight + 2;
-            gfx.drawString(this.font, "name: " + selected.name(), detailsX, detailsY, 0xCCCCCC, false);
+            gfx.drawString(this.font, P2SI18n.tr("screen.p2s.config.skills.name", selected.name()), detailsX, detailsY, 0xCCCCCC, false);
             detailsY += this.font.lineHeight + 2;
-            gfx.drawString(this.font, "desc: " + selected.description(), detailsX, detailsY, 0xAAAAAA, false);
+            gfx.drawString(this.font, P2SI18n.tr("screen.p2s.config.skills.desc", selected.description()), detailsX, detailsY, 0xAAAAAA, false);
         }
     }
 

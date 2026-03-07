@@ -30,14 +30,18 @@ public class P2SSkillEditorScreen extends Screen {
     private int bodyPage = 0;
 
     private String originalBody = "";
-    private String statusText = "";
+    private Component statusText = Component.empty();
     private int statusColor = 0xAAAAAA;
 
     private Button prevPageButton;
     private Button nextPageButton;
 
     public P2SSkillEditorScreen(Screen parent, Mode mode, String skillId) {
-        super(Component.literal(mode == Mode.CREATE ? "Create Skill" : (mode == Mode.RENAME ? "Rename Skill" : "Edit Skill")));
+        super(switch (mode == null ? Mode.CREATE : mode) {
+            case CREATE -> P2SI18n.tr("screen.p2s.skill_editor.title.create");
+            case RENAME -> P2SI18n.tr("screen.p2s.skill_editor.title.rename");
+            case EDIT -> P2SI18n.tr("screen.p2s.skill_editor.title.edit");
+        });
         this.parent = parent;
         this.mode = mode == null ? Mode.CREATE : mode;
         this.skillId = skillId == null ? "" : skillId;
@@ -52,11 +56,11 @@ public class P2SSkillEditorScreen extends Screen {
         int left = (this.width - panelWidth) / 2;
         int top = Math.max(14, this.height / 10);
 
-        nameInput = new EditBox(this.font, left + 10, top + 26, panelWidth - 20, 20, Component.literal("name"));
+        nameInput = new EditBox(this.font, left + 10, top + 26, panelWidth - 20, 20, P2SI18n.tr("screen.p2s.skill_editor.name"));
         nameInput.setMaxLength(128);
         addRenderableWidget(nameInput);
 
-        descInput = new EditBox(this.font, left + 10, top + 56, panelWidth - 20, 20, Component.literal("description"));
+        descInput = new EditBox(this.font, left + 10, top + 56, panelWidth - 20, 20, P2SI18n.tr("screen.p2s.skill_editor.description"));
         descInput.setMaxLength(256);
         addRenderableWidget(descInput);
 
@@ -71,7 +75,7 @@ public class P2SSkillEditorScreen extends Screen {
         bodyInputs.clear();
         if (mode != Mode.RENAME) {
             for (int i = 0; i < BODY_ROWS; i++) {
-                EditBox row = new EditBox(this.font, left + 10, bodyTop + i * (rowHeight + rowSpacing), bodyWidth, rowHeight, Component.literal("body line"));
+                EditBox row = new EditBox(this.font, left + 10, bodyTop + i * (rowHeight + rowSpacing), bodyWidth, rowHeight, P2SI18n.tr("screen.p2s.skill_editor.body_line"));
                 row.setMaxLength(1024);
                 bodyInputs.add(row);
                 addRenderableWidget(row);
@@ -80,15 +84,15 @@ public class P2SSkillEditorScreen extends Screen {
         loadBodyPage();
 
         int buttonY = top + 94 + BODY_ROWS * (rowHeight + rowSpacing) + 10;
-        addRenderableWidget(Button.builder(Component.literal("Save"), btn -> saveSkill())
+        addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.common.save"), btn -> saveSkill())
                 .bounds(left + 10, buttonY, 80, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("Cancel"), btn -> onClose())
+        addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.common.cancel"), btn -> onClose())
                 .bounds(left + 98, buttonY, 90, 20).build());
 
         if (mode != Mode.RENAME) {
-            prevPageButton = addRenderableWidget(Button.builder(Component.literal("Prev"), btn -> changePage(-1))
+            prevPageButton = addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.common.prev"), btn -> changePage(-1))
                     .bounds(left + panelWidth - 190, buttonY, 80, 20).build());
-            nextPageButton = addRenderableWidget(Button.builder(Component.literal("Next"), btn -> changePage(1))
+            nextPageButton = addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.common.next"), btn -> changePage(1))
                     .bounds(left + panelWidth - 100, buttonY, 80, 20).build());
             refreshPageButtons();
         }
@@ -207,7 +211,7 @@ public class P2SSkillEditorScreen extends Screen {
         String name = nameInput == null ? "" : nameInput.getValue();
         String desc = descInput == null ? "" : descInput.getValue();
         if (name == null || name.isBlank()) {
-            statusText = "Name is required";
+            statusText = P2SI18n.tr("screen.p2s.skill_editor.status.name_required");
             statusColor = 0xFF5555;
             return;
         }
@@ -229,7 +233,7 @@ public class P2SSkillEditorScreen extends Screen {
                 }
             }
             if (saved == null) {
-                statusText = "Save failed";
+                statusText = P2SI18n.tr("screen.p2s.skill_editor.status.save_failed");
                 statusColor = 0xFF5555;
                 return;
             }
@@ -240,7 +244,7 @@ public class P2SSkillEditorScreen extends Screen {
                 this.minecraft.setScreen(parent);
             }
         } catch (Exception e) {
-            statusText = "Save failed: " + e.getMessage();
+            statusText = P2SI18n.tr("screen.p2s.skill_editor.status.save_failed_with_reason", e.getMessage());
             statusColor = 0xFF5555;
         }
     }
@@ -291,14 +295,14 @@ public class P2SSkillEditorScreen extends Screen {
         int top = Math.max(14, this.height / 10);
 
         gfx.drawString(this.font, this.title, left + 10, top + 8, 0xFFFFFF, true);
-        gfx.drawString(this.font, "name", left + 10, top + 16, 0xCCCCCC, false);
-        gfx.drawString(this.font, "description", left + 10, top + 46, 0xCCCCCC, false);
+        gfx.drawString(this.font, P2SI18n.tr("screen.p2s.skill_editor.name"), left + 10, top + 16, 0xCCCCCC, false);
+        gfx.drawString(this.font, P2SI18n.tr("screen.p2s.skill_editor.description"), left + 10, top + 46, 0xCCCCCC, false);
         if (mode != Mode.RENAME) {
-            gfx.drawString(this.font, "body (" + (bodyPage + 1) + ")", left + 10, top + 84, 0xCCCCCC, false);
+            gfx.drawString(this.font, P2SI18n.tr("screen.p2s.skill_editor.body_page", bodyPage + 1), left + 10, top + 84, 0xCCCCCC, false);
         } else {
-            gfx.drawString(this.font, "Rename only: body unchanged", left + 10, top + 84, 0xAAAAAA, false);
+            gfx.drawString(this.font, P2SI18n.tr("screen.p2s.skill_editor.rename_only"), left + 10, top + 84, 0xAAAAAA, false);
         }
-        if (statusText != null && !statusText.isBlank()) {
+        if (statusText != null && !statusText.getString().isBlank()) {
             gfx.drawString(this.font, statusText, left + 10, top + this.height / 2, statusColor, false);
         }
     }
