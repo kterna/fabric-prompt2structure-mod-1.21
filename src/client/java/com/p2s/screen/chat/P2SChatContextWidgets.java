@@ -37,18 +37,26 @@ public final class P2SChatContextWidgets {
             int editorMinWidth,
             int splitGap,
             boolean explorerPanelCollapsed,
+            boolean workspaceCreateMode,
+            boolean workspaceCreateFolderMode,
             boolean workspaceRenameMode,
             boolean inlineDiffMode,
             boolean selectedWorkspacePending,
+            String workspaceCreateDraft,
             String workspaceRenameDraft,
             String selectedWorkspacePath,
+            String selectedWorkspaceFolderPath,
             List<ClientSessionState.WorkspaceFileInfo> workspaceFiles,
+            List<String> workspaceFolders,
             Set<String> collapsedWorkspaceFolders,
-            Runnable onCreateWorkspaceDoc,
+            Runnable onEnterWorkspaceCreateFileMode,
+            Runnable onEnterWorkspaceCreateFolderMode,
             Runnable onEnterWorkspaceRenameMode,
             Runnable onDeleteSelectedWorkspaceDoc,
             Consumer<String> onSwitchWorkspaceDoc,
             Consumer<String> onToggleWorkspaceFolder,
+            Runnable onConfirmWorkspaceCreate,
+            Runnable onExitWorkspaceCreateMode,
             Runnable onConfirmWorkspaceRename,
             Runnable onExitWorkspaceRenameMode,
             Runnable onLoadWorkspaceDiff,
@@ -73,8 +81,12 @@ public final class P2SChatContextWidgets {
             int contextEditorHeight,
             int contextQueueTopY,
             Button workspaceDocCreateButton,
+            Button workspaceFolderCreateButton,
             Button workspaceRenameButton,
             Button workspaceDeleteButton,
+            EditBox workspaceCreateInput,
+            Button workspaceCreateOkButton,
+            Button workspaceCreateCancelButton,
             EditBox workspaceRenameInput,
             Button workspaceRenameOkButton,
             Button workspaceRenameCancelButton,
@@ -105,8 +117,12 @@ public final class P2SChatContextWidgets {
 
         List<Button> workspaceDocButtons = new ArrayList<>();
         Button workspaceDocCreateButton = null;
+        Button workspaceFolderCreateButton = null;
         Button workspaceRenameButton = null;
         Button workspaceDeleteButton = null;
+        EditBox workspaceCreateInput = null;
+        Button workspaceCreateOkButton = null;
+        Button workspaceCreateCancelButton = null;
         EditBox workspaceRenameInput = null;
         Button workspaceRenameOkButton = null;
         Button workspaceRenameCancelButton = null;
@@ -141,23 +157,35 @@ public final class P2SChatContextWidgets {
                             config.explorerWidth(),
                             config.inputHeight(),
                             config.contextFooterHeight(),
+                            config.workspaceCreateMode(),
+                            config.workspaceCreateFolderMode(),
                             config.workspaceRenameMode(),
+                            config.workspaceCreateDraft(),
                             config.workspaceRenameDraft(),
                             config.selectedWorkspacePath(),
+                            config.selectedWorkspaceFolderPath(),
                             config.workspaceFiles(),
+                            config.workspaceFolders(),
                             config.collapsedWorkspaceFolders(),
-                            config.onCreateWorkspaceDoc(),
+                            config.onEnterWorkspaceCreateFileMode(),
+                            config.onEnterWorkspaceCreateFolderMode(),
                             config.onEnterWorkspaceRenameMode(),
                             config.onDeleteSelectedWorkspaceDoc(),
                             config.onSwitchWorkspaceDoc(),
                             config.onToggleWorkspaceFolder(),
+                            config.onConfirmWorkspaceCreate(),
+                            config.onExitWorkspaceCreateMode(),
                             config.onConfirmWorkspaceRename(),
                             config.onExitWorkspaceRenameMode()
                     )
             );
-            workspaceDocCreateButton = explorer.createButton();
+            workspaceDocCreateButton = explorer.createFileButton();
+            workspaceFolderCreateButton = explorer.createFolderButton();
             workspaceRenameButton = explorer.renameButton();
             workspaceDeleteButton = explorer.deleteButton();
+            workspaceCreateInput = explorer.createInput();
+            workspaceCreateOkButton = explorer.createOkButton();
+            workspaceCreateCancelButton = explorer.createCancelButton();
             workspaceRenameInput = explorer.renameInput();
             workspaceRenameOkButton = explorer.renameOkButton();
             workspaceRenameCancelButton = explorer.renameCancelButton();
@@ -235,8 +263,12 @@ public final class P2SChatContextWidgets {
                 contextEditorHeight,
                 contextQueueTopY,
                 workspaceDocCreateButton,
+                workspaceFolderCreateButton,
                 workspaceRenameButton,
                 workspaceDeleteButton,
+                workspaceCreateInput,
+                workspaceCreateOkButton,
+                workspaceCreateCancelButton,
                 workspaceRenameInput,
                 workspaceRenameOkButton,
                 workspaceRenameCancelButton,

@@ -301,5 +301,19 @@
   "status.p2s.pending": "待处理",
   "status.p2s.rollback_mode.all": "全部",
   "status.p2s.rollback_mode.chat": "会话",
-  "screen.p2s.config.toggle.auto_apply": "自动应用补丁：%s"
+  "screen.p2s.config.toggle.auto_apply": "自动应用补丁：%s",
+  "screen.p2s.workspace.new_file_short": "文件+",
+  "screen.p2s.workspace.new_folder_short": "目录+",
+  "screen.p2s.workspace.folder_path": "文件夹路径",
+  "screen.p2s.workspace.folder_hint": "工作区/文件夹",
+  "screen.p2s.chat.context.status.create_workspace_file": "创建工作区文件",
+  "screen.p2s.chat.context.status.create_workspace_folder": "创建工作区文件夹",
+  "screen.p2s.chat.context.status.folder_created": "文件夹已创建：%s",
+  "screen.p2s.chat.checkpoint.list_short": "列表",
+  "screen.p2s.checkpoints.title": "检查点",
+  "screen.p2s.checkpoints.header": "%s · %s 个检查点",
+  "screen.p2s.checkpoints.mode": "回滚模式：%s",
+  "screen.p2s.checkpoints.status.creating": "正在创建检查点...",
+  "screen.p2s.checkpoints.status.renaming": "正在重命名检查点：%s",
+  "screen.p2s.checkpoints.status.rolling_back": "正在回滚到：%s"
 }

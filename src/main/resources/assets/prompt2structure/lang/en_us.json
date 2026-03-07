@@ -301,5 +301,19 @@
   "status.p2s.pending": "Pending",
   "status.p2s.rollback_mode.all": "All",
   "status.p2s.rollback_mode.chat": "Chat",
-  "screen.p2s.config.toggle.auto_apply": "Auto apply: %s"
+  "screen.p2s.config.toggle.auto_apply": "Auto apply: %s",
+  "screen.p2s.workspace.new_file_short": "File+",
+  "screen.p2s.workspace.new_folder_short": "Dir+",
+  "screen.p2s.workspace.folder_path": "Folder path",
+  "screen.p2s.workspace.folder_hint": "workspace/folder",
+  "screen.p2s.chat.context.status.create_workspace_file": "Create workspace file",
+  "screen.p2s.chat.context.status.create_workspace_folder": "Create workspace folder",
+  "screen.p2s.chat.context.status.folder_created": "Folder created: %s",
+  "screen.p2s.chat.checkpoint.list_short": "List",
+  "screen.p2s.checkpoints.title": "Checkpoints",
+  "screen.p2s.checkpoints.header": "%s · %s checkpoints",
+  "screen.p2s.checkpoints.mode": "Mode: %s",
+  "screen.p2s.checkpoints.status.creating": "Creating checkpoint...",
+  "screen.p2s.checkpoints.status.renaming": "Renaming checkpoint: %s",
+  "screen.p2s.checkpoints.status.rolling_back": "Rolling back to: %s"
 }

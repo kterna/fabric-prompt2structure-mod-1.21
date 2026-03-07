@@ -2,6 +2,8 @@ package com.p2s;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import net.fabricmc.loader.api.FabricLoader;
@@ -11,6 +13,12 @@ import net.minecraft.world.item.Item;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 public final class P2SClientConfig {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
@@ -34,6 +42,7 @@ public final class P2SClientConfig {
     private static boolean useStreaming = DEFAULT_USE_STREAMING;
     private static boolean autoApplyPatch = DEFAULT_AUTO_APPLY_PATCH;
     private static String systemPrompt = DEFAULT_SYSTEM_PROMPT;
+    private static final Map<String, List<String>> workspaceFoldersByProject = new LinkedHashMap<>();
 
     private P2SClientConfig() {
     }
@@ -103,6 +112,69 @@ public final class P2SClientConfig {
 
     public static synchronized void setUseStreaming(boolean value, boolean persist) {
         useStreaming = value;
+        if (persist) {
+            save();
+        }
+    }
+
+    public static synchronized List<String> getWorkspaceFolders(String projectId) {
+        String key = normalizeProjectKey(projectId);
+        if (key == null) {
+            return List.of();
+        }
+        List<String> folders = workspaceFoldersByProject.get(key);
+        return folders == null ? List.of() : List.copyOf(folders);
+    }
+
+    public static synchronized void addWorkspaceFolder(String projectId, String folderPath, boolean persist) {
+        String key = normalizeProjectKey(projectId);
+        String normalizedFolder = normalizeFolderPath(folderPath);
+        if (key == null || normalizedFolder == null) {
+            return;
+        }
+        List<String> current = new ArrayList<>(workspaceFoldersByProject.getOrDefault(key, List.of()));
+        LinkedHashSet<String> merged = new LinkedHashSet<>(normalizeFolderList(current));
+        merged.add(normalizedFolder);
+        workspaceFoldersByProject.put(key, new ArrayList<>(merged));
+        if (persist) {
+            save();
+        }
+    }
+
+    public static synchronized void ensureWorkspaceFoldersForPath(String projectId, String workspacePath, boolean persist) {
+        String key = normalizeProjectKey(projectId);
+        String normalizedPath = normalizeFolderPath(workspacePath);
+        if (key == null || normalizedPath == null) {
+            return;
+        }
+        int slash = normalizedPath.lastIndexOf('/');
+        if (slash <= 0) {
+            return;
+        }
+        Set<String> folders = new LinkedHashSet<>(workspaceFoldersByProject.getOrDefault(key, List.of()));
+        while (slash > 0) {
+            folders.add(normalizedPath.substring(0, slash));
+            slash = normalizedPath.lastIndexOf('/', slash - 1);
+        }
+        workspaceFoldersByProject.put(key, new ArrayList<>(normalizeFolderList(folders)));
+        if (persist) {
+            save();
+        }
+    }
+
+    public static synchronized void removeWorkspaceFolder(String projectId, String folderPath, boolean persist) {
+        String key = normalizeProjectKey(projectId);
+        String normalizedFolder = normalizeFolderPath(folderPath);
+        if (key == null || normalizedFolder == null) {
+            return;
+        }
+        List<String> current = new ArrayList<>(workspaceFoldersByProject.getOrDefault(key, List.of()));
+        current.removeIf(folder -> folder.equals(normalizedFolder) || folder.startsWith(normalizedFolder + "/"));
+        if (current.isEmpty()) {
+            workspaceFoldersByProject.remove(key);
+        } else {
+            workspaceFoldersByProject.put(key, new ArrayList<>(normalizeFolderList(current)));
+        }
         if (persist) {
             save();
         }
@@ -193,6 +265,7 @@ public final class P2SClientConfig {
         Boolean loadedUseStreaming = null;
         Boolean loadedAutoApplyPatch = null;
         String loadedSystemPrompt = null;
+        Map<String, List<String>> loadedFolders = new LinkedHashMap<>();
         try {
             if (Files.exists(CONFIG_PATH)) {
                 JsonObject root = JsonParser.parseString(Files.readString(CONFIG_PATH)).getAsJsonObject();
@@ -205,6 +278,29 @@ public final class P2SClientConfig {
                 loadedUseStreaming = root.has("useStreaming") ? root.get("useStreaming").getAsBoolean() : null;
                 loadedAutoApplyPatch = root.has("autoApplyPatch") ? root.get("autoApplyPatch").getAsBoolean() : null;
                 loadedSystemPrompt = root.has("systemPrompt") ? root.get("systemPrompt").getAsString() : null;
+                if (root.has("workspaceFoldersByProject") && root.get("workspaceFoldersByProject").isJsonObject()) {
+                    JsonObject foldersRoot = root.getAsJsonObject("workspaceFoldersByProject");
+                    for (Map.Entry<String, JsonElement> entry : foldersRoot.entrySet()) {
+                        String projectKey = normalizeProjectKey(entry.getKey());
+                        if (projectKey == null || entry.getValue() == null || !entry.getValue().isJsonArray()) {
+                            continue;
+                        }
+                        List<String> folderList = new ArrayList<>();
+                        JsonArray arr = entry.getValue().getAsJsonArray();
+                        for (JsonElement element : arr) {
+                            if (element != null && element.isJsonPrimitive()) {
+                                String folder = normalizeFolderPath(element.getAsString());
+                                if (folder != null) {
+                                    folderList.add(folder);
+                                }
+                            }
+                        }
+                        List<String> normalizedFolders = normalizeFolderList(folderList);
+                        if (!normalizedFolders.isEmpty()) {
+                            loadedFolders.put(projectKey, normalizedFolders);
+                        }
+                    }
+                }
             }
         } catch (Exception e) {
             P2SMod.LOGGER.warn("Failed reading client config {}, using defaults: {}", CONFIG_PATH, e.getMessage());
@@ -234,6 +330,8 @@ public final class P2SClientConfig {
         autoApplyPatch = loadedAutoApplyPatch == null ? DEFAULT_AUTO_APPLY_PATCH : loadedAutoApplyPatch;
         String prompt = loadedSystemPrompt == null ? "" : loadedSystemPrompt.trim();
         systemPrompt = prompt.isBlank() ? DEFAULT_SYSTEM_PROMPT : prompt;
+        workspaceFoldersByProject.clear();
+        workspaceFoldersByProject.putAll(loadedFolders);
         save();
     }
 
@@ -253,6 +351,23 @@ public final class P2SClientConfig {
             root.addProperty("useStreaming", useStreaming);
             root.addProperty("autoApplyPatch", autoApplyPatch);
             root.addProperty("systemPrompt", systemPrompt);
+
+            JsonObject foldersRoot = new JsonObject();
+            for (Map.Entry<String, List<String>> entry : workspaceFoldersByProject.entrySet()) {
+                if (entry.getKey() == null || entry.getKey().isBlank()) {
+                    continue;
+                }
+                List<String> folders = normalizeFolderList(entry.getValue());
+                if (folders.isEmpty()) {
+                    continue;
+                }
+                JsonArray arr = new JsonArray();
+                for (String folder : folders) {
+                    arr.add(folder);
+                }
+                foldersRoot.add(entry.getKey(), arr);
+            }
+            root.add("workspaceFoldersByProject", foldersRoot);
             Files.writeString(CONFIG_PATH, GSON.toJson(root));
         } catch (Exception e) {
             P2SMod.LOGGER.warn("Failed writing client config {}: {}", CONFIG_PATH, e.getMessage());
@@ -289,5 +404,41 @@ public final class P2SClientConfig {
             return null;
         }
         return value;
+    }
+
+    private static String normalizeProjectKey(String projectId) {
+        if (projectId == null || projectId.isBlank()) {
+            return null;
+        }
+        String normalized = projectId.trim();
+        return normalized.isBlank() ? null : normalized;
+    }
+
+    private static String normalizeFolderPath(String folderPath) {
+        if (folderPath == null || folderPath.isBlank()) {
+            return null;
+        }
+        String normalized = folderPath.trim().replace('\\', '/');
+        while (normalized.startsWith("/")) {
+            normalized = normalized.substring(1);
+        }
+        while (normalized.endsWith("/")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        normalized = normalized.replaceAll("/{2,}", "/");
+        return normalized.isBlank() ? null : normalized;
+    }
+
+    private static List<String> normalizeFolderList(Iterable<String> folders) {
+        LinkedHashSet<String> normalized = new LinkedHashSet<>();
+        if (folders != null) {
+            for (String folder : folders) {
+                String value = normalizeFolderPath(folder);
+                if (value != null) {
+                    normalized.add(value);
+                }
+            }
+        }
+        return new ArrayList<>(normalized);
     }
 }

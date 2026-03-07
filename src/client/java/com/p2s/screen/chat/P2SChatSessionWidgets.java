@@ -43,6 +43,7 @@ public final class P2SChatSessionWidgets {
             Runnable onNewSession,
             Runnable onToggleInfo,
             Runnable onOpenConfig,
+            Runnable onOpenCheckpoints,
             Runnable onApplyPatch,
             Runnable onEnterDiscardReasonMode,
             Runnable onUndo,
@@ -68,6 +69,7 @@ public final class P2SChatSessionWidgets {
             Button undoButton,
             Button redoButton,
             Button checkpointCreateButton,
+            Button checkpointListButton,
             Button checkpointPrevButton,
             Button checkpointNextButton,
             Button checkpointRollbackButton,
@@ -140,42 +142,17 @@ public final class P2SChatSessionWidgets {
         int checkpointY = rowY + config.topButtonHeight() + 2;
         int checkpointX = config.panelX() + config.padding();
         Button checkpointCreateButton = host.addButton(Button.builder(P2SI18n.tr("screen.p2s.chat.checkpoint.create_short"), btn -> config.onCreateCheckpoint().run())
-                .bounds(checkpointX, checkpointY, 36, config.topButtonHeight())
+                .bounds(checkpointX, checkpointY, 40, config.topButtonHeight())
                 .build());
 
-        Button checkpointPrevButton = host.addButton(Button.builder(Component.literal("<"), btn -> config.onSelectPreviousCheckpoint().run())
-                .bounds(checkpointX + 38, checkpointY, 20, config.topButtonHeight())
-                .build());
-
-        Button checkpointNextButton = host.addButton(Button.builder(Component.literal(">"), btn -> config.onSelectNextCheckpoint().run())
-                .bounds(checkpointX + 60, checkpointY, 20, config.topButtonHeight())
-                .build());
-
-        Button checkpointRollbackButton = host.addButton(Button.builder(P2SI18n.tr("screen.p2s.chat.checkpoint.rollback_short"), btn -> config.onRollbackCheckpoint().run())
-                .bounds(checkpointX + 82, checkpointY, 30, config.topButtonHeight())
-                .build());
-
-        Button checkpointModeButton = host.addButton(Button.builder(Component.literal(config.rollbackModeLabel()), btn -> config.onToggleRollbackMode().run())
-                .bounds(checkpointX + 114, checkpointY, 54, config.topButtonHeight())
+        Button checkpointListButton = host.addButton(Button.builder(P2SI18n.tr("screen.p2s.chat.checkpoint.list_short"), btn -> config.onOpenCheckpoints().run())
+                .bounds(checkpointX + 42, checkpointY, 40, config.topButtonHeight())
                 .build());
 
         List<Button> choiceButtons = new ArrayList<>();
         int choiceY = checkpointY + config.topButtonHeight() + 2;
         int choiceGap = 2;
         int choiceWidth = (actionWidth - choiceGap * (config.choiceButtonCount() - 1)) / config.choiceButtonCount();
-
-        int checkpointAvailableWidth = Math.max(0, rowStart - checkpointX - 4);
-        int checkpointRenameWidth = Math.min(42, Math.max(30, checkpointAvailableWidth / 3));
-        int checkpointNameWidth = Math.max(48, checkpointAvailableWidth - checkpointRenameWidth - 4);
-        EditBox checkpointNameInput = host.addEditBox(new EditBox(host.font(), checkpointX, choiceY, checkpointNameWidth,
-                config.inputHeight(), Component.empty()));
-        checkpointNameInput.setMaxLength(120);
-        checkpointNameInput.setHint(P2SI18n.tr("screen.p2s.chat.checkpoint.name_hint"));
-        checkpointNameInput.setValue(config.checkpointNameDraft() == null ? "" : config.checkpointNameDraft());
-
-        Button checkpointRenameButton = host.addButton(Button.builder(P2SI18n.tr("screen.p2s.chat.checkpoint.rename_short"), btn -> config.onRenameCheckpoint().run())
-                .bounds(checkpointX + checkpointNameWidth + 4, choiceY, checkpointRenameWidth, config.topButtonHeight())
-                .build());
 
         for (int i = 0; i < config.choiceButtonCount(); i++) {
             final int index = i;
@@ -215,12 +192,13 @@ public final class P2SChatSessionWidgets {
                 undoButton,
                 redoButton,
                 checkpointCreateButton,
-                checkpointPrevButton,
-                checkpointNextButton,
-                checkpointRollbackButton,
-                checkpointModeButton,
-                checkpointNameInput,
-                checkpointRenameButton,
+                checkpointListButton,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
                 infoButton,
                 discardReasonInput,
                 discardOkButton,

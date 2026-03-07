@@ -737,6 +737,21 @@ public final class ClientSessionState {
         selectedCheckpointIndex = (selectedCheckpointIndex + 1) % checkpoints.size();
     }
 
+    public static synchronized boolean selectCheckpointById(String checkpointId) {
+        if (checkpointId == null || checkpointId.isBlank()) {
+            return false;
+        }
+        String target = checkpointId.trim();
+        for (int i = 0; i < checkpoints.size(); i++) {
+            CheckpointInfo checkpoint = checkpoints.get(i);
+            if (checkpoint != null && target.equals(checkpoint.id())) {
+                selectedCheckpointIndex = i;
+                return true;
+            }
+        }
+        return false;
+    }
+
     public static synchronized String getRollbackMode() {
         return rollbackMode;
     }
