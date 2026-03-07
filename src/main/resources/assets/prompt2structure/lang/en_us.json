@@ -100,6 +100,8 @@
   "screen.p2s.chat.checkpoint.rollback_short": "RB",
   "screen.p2s.chat.config": "Config",
   "screen.p2s.chat.context.add_range": "Add Range",
+  "screen.p2s.chat.context.confirm_add_selection": "Add selected content to context?",
+  "screen.p2s.chat.context.confirm_selection_preview": "%s · %s chars",
   "screen.p2s.chat.context.clear": "Clear",
   "screen.p2s.chat.context.clear_queue": "Clear Ctx",
   "screen.p2s.chat.context.diff": "Diff",

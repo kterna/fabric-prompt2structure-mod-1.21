@@ -42,10 +42,12 @@ public class P2SChatScreen extends Screen {
     private static final int CONTEXT_MAX_SNIPPETS = 8;
     private static final int CONTEXT_MAX_SNIPPET_CHARS = 4000;
     private static final int CONTEXT_MAX_TOTAL_CHARS = 12000;
-    private static final int CONTEXT_DEFAULT_RANGE = 30;
-    private static final long CONTEXT_LONG_PRESS_MS = 400;
     private static final int CONTEXT_DIFF_MAX_SOURCE_LINES = 1400;
     private static final int CONTEXT_DIFF_EQUAL_CONTEXT_LINES = 3;
+    private static final int CONTEXT_SELECTION_CONFIRM_WIDTH = 196;
+    private static final int CONTEXT_SELECTION_CONFIRM_HEIGHT = 54;
+    private static final int CONTEXT_SELECTION_CONFIRM_BUTTON_WIDTH = 56;
+    private static final int CONTEXT_SELECTION_CONFIRM_BUTTON_HEIGHT = 18;
 
     private EditBox input;
     private Button sendButton;
@@ -84,15 +86,12 @@ public class P2SChatScreen extends Screen {
     private Button contextTabStateButton;
     private Button contextTabScriptButton;
     private Button contextTabDiffButton;
-    private EditBox contextStartInput;
-    private EditBox contextEndInput;
     private Button contextLoadButton;
     private Button contextFormatButton;
     private Button contextClearJsonButton;
     private Button contextClearQueueButton;
     private Button contextDiffPrevButton;
     private Button contextDiffNextButton;
-    private Button contextAddRangeButton;
     private Button workspaceDocCreateButton;
     private final List<Button> workspaceDocButtons = new ArrayList<>();
     private ContextTab activeContextTab = ContextTab.SCRIPT;
@@ -121,11 +120,12 @@ public class P2SChatScreen extends Screen {
     private int contextSelectionAnchorLine = 0;
     private int contextSelectionAnchorColumn = 0;
     private boolean contextMouseSelecting = false;
-    private long contextMousePressTime = 0;
-    private boolean contextLongPressCtxMode = false;
     private int contextQueueTopY = 0;
-    private int contextRangeStart = 1;
-    private int contextRangeEnd = CONTEXT_DEFAULT_RANGE;
+    private boolean contextSelectionConfirmVisible = false;
+    private int contextSelectionConfirmStartLine = 1;
+    private int contextSelectionConfirmEndLine = 1;
+    private int contextSelectionConfirmX = 0;
+    private int contextSelectionConfirmY = 0;
     private boolean contextDiffMode = false;
     private final List<DiffViewLine> contextDiffLines = new ArrayList<>();
     private final List<Integer> contextDiffChangeRows = new ArrayList<>();
@@ -152,6 +152,7 @@ public class P2SChatScreen extends Screen {
 
     private void createWidgets() {
         captureContextControlState();
+        hideContextSelectionConfirm();
         clearWidgets();
 
         int panelWidth = getPanelWidth();
@@ -325,7 +326,6 @@ public class P2SChatScreen extends Screen {
         int rowGap = 2;
         int row1Y = PADDING + this.font.lineHeight + 6;
         int row2Y = row1Y + INPUT_HEIGHT + rowGap;
-        int row3Y = row2Y + INPUT_HEIGHT + rowGap;
 
         // Explorer (left): VSCode-like file list
         workspaceDocButtons.clear();
@@ -445,40 +445,7 @@ public class P2SChatScreen extends Screen {
             }
         }
 
-        // Row 3: Range inputs + Add Range button
-        int startWidth = 52;
-        int endWidth = 52;
-        int addWidth = Math.max(80, editorWidth - startWidth - endWidth - rowGap * 2);
-
-        contextStartInput = new EditBox(this.font, editorXBase, row3Y, startWidth, INPUT_HEIGHT, P2SI18n.tr("screen.p2s.chat.context.start_line"));
-        contextStartInput.setMaxLength(8);
-        contextStartInput.setHint(P2SI18n.tr("screen.p2s.chat.context.start"));
-        addRenderableWidget(contextStartInput);
-
-        contextEndInput = new EditBox(this.font, editorXBase + startWidth + rowGap, row3Y, endWidth, INPUT_HEIGHT, P2SI18n.tr("screen.p2s.chat.context.end_line"));
-        contextEndInput.setMaxLength(8);
-        contextEndInput.setHint(P2SI18n.tr("screen.p2s.chat.context.end"));
-        addRenderableWidget(contextEndInput);
-
-        contextAddRangeButton = addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.chat.context.add_range"), btn -> addSelectedRangeAsContext())
-                .bounds(editorXBase + startWidth + endWidth + rowGap * 2, row3Y, addWidth, INPUT_HEIGHT).build());
-
-        if (activeContextTab == ContextTab.DIFF) {
-            contextStartInput.active = false;
-            contextEndInput.active = false;
-            contextAddRangeButton.active = false;
-        }
-
-        if (contextRangeStart <= 0) {
-            contextRangeStart = contextScroll + 1;
-        }
-        if (contextRangeEnd <= 0) {
-            contextRangeEnd = Math.min(contextJsonLines.size(), contextRangeStart + CONTEXT_DEFAULT_RANGE - 1);
-        }
-        contextStartInput.setValue(Integer.toString(Math.max(1, contextRangeStart)));
-        contextEndInput.setValue(Integer.toString(Math.max(1, contextRangeEnd)));
-
-        int editorTop = row3Y + INPUT_HEIGHT + 4;
+        int editorTop = row2Y + INPUT_HEIGHT + 4;
         int editorBottom = this.height - CONTEXT_FOOTER_HEIGHT;
         int available = Math.max(0, editorBottom - editorTop);
         int rowStep = CONTEXT_ROW_HEIGHT + CONTEXT_ROW_GAP;
@@ -503,12 +470,6 @@ public class P2SChatScreen extends Screen {
         saveCurrentTabEditorState();
         if (workspaceRenameMode && workspaceRenameInput != null) {
             workspaceRenameDraft = workspaceRenameInput.getValue();
-        }
-        if (contextStartInput != null) {
-            contextRangeStart = parsePositiveInt(contextStartInput.getValue(), contextRangeStart <= 0 ? 1 : contextRangeStart);
-        }
-        if (contextEndInput != null) {
-            contextRangeEnd = parsePositiveInt(contextEndInput.getValue(), contextRangeEnd <= 0 ? contextRangeStart : contextRangeEnd);
         }
     }
 
@@ -685,7 +646,7 @@ public class P2SChatScreen extends Screen {
         contextPreferredColumn = -1;
         clearContextSelection();
         contextMouseSelecting = false;
-        contextLongPressCtxMode = false;
+        hideContextSelectionConfirm();
     }
 
     private void switchContextTab(ContextTab newTab) {
@@ -964,7 +925,7 @@ public class P2SChatScreen extends Screen {
         contextPreferredColumn = -1;
         clearContextSelection();
         contextMouseSelecting = false;
-        contextLongPressCtxMode = false;
+        hideContextSelectionConfirm();
 
         if (!contextDiffChangeRows.isEmpty()) {
             int target = contextDiffChangeRows.get(contextDiffNavIndex);
@@ -1070,18 +1031,10 @@ public class P2SChatScreen extends Screen {
         contextPreferredColumn = -1;
         clearContextSelection();
         contextMouseSelecting = false;
-        contextLongPressCtxMode = false;
+        hideContextSelectionConfirm();
         clampContextScroll();
         clampContextCursor();
         ensureContextCursorVisible();
-        contextRangeStart = 1;
-        contextRangeEnd = Math.min(contextJsonLines.size(), CONTEXT_DEFAULT_RANGE);
-        if (contextStartInput != null) {
-            contextStartInput.setValue(Integer.toString(contextRangeStart));
-        }
-        if (contextEndInput != null) {
-            contextEndInput.setValue(Integer.toString(contextRangeEnd));
-        }
     }
 
     private void clampContextCursor() {
@@ -1152,6 +1105,7 @@ public class P2SChatScreen extends Screen {
 
     private void clearContextSelection() {
         contextSelectionActive = false;
+        hideContextSelectionConfirm();
     }
 
     private boolean hasContextSelection() {
@@ -1429,23 +1383,21 @@ public class P2SChatScreen extends Screen {
         clampContextScroll();
     }
 
-    private void addSelectedRangeAsContext() {
+    private boolean queueContextRange(int start, int end) {
         if (contextDiffMode) {
             setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.range_disabled_in_diff"), 0xFFAA55);
-            return;
+            return false;
         }
         if (queuedContexts.size() >= CONTEXT_MAX_SNIPPETS) {
             setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.too_many_snippets", CONTEXT_MAX_SNIPPETS), 0xFF5555);
-            return;
+            return false;
         }
         if (contextJsonLines.isEmpty()) {
             setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.no_json_lines"), 0xFF5555);
-            return;
+            return false;
         }
 
         int maxLine = contextJsonLines.size();
-        int start = parsePositiveInt(contextStartInput == null ? "" : contextStartInput.getValue(), contextScroll + 1);
-        int end = parsePositiveInt(contextEndInput == null ? "" : contextEndInput.getValue(), start);
         start = Math.max(1, Math.min(start, maxLine));
         end = Math.max(1, Math.min(end, maxLine));
         if (start > end) {
@@ -1453,44 +1405,36 @@ public class P2SChatScreen extends Screen {
             start = end;
             end = tmp;
         }
-        contextRangeStart = start;
-        contextRangeEnd = end;
-        if (contextStartInput != null) {
-            contextStartInput.setValue(Integer.toString(start));
-        }
-        if (contextEndInput != null) {
-            contextEndInput.setValue(Integer.toString(end));
-        }
 
         String snippetText = buildContextRangeText(start, end);
         if (snippetText.isBlank()) {
             setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.empty_range"), 0xFF5555);
-            return;
+            return false;
         }
         if (snippetText.length() > CONTEXT_MAX_SNIPPET_CHARS) {
             setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.selection_too_large", snippetText.length()), 0xFF5555);
-            return;
+            return false;
         }
         if (totalQueuedContextChars() + snippetText.length() > CONTEXT_MAX_TOTAL_CHARS) {
             setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.queue_too_large", CONTEXT_MAX_TOTAL_CHARS), 0xFF5555);
-            return;
+            return false;
         }
 
         String fileName = activeContextFileName();
         String label = fileName + ":" + start + "-" + end;
         queuedContexts.add(new ContextSnippet(label, snippetText));
         setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.added_context", label), 0x55FF55);
+        return true;
     }
 
-    private void addSelectionAsContext() {
-        ContextSelectionRange sel = getContextSelectionRange();
-        if (sel == null) return;
-        int startLine = sel.startLine() + 1; // 0-indexed to 1-indexed
-        int endLine = sel.endLine() + 1;
-        if (contextStartInput != null) contextStartInput.setValue(Integer.toString(startLine));
-        if (contextEndInput != null) contextEndInput.setValue(Integer.toString(endLine));
-        addSelectedRangeAsContext();
-        clearContextSelection();
+    private void confirmSelectionAsContext() {
+        if (!contextSelectionConfirmVisible) {
+            return;
+        }
+        if (queueContextRange(contextSelectionConfirmStartLine, contextSelectionConfirmEndLine)) {
+            clearContextSelection();
+        }
+        hideContextSelectionConfirm();
     }
 
     private String buildContextRangeText(int startLine, int endLine) {
@@ -1666,18 +1610,6 @@ public class P2SChatScreen extends Screen {
         return trimmed.substring(0, max - 3) + "...";
     }
 
-    private int parsePositiveInt(String raw, int fallback) {
-        if (raw == null || raw.isBlank()) {
-            return fallback;
-        }
-        try {
-            int value = Integer.parseInt(raw.trim());
-            return value <= 0 ? fallback : value;
-        } catch (Exception e) {
-            return fallback;
-        }
-    }
-
     private String shortError(String message) {
         if (message == null || message.isBlank()) {
             return P2SI18n.tr("screen.p2s.common.unknown").getString();
@@ -1689,6 +1621,59 @@ public class P2SChatScreen extends Screen {
     private void setContextStatus(Component text, int color) {
         contextStatus = text == null ? Component.empty() : text;
         contextStatusColor = color;
+    }
+
+    private void hideContextSelectionConfirm() {
+        contextSelectionConfirmVisible = false;
+    }
+
+    private void showContextSelectionConfirm(double mouseX, double mouseY) {
+        if (contextDiffMode) {
+            return;
+        }
+        ContextSelectionRange selection = getContextSelectionRange();
+        if (selection == null) {
+            return;
+        }
+        contextSelectionConfirmStartLine = selection.startLine() + 1;
+        contextSelectionConfirmEndLine = selection.endLine() + 1;
+        int popupWidth = CONTEXT_SELECTION_CONFIRM_WIDTH;
+        int popupHeight = CONTEXT_SELECTION_CONFIRM_HEIGHT;
+        int minX = contextEditorX + 4;
+        int maxX = Math.max(minX, contextEditorX + contextEditorWidth - popupWidth - 4);
+        int minY = contextEditorY + 4;
+        int maxY = Math.max(minY, contextEditorY + contextEditorHeight - popupHeight - 4);
+        contextSelectionConfirmX = Math.max(minX, Math.min((int) mouseX + 8, maxX));
+        contextSelectionConfirmY = Math.max(minY, Math.min((int) mouseY + 8, maxY));
+        contextSelectionConfirmVisible = true;
+    }
+
+    private boolean isInsideContextSelectionConfirm(double mouseX, double mouseY) {
+        if (!contextSelectionConfirmVisible) {
+            return false;
+        }
+        return mouseX >= contextSelectionConfirmX
+                && mouseX < contextSelectionConfirmX + CONTEXT_SELECTION_CONFIRM_WIDTH
+                && mouseY >= contextSelectionConfirmY
+                && mouseY < contextSelectionConfirmY + CONTEXT_SELECTION_CONFIRM_HEIGHT;
+    }
+
+    private boolean isInsideContextSelectionConfirmOk(double mouseX, double mouseY) {
+        int buttonY = contextSelectionConfirmY + CONTEXT_SELECTION_CONFIRM_HEIGHT - CONTEXT_SELECTION_CONFIRM_BUTTON_HEIGHT - 6;
+        int okX = contextSelectionConfirmX + CONTEXT_SELECTION_CONFIRM_WIDTH - CONTEXT_SELECTION_CONFIRM_BUTTON_WIDTH * 2 - 10;
+        return mouseX >= okX
+                && mouseX < okX + CONTEXT_SELECTION_CONFIRM_BUTTON_WIDTH
+                && mouseY >= buttonY
+                && mouseY < buttonY + CONTEXT_SELECTION_CONFIRM_BUTTON_HEIGHT;
+    }
+
+    private boolean isInsideContextSelectionConfirmCancel(double mouseX, double mouseY) {
+        int buttonY = contextSelectionConfirmY + CONTEXT_SELECTION_CONFIRM_HEIGHT - CONTEXT_SELECTION_CONFIRM_BUTTON_HEIGHT - 6;
+        int cancelX = contextSelectionConfirmX + CONTEXT_SELECTION_CONFIRM_WIDTH - CONTEXT_SELECTION_CONFIRM_BUTTON_WIDTH - 6;
+        return mouseX >= cancelX
+                && mouseX < cancelX + CONTEXT_SELECTION_CONFIRM_BUTTON_WIDTH
+                && mouseY >= buttonY
+                && mouseY < buttonY + CONTEXT_SELECTION_CONFIRM_BUTTON_HEIGHT;
     }
 
     private void refreshContextDiffControls() {
@@ -1708,12 +1693,6 @@ public class P2SChatScreen extends Screen {
         }
         if (input != null) {
             input.setFocused(false);
-        }
-        if (contextStartInput != null) {
-            contextStartInput.setFocused(false);
-        }
-        if (contextEndInput != null) {
-            contextEndInput.setFocused(false);
         }
     }
 
@@ -1919,6 +1898,18 @@ public class P2SChatScreen extends Screen {
             return super.keyPressed(keyCode, scanCode, modifiers);
         }
 
+        if (contextSelectionConfirmVisible) {
+            if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
+                hideContextSelectionConfirm();
+                return true;
+            }
+            if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
+                confirmSelectionAsContext();
+                return true;
+            }
+            hideContextSelectionConfirm();
+        }
+
         if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
             onClose();
             return true;
@@ -1996,10 +1987,23 @@ public class P2SChatScreen extends Screen {
             infoOverlayVisible = false;
         }
 
+        if (button == 0 && contextSelectionConfirmVisible) {
+            if (isInsideContextSelectionConfirmOk(mouseX, mouseY)) {
+                confirmSelectionAsContext();
+                return true;
+            }
+            if (isInsideContextSelectionConfirmCancel(mouseX, mouseY)) {
+                hideContextSelectionConfirm();
+                return true;
+            }
+            if (isInsideContextSelectionConfirm(mouseX, mouseY)) {
+                return true;
+            }
+            hideContextSelectionConfirm();
+        }
+
         if (button == 0 && isInsideContextEditor(mouseX, mouseY)) {
             setContextEditorFocused(true);
-            contextMousePressTime = System.currentTimeMillis();
-            contextLongPressCtxMode = false;
             if (contextDiffMode) {
                 int rowStep = CONTEXT_ROW_HEIGHT + CONTEXT_ROW_GAP;
                 int row = (int) ((mouseY - (contextEditorY + CONTEXT_EDITOR_PADDING)) / rowStep);
@@ -2038,9 +2042,6 @@ public class P2SChatScreen extends Screen {
             return super.mouseDragged(mouseX, mouseY, button, dragX, dragY);
         }
         if (button == 0 && contextMouseSelecting && contextEditorFocused) {
-            if (!contextLongPressCtxMode && System.currentTimeMillis() - contextMousePressTime > CONTEXT_LONG_PRESS_MS) {
-                contextLongPressCtxMode = true;
-            }
             ensureSelectionAnchor();
             placeContextCursorFromMouse(mouseX, mouseY);
             return true;
@@ -2051,11 +2052,10 @@ public class P2SChatScreen extends Screen {
     @Override
     public boolean mouseReleased(double mouseX, double mouseY, int button) {
         if (button == 0) {
-            if (contextLongPressCtxMode && hasContextSelection()) {
-                addSelectionAsContext();
+            if (contextMouseSelecting && hasContextSelection() && !contextDiffMode) {
+                showContextSelectionConfirm(mouseX, mouseY);
             }
             contextMouseSelecting = false;
-            contextLongPressCtxMode = false;
         }
         return super.mouseReleased(mouseX, mouseY, button);
     }
@@ -2193,15 +2193,7 @@ public class P2SChatScreen extends Screen {
         };
         gfx.drawString(this.font, modeHint, x, y, 0x9CAECC, false);
 
-        int start = parsePositiveInt(contextStartInput == null ? "" : contextStartInput.getValue(), contextRangeStart);
-        int end = parsePositiveInt(contextEndInput == null ? "" : contextEndInput.getValue(), contextRangeEnd);
-        if (start > end) {
-            int t = start;
-            start = end;
-            end = t;
-        }
-
-        drawContextEditor(gfx, start, end);
+        drawContextEditor(gfx);
 
         int infoY = contextQueueTopY;
         gfx.drawString(this.font, P2SI18n.tr("screen.p2s.chat.context.next_message", queuedContexts.size(), CONTEXT_MAX_SNIPPETS), x, infoY, 0xE8F0FF, true);
@@ -2233,17 +2225,19 @@ public class P2SChatScreen extends Screen {
         if (contextStatus != null && !contextStatus.getString().isBlank()) {
             gfx.drawString(this.font, contextStatus, x, this.height - 14, contextStatusColor, false);
         }
+
+        drawContextSelectionConfirm(gfx);
     }
 
-    private void drawContextEditor(GuiGraphics gfx, int startLine, int endLine) {
+    private void drawContextEditor(GuiGraphics gfx) {
         if (contextDiffMode) {
             drawContextDiffEditor(gfx);
             return;
         }
-        drawContextTextEditor(gfx, startLine, endLine);
+        drawContextTextEditor(gfx);
     }
 
-    private void drawContextTextEditor(GuiGraphics gfx, int startLine, int endLine) {
+    private void drawContextTextEditor(GuiGraphics gfx) {
         if (contextJsonLines.isEmpty()) {
             contextJsonLines.add("");
         }
@@ -2276,11 +2270,6 @@ public class P2SChatScreen extends Screen {
             int rowY = baseY + row * rowStep;
             int rowBottom = rowY + CONTEXT_ROW_HEIGHT;
             int lineNo = lineIndex + 1;
-            int lineNoColor = 0x8A99B8;
-            if (lineNo >= startLine && lineNo <= endLine) {
-                gfx.fill(left + 1, rowY, right - 1, rowBottom, 0x33335522);
-                lineNoColor = 0xFFD27D;
-            }
             String fullLine = getContextLine(lineIndex);
             if (selection != null && lineIndex >= selection.startLine() && lineIndex <= selection.endLine()) {
                 int selStart = 0;
@@ -2300,12 +2289,11 @@ public class P2SChatScreen extends Screen {
                         drawSelX2 = Math.min(maxTextX, drawSelX1 + 1);
                     }
                     if (drawSelX2 > drawSelX1) {
-                        int selColor = contextLongPressCtxMode ? 0x6655CC55 : 0x665A8BFF;
-                        gfx.fill(drawSelX1, rowY + 2, drawSelX2, rowBottom - 2, selColor);
+                        gfx.fill(drawSelX1, rowY + 2, drawSelX2, rowBottom - 2, 0x665A8BFF);
                     }
                 }
             }
-            gfx.drawString(this.font, Integer.toString(lineNo), left + 4, rowY + 5, lineNoColor, false);
+            gfx.drawString(this.font, Integer.toString(lineNo), left + 4, rowY + 5, 0x8A99B8, false);
             String lineText = clipTextToWidth(fullLine, textWidth);
             gfx.drawString(this.font, lineText, textX, rowY + 5, 0xD6E0F5, false);
         }
@@ -2324,6 +2312,35 @@ public class P2SChatScreen extends Screen {
                 gfx.fill(caretX, caretY, caretX + 1, caretY + caretHeight, 0xFFE8F0FF);
             }
         }
+    }
+
+    private void drawContextSelectionConfirm(GuiGraphics gfx) {
+        if (!contextSelectionConfirmVisible) {
+            return;
+        }
+        int left = contextSelectionConfirmX;
+        int top = contextSelectionConfirmY;
+        int right = left + CONTEXT_SELECTION_CONFIRM_WIDTH;
+        int bottom = top + CONTEXT_SELECTION_CONFIRM_HEIGHT;
+        gfx.fill(left, top, right, bottom, 0xE6111720);
+        gfx.fill(left, top, right, top + 1, 0xFF5A6E91);
+        gfx.fill(left, bottom - 1, right, bottom, 0xFF5A6E91);
+        gfx.fill(left, top, left + 1, bottom, 0xFF5A6E91);
+        gfx.fill(right - 1, top, right, bottom, 0xFF5A6E91);
+
+        gfx.drawString(this.font, P2SI18n.tr("screen.p2s.chat.context.confirm_add_selection"), left + 6, top + 6, 0xFFFFFF, false);
+        String label = activeContextFileName() + ":" + contextSelectionConfirmStartLine + "-" + contextSelectionConfirmEndLine;
+        int chars = buildContextRangeText(contextSelectionConfirmStartLine, contextSelectionConfirmEndLine).length();
+        String preview = P2SI18n.tr("screen.p2s.chat.context.confirm_selection_preview", label, chars).getString();
+        gfx.drawString(this.font, clipTextToWidth(preview, CONTEXT_SELECTION_CONFIRM_WIDTH - 12), left + 6, top + 18, 0xC9D4EB, false);
+
+        int buttonY = bottom - CONTEXT_SELECTION_CONFIRM_BUTTON_HEIGHT - 6;
+        int okX = right - CONTEXT_SELECTION_CONFIRM_BUTTON_WIDTH * 2 - 10;
+        int cancelX = right - CONTEXT_SELECTION_CONFIRM_BUTTON_WIDTH - 6;
+        gfx.fill(okX, buttonY, okX + CONTEXT_SELECTION_CONFIRM_BUTTON_WIDTH, buttonY + CONTEXT_SELECTION_CONFIRM_BUTTON_HEIGHT, 0xFF365C3B);
+        gfx.fill(cancelX, buttonY, cancelX + CONTEXT_SELECTION_CONFIRM_BUTTON_WIDTH, buttonY + CONTEXT_SELECTION_CONFIRM_BUTTON_HEIGHT, 0xFF4C3940);
+        gfx.drawCenteredString(this.font, P2SI18n.tr("screen.p2s.common.ok").getString(), okX + CONTEXT_SELECTION_CONFIRM_BUTTON_WIDTH / 2, buttonY + 5, 0xFFFFFF);
+        gfx.drawCenteredString(this.font, P2SI18n.tr("screen.p2s.common.cancel").getString(), cancelX + CONTEXT_SELECTION_CONFIRM_BUTTON_WIDTH / 2, buttonY + 5, 0xFFFFFF);
     }
 
     private void drawContextDiffEditor(GuiGraphics gfx) {
@@ -2432,12 +2449,6 @@ public class P2SChatScreen extends Screen {
         }
         if (workspaceRenameInput != null) {
             boxes.add(workspaceRenameInput);
-        }
-        if (contextStartInput != null) {
-            boxes.add(contextStartInput);
-        }
-        if (contextEndInput != null) {
-            boxes.add(contextEndInput);
         }
         return boxes;
     }

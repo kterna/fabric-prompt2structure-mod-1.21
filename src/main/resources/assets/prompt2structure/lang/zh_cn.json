@@ -100,6 +100,8 @@
   "screen.p2s.chat.checkpoint.rollback_short": "回滚",
   "screen.p2s.chat.config": "配置",
   "screen.p2s.chat.context.add_range": "添加范围",
+  "screen.p2s.chat.context.confirm_add_selection": "将选中内容添加到上下文？",
+  "screen.p2s.chat.context.confirm_selection_preview": "%s · %s 字符",
   "screen.p2s.chat.context.clear": "清空",
   "screen.p2s.chat.context.clear_queue": "清上下文",
   "screen.p2s.chat.context.diff": "Diff",
