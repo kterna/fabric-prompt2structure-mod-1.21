@@ -31,7 +31,8 @@ public final class ClientNetworkHandler {
             if (P2SMod.DEBUG) {
                 P2SMod.LOGGER.info("[DEBUG] C->S2CSessionSync received -> hasProject={}, sessionActive={}, sessionId={}, partCount={}, revision={}, hasPendingPatch={}", payload.hasProject(), payload.sessionActive(), payload.sessionId(), payload.partCount(), payload.revision(), payload.hasPendingPatch());
             }
-            context.client().execute(() -> ClientSessionState.onSessionSync(
+            context.client().execute(() -> {
+                ClientSessionState.onSessionSync(
                     payload.hasProject(),
                     payload.sessionActive(),
                     payload.sessionId(),
@@ -60,7 +61,9 @@ public final class ClientNetworkHandler {
                     payload.checkpointsJson(),
                     payload.currentScriptJson(),
                     payload.workspaceFilesJson()
-            ));
+                );
+                ClientAgentManager.maybeAutoApplyPendingPatch();
+            });
         });
 
         ClientPlayNetworking.registerGlobalReceiver(S2CBuildProgressPayload.TYPE, (payload, context) -> {
@@ -79,13 +82,16 @@ public final class ClientNetworkHandler {
             if (P2SMod.DEBUG) {
                 P2SMod.LOGGER.info("[DEBUG] C->S2CPatchPreview received -> hasPreview={}, changedBlocks={}, riskLevel={}", payload.hasPreview(), payload.changedBlocks(), payload.riskLevel());
             }
-            context.client().execute(() -> ClientSessionState.onPatchPreview(
+            context.client().execute(() -> {
+                ClientSessionState.onPatchPreview(
                     payload.hasPreview(),
                     payload.summary(),
                     payload.detail(),
                     payload.changedBlocks(),
                     payload.riskLevel()
-            ));
+                );
+                ClientAgentManager.maybeAutoApplyPendingPatch();
+            });
         });
 
         ClientPlayNetworking.registerGlobalReceiver(S2CToolBridgePayload.TYPE, (payload, context) -> {

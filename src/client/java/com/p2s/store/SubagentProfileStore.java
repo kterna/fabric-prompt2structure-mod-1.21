@@ -1,5 +1,6 @@
-package com.p2s;
+package com.p2s.store;
 
+import com.p2s.P2SMod;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;

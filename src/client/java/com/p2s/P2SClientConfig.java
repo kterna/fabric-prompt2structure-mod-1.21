@@ -22,6 +22,7 @@ public final class P2SClientConfig {
     private static final int DEFAULT_TIMEOUT_SECONDS = 30;
     private static final boolean DEFAULT_USE_TOOL_CALL = true;
     private static final boolean DEFAULT_USE_STREAMING = true;
+    private static final boolean DEFAULT_AUTO_APPLY_PATCH = false;
     private static final String DEFAULT_SYSTEM_PROMPT = ModConfig.DEFAULT_SYSTEM_PROMPT;
 
     private static String selectionItemId = DEFAULT_SELECTION_ITEM_ID;
@@ -31,6 +32,7 @@ public final class P2SClientConfig {
     private static int httpTimeoutSeconds = DEFAULT_TIMEOUT_SECONDS;
     private static boolean useToolCall = DEFAULT_USE_TOOL_CALL;
     private static boolean useStreaming = DEFAULT_USE_STREAMING;
+    private static boolean autoApplyPatch = DEFAULT_AUTO_APPLY_PATCH;
     private static String systemPrompt = DEFAULT_SYSTEM_PROMPT;
 
     private P2SClientConfig() {
@@ -88,6 +90,17 @@ public final class P2SClientConfig {
         return useStreaming;
     }
 
+    public static synchronized boolean getAutoApplyPatch() {
+        return autoApplyPatch;
+    }
+
+    public static synchronized void setAutoApplyPatch(boolean value, boolean persist) {
+        autoApplyPatch = value;
+        if (persist) {
+            save();
+        }
+    }
+
     public static synchronized void setUseStreaming(boolean value, boolean persist) {
         useStreaming = value;
         if (persist) {
@@ -137,6 +150,7 @@ public final class P2SClientConfig {
         httpTimeoutSeconds = DEFAULT_TIMEOUT_SECONDS;
         useToolCall = DEFAULT_USE_TOOL_CALL;
         useStreaming = DEFAULT_USE_STREAMING;
+        autoApplyPatch = DEFAULT_AUTO_APPLY_PATCH;
         systemPrompt = DEFAULT_SYSTEM_PROMPT;
         if (persist) {
             save();
@@ -177,6 +191,7 @@ public final class P2SClientConfig {
         Integer loadedTimeout = null;
         Boolean loadedUseToolCall = null;
         Boolean loadedUseStreaming = null;
+        Boolean loadedAutoApplyPatch = null;
         String loadedSystemPrompt = null;
         try {
             if (Files.exists(CONFIG_PATH)) {
@@ -188,6 +203,7 @@ public final class P2SClientConfig {
                 loadedTimeout = root.has("httpTimeoutSeconds") ? root.get("httpTimeoutSeconds").getAsInt() : null;
                 loadedUseToolCall = root.has("useToolCall") ? root.get("useToolCall").getAsBoolean() : null;
                 loadedUseStreaming = root.has("useStreaming") ? root.get("useStreaming").getAsBoolean() : null;
+                loadedAutoApplyPatch = root.has("autoApplyPatch") ? root.get("autoApplyPatch").getAsBoolean() : null;
                 loadedSystemPrompt = root.has("systemPrompt") ? root.get("systemPrompt").getAsString() : null;
             }
         } catch (Exception e) {
@@ -215,6 +231,7 @@ public final class P2SClientConfig {
         httpTimeoutSeconds = timeout == null ? DEFAULT_TIMEOUT_SECONDS : timeout;
         useToolCall = loadedUseToolCall == null ? DEFAULT_USE_TOOL_CALL : loadedUseToolCall;
         useStreaming = loadedUseStreaming == null ? DEFAULT_USE_STREAMING : loadedUseStreaming;
+        autoApplyPatch = loadedAutoApplyPatch == null ? DEFAULT_AUTO_APPLY_PATCH : loadedAutoApplyPatch;
         String prompt = loadedSystemPrompt == null ? "" : loadedSystemPrompt.trim();
         systemPrompt = prompt.isBlank() ? DEFAULT_SYSTEM_PROMPT : prompt;
         save();
@@ -234,6 +251,7 @@ public final class P2SClientConfig {
             root.addProperty("httpTimeoutSeconds", httpTimeoutSeconds);
             root.addProperty("useToolCall", useToolCall);
             root.addProperty("useStreaming", useStreaming);
+            root.addProperty("autoApplyPatch", autoApplyPatch);
             root.addProperty("systemPrompt", systemPrompt);
             Files.writeString(CONFIG_PATH, GSON.toJson(root));
         } catch (Exception e) {

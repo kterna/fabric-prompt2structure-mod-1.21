@@ -6,6 +6,8 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.p2s.network.C2SSessionActionPayload;
+import com.p2s.store.SessionPersistence;
+import com.p2s.store.SkillStore;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.Minecraft;
 
@@ -68,6 +70,7 @@ public final class ClientAgentManager {
 
     private static final Object LOCK = new Object();
     private static LocalSession currentSession;
+    private static boolean autoRestoreAttempted = false;
 
     private ClientAgentManager() {
     }
@@ -359,6 +362,7 @@ public final class ClientAgentManager {
                     session.inFlight = false;
                 }
             }
+            postToClient(ClientAgentManager::maybeAutoApplyPendingPatch);
             autoSaveSession(session);
         }
     }
@@ -1194,6 +1198,72 @@ public final class ClientAgentManager {
         }
     }
 
+    public static void onClientJoin() {
+        synchronized (LOCK) {
+            autoRestoreAttempted = false;
+        }
+        postToClient(() -> {
+            if (!autoRestoreAttempted) {
+                restoreLatestSession(null, false);
+            }
+        });
+    }
+
+    public static void onClientDisconnect() {
+        LocalSession previous;
+        synchronized (LOCK) {
+            previous = currentSession;
+            currentSession = null;
+            autoRestoreAttempted = false;
+        }
+        if (previous != null) {
+            autoSaveSession(previous);
+        }
+        postToClient(() -> {
+            clearLocalSessionView();
+            ClientSessionState.resetAll();
+        });
+    }
+
+    public static void restoreLatestSession(String projectId, boolean notifyOnFailure) {
+        synchronized (LOCK) {
+            autoRestoreAttempted = true;
+            if (currentSession != null && currentSession.inFlight) {
+                return;
+            }
+            if (currentSession != null) {
+                return;
+            }
+        }
+
+        List<SessionPersistence.SessionIndexEntry> sessions = (projectId == null || projectId.isBlank())
+                ? SessionPersistence.listSessions()
+                : SessionPersistence.listSessions(projectId);
+        if (sessions == null || sessions.isEmpty()) {
+            if (notifyOnFailure) {
+                postToClient(() -> ClientSessionState.setStatus(""));
+            }
+            return;
+        }
+        SessionPersistence.SessionIndexEntry latest = sessions.get(0);
+        if (latest == null || latest.id() == null || latest.id().isBlank()) {
+            return;
+        }
+        restoreSession(latest.id());
+    }
+
+    public static void maybeAutoApplyPendingPatch() {
+        if (!P2SClientConfig.getAutoApplyPatch() || !ClientSessionState.hasPendingPatch()) {
+            return;
+        }
+        synchronized (LOCK) {
+            if (currentSession == null || currentSession.inFlight) {
+                return;
+            }
+        }
+        submitPatchApply();
+    }
+
     public static void restoreSession(String sessionId) {
         if (sessionId == null || sessionId.isBlank()) {
             return;
@@ -1297,6 +1367,10 @@ public final class ClientAgentManager {
             }
         }
         closeCurrentSessionInternal(false);
+        String projectId = ClientSessionState.getProjectId();
+        if (projectId != null && !projectId.isBlank()) {
+            restoreLatestSession(projectId, false);
+        }
     }
 
     private static void closeCurrentSessionInternal(boolean clearStatus) {

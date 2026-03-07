@@ -6,9 +6,15 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.p2s.network.C2SSessionActionPayload;
+import com.p2s.screen.P2SConfigScreen;
+import com.p2s.screen.P2SProjectListScreen;
+import com.p2s.screen.P2SSessionListScreen;
+import com.p2s.screen.chat.P2SChatContextWidgets;
+import com.p2s.screen.chat.P2SChatSessionWidgets;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
@@ -19,7 +25,9 @@ import org.lwjgl.glfw.GLFW;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 public class P2SChatScreen extends Screen {
     private static final Gson CONTEXT_GSON = new GsonBuilder().setPrettyPrinting().create();
@@ -48,6 +56,11 @@ public class P2SChatScreen extends Screen {
     private static final int CONTEXT_SELECTION_CONFIRM_HEIGHT = 54;
     private static final int CONTEXT_SELECTION_CONFIRM_BUTTON_WIDTH = 56;
     private static final int CONTEXT_SELECTION_CONFIRM_BUTTON_HEIGHT = 18;
+    private static final int DOCK_SPLITTER_WIDTH = 4;
+    private static final int DOCK_COLLAPSED_WIDTH = 22;
+    private static final int DOCK_TOGGLE_BUTTON_SIZE = 18;
+    private static final int EXPLORER_MIN_WIDTH = 130;
+    private static final int EDITOR_MIN_WIDTH = 180;
 
     private EditBox input;
     private Button sendButton;
@@ -61,6 +74,8 @@ public class P2SChatScreen extends Screen {
     private Button checkpointNextButton;
     private Button checkpointRollbackButton;
     private Button checkpointModeButton;
+    private EditBox checkpointNameInput;
+    private Button checkpointRenameButton;
     private final List<Button> choiceButtons = new ArrayList<>();
     private double scrollOffset;
 
@@ -87,9 +102,12 @@ public class P2SChatScreen extends Screen {
     private Button contextTabScriptButton;
     private Button contextTabDiffButton;
     private Button contextLoadButton;
+    private Button contextSaveButton;
     private Button contextFormatButton;
     private Button contextClearJsonButton;
     private Button contextClearQueueButton;
+    private Button contextApplyButton;
+    private Button contextDiscardButton;
     private Button contextDiffPrevButton;
     private Button contextDiffNextButton;
     private Button workspaceDocCreateButton;
@@ -104,7 +122,10 @@ public class P2SChatScreen extends Screen {
     private int scriptCursorColumn = 0;
     private int scriptScroll = 0;
     private boolean scriptLoading = false;
+    private boolean contextDiffLoading = false;
     private String contextLoadedDocId = "";
+    private String contextDiffLoadedPath = "";
+    private String contextDiffLoadedSignature = "";
     private String workspaceUiSignature = "";
     private int contextVisibleRows = 0;
     private int contextScroll = 0;
@@ -126,12 +147,29 @@ public class P2SChatScreen extends Screen {
     private int contextSelectionConfirmEndLine = 1;
     private int contextSelectionConfirmX = 0;
     private int contextSelectionConfirmY = 0;
+    private int sessionPanelWidth = -1;
+    private int explorerPanelWidth = -1;
+    private int lastSessionPanelWidth = -1;
+    private int lastExplorerPanelWidth = -1;
+    private int currentSessionPanelX = 0;
+    private int currentExplorerSplitterX = 0;
+    private boolean sessionPanelCollapsed = false;
+    private boolean explorerPanelCollapsed = false;
+    private boolean draggingSessionSplitter = false;
+    private boolean draggingExplorerSplitter = false;
     private boolean contextDiffMode = false;
     private final List<DiffViewLine> contextDiffLines = new ArrayList<>();
     private final List<Integer> contextDiffChangeRows = new ArrayList<>();
     private int contextDiffNavIndex = -1;
     private Component contextStatus = Component.empty();
     private int contextStatusColor = 0xAAAAAA;
+    private String inputDraft = "";
+    private String discardReasonDraft = "";
+    private String checkpointNameDraft = "";
+    private String checkpointNameSourceId = "";
+    private String pendingWorkspaceJumpPath = "";
+    private final Set<String> collapsedWorkspaceFolders = new LinkedHashSet<>();
+    private String workspaceExpandedSelectionPath = "";
 
     public P2SChatScreen() {
         super(P2SI18n.tr("screen.p2s.chat.title"));
@@ -150,152 +188,239 @@ public class P2SChatScreen extends Screen {
         clampScroll();
     }
 
+    private void ensureDockLayoutState() {
+        int maxSessionWidth = Math.max(PANEL_MIN_WIDTH, this.width - EDITOR_MIN_WIDTH - DOCK_COLLAPSED_WIDTH - PADDING * 3);
+        if (sessionPanelWidth <= 0) {
+            sessionPanelWidth = Math.max(PANEL_MIN_WIDTH, this.width * 2 / 5);
+        }
+        sessionPanelWidth = Math.max(PANEL_MIN_WIDTH, Math.min(sessionPanelWidth, maxSessionWidth));
+        if (lastSessionPanelWidth <= 0) {
+            lastSessionPanelWidth = sessionPanelWidth;
+        }
+
+        int sessionVisibleWidth = sessionPanelCollapsed ? DOCK_COLLAPSED_WIDTH : sessionPanelWidth;
+        int leftWidth = Math.max(100, this.width - sessionVisibleWidth - PADDING * 2);
+        int maxExplorerWidth = Math.max(EXPLORER_MIN_WIDTH, leftWidth - EDITOR_MIN_WIDTH - DOCK_SPLITTER_WIDTH - DOCK_COLLAPSED_WIDTH);
+        if (explorerPanelWidth <= 0) {
+            explorerPanelWidth = Math.min(220, Math.max(EXPLORER_MIN_WIDTH, leftWidth / 3));
+        }
+        explorerPanelWidth = Math.max(EXPLORER_MIN_WIDTH, Math.min(explorerPanelWidth, maxExplorerWidth));
+        if (lastExplorerPanelWidth <= 0) {
+            lastExplorerPanelWidth = explorerPanelWidth;
+        }
+    }
+
+    private int getSessionVisibleWidth() {
+        ensureDockLayoutState();
+        return sessionPanelCollapsed ? DOCK_COLLAPSED_WIDTH : sessionPanelWidth;
+    }
+
+    private int getExplorerVisibleWidth(int leftWidth) {
+        ensureDockLayoutState();
+        if (explorerPanelCollapsed) {
+            return DOCK_COLLAPSED_WIDTH;
+        }
+        int maxExplorerWidth = Math.max(EXPLORER_MIN_WIDTH, leftWidth - EDITOR_MIN_WIDTH - DOCK_SPLITTER_WIDTH);
+        explorerPanelWidth = Math.max(EXPLORER_MIN_WIDTH, Math.min(explorerPanelWidth, maxExplorerWidth));
+        return explorerPanelWidth;
+    }
+
+    private void toggleSessionPanel() {
+        if (sessionPanelCollapsed) {
+            sessionPanelCollapsed = false;
+            sessionPanelWidth = lastSessionPanelWidth > 0 ? lastSessionPanelWidth : Math.max(PANEL_MIN_WIDTH, this.width * 2 / 5);
+        } else {
+            lastSessionPanelWidth = Math.max(PANEL_MIN_WIDTH, sessionPanelWidth);
+            sessionPanelCollapsed = true;
+            infoOverlayVisible = false;
+            discardReasonMode = false;
+        }
+        createWidgets();
+    }
+
+    private void toggleExplorerPanel() {
+        if (explorerPanelCollapsed) {
+            explorerPanelCollapsed = false;
+            explorerPanelWidth = lastExplorerPanelWidth > 0 ? lastExplorerPanelWidth : 180;
+        } else {
+            lastExplorerPanelWidth = Math.max(EXPLORER_MIN_WIDTH, explorerPanelWidth);
+            explorerPanelCollapsed = true;
+            workspaceRenameMode = false;
+            workspaceRenameDraft = "";
+        }
+        createWidgets();
+    }
+
+    private boolean isInsideSessionSplitter(double mouseX, double mouseY) {
+        if (sessionPanelCollapsed) {
+            return false;
+        }
+        return mouseX >= currentSessionPanelX - DOCK_SPLITTER_WIDTH
+                && mouseX <= currentSessionPanelX + DOCK_SPLITTER_WIDTH
+                && mouseY >= 0 && mouseY < this.height;
+    }
+
+    private boolean isInsideExplorerSplitter(double mouseX, double mouseY) {
+        if (explorerPanelCollapsed) {
+            return false;
+        }
+        return mouseX >= currentExplorerSplitterX - DOCK_SPLITTER_WIDTH
+                && mouseX <= currentExplorerSplitterX + DOCK_SPLITTER_WIDTH
+                && mouseY >= 0 && mouseY < this.height;
+    }
+
+    private void updateSessionWidthFromMouse(double mouseX) {
+        int nextWidth = this.width - (int) mouseX;
+        int maxSessionWidth = Math.max(PANEL_MIN_WIDTH, this.width - EDITOR_MIN_WIDTH - DOCK_COLLAPSED_WIDTH - PADDING * 3);
+        sessionPanelWidth = Math.max(PANEL_MIN_WIDTH, Math.min(nextWidth, maxSessionWidth));
+        lastSessionPanelWidth = sessionPanelWidth;
+    }
+
+    private void updateExplorerWidthFromMouse(double mouseX) {
+        int leftX = PADDING;
+        int leftWidth = Math.max(100, currentSessionPanelX - PADDING * 2);
+        int nextWidth = (int) mouseX - leftX;
+        int maxExplorerWidth = Math.max(EXPLORER_MIN_WIDTH, leftWidth - EDITOR_MIN_WIDTH - DOCK_SPLITTER_WIDTH);
+        explorerPanelWidth = Math.max(EXPLORER_MIN_WIDTH, Math.min(nextWidth, maxExplorerWidth));
+        lastExplorerPanelWidth = explorerPanelWidth;
+    }
+
     private void createWidgets() {
+        ensureDockLayoutState();
+        if (input != null) {
+            inputDraft = input.getValue();
+        }
+        if (discardReasonInput != null) {
+            discardReasonDraft = discardReasonInput.getValue();
+        }
+        if (checkpointNameInput != null) {
+            checkpointNameDraft = checkpointNameInput.getValue();
+        }
         captureContextControlState();
         hideContextSelectionConfirm();
         clearWidgets();
 
         int panelWidth = getPanelWidth();
         int panelX = getPanelX(panelWidth);
+        currentSessionPanelX = panelX;
         initContextWidgets(panelX);
 
-        int inputY = getInputY();
-        int inputWidth = panelWidth - PADDING * 2 - BUTTON_WIDTH - 4;
-
-        input = new EditBox(this.font, panelX + PADDING, inputY, inputWidth, INPUT_HEIGHT, Component.empty());
-        input.setMaxLength(512);
-        input.setFocused(!contextEditorFocused);
-        addRenderableWidget(input);
-
-        sendButton = Button.builder(Component.literal(">"), btn -> sendMessage())
-                .bounds(panelX + PADDING + inputWidth + 4, inputY, BUTTON_WIDTH, INPUT_HEIGHT)
+        Button explorerToggle = Button.builder(Component.literal(explorerPanelCollapsed ? ">" : "<"), btn -> toggleExplorerPanel())
+                .bounds(explorerPanelCollapsed ? PADDING + 2 : Math.max(PADDING + 2, currentExplorerSplitterX - DOCK_TOGGLE_BUTTON_SIZE - DOCK_SPLITTER_WIDTH - 2),
+                        PADDING,
+                        DOCK_TOGGLE_BUTTON_SIZE,
+                        DOCK_TOGGLE_BUTTON_SIZE)
                 .build();
-        addRenderableWidget(sendButton);
+        addRenderableWidget(explorerToggle);
 
-        int topRowY = PADDING;
-        int navX = panelX + PADDING;
-
-        Button projectsButton = Button.builder(P2SI18n.tr("screen.p2s.chat.projects"), btn -> this.minecraft.setScreen(new P2SProjectListScreen(this)))
-                .bounds(navX, topRowY, 60, INPUT_HEIGHT)
+        int sessionToggleX = sessionPanelCollapsed ? panelX + 2 : Math.max(panelX - DOCK_TOGGLE_BUTTON_SIZE - DOCK_SPLITTER_WIDTH - 2, PADDING + 2);
+        Button sessionToggle = Button.builder(Component.literal(sessionPanelCollapsed ? "<" : ">"), btn -> toggleSessionPanel())
+                .bounds(sessionToggleX, PADDING, DOCK_TOGGLE_BUTTON_SIZE, DOCK_TOGGLE_BUTTON_SIZE)
                 .build();
-        addRenderableWidget(projectsButton);
-        navX += 64;
+        addRenderableWidget(sessionToggle);
 
-        Button sessionsButton = Button.builder(P2SI18n.tr("screen.p2s.chat.sessions"), btn -> this.minecraft.setScreen(new P2SSessionListScreen(this)))
-                .bounds(navX, topRowY, 60, INPUT_HEIGHT)
-                .build();
-        addRenderableWidget(sessionsButton);
-        navX += 64;
-
-        Button newButton = Button.builder(P2SI18n.tr("screen.p2s.common.new"), btn -> ClientAgentManager.newSession())
-                .bounds(navX, topRowY, 40, INPUT_HEIGHT)
-                .build();
-        addRenderableWidget(newButton);
-        navX += 44;
-
-        infoButton = Button.builder(Component.literal("[i]"), btn -> {
-                    infoOverlayVisible = !infoOverlayVisible;
-                    infoOverlayScroll = 0;
-                })
-                .bounds(navX, topRowY, 32, INPUT_HEIGHT)
-                .build();
-        addRenderableWidget(infoButton);
-
-        configButton = Button.builder(P2SI18n.tr("screen.p2s.chat.config"), btn -> this.minecraft.setScreen(new P2SConfigScreen(this)))
-                .bounds(panelX + panelWidth - PADDING - 56, topRowY, 56, INPUT_HEIGHT)
-                .build();
-        addRenderableWidget(configButton);
-
-        int rowY = PADDING + TOP_BUTTON_HEIGHT + 4;
-        int rowStart = panelX + panelWidth - PADDING - (SMALL_BUTTON_WIDTH * 4 + 6);
-
-        applyButton = Button.builder(P2SI18n.tr("screen.p2s.chat.apply"), btn -> ClientAgentManager.submitPatchApply())
-                .bounds(rowStart, rowY, SMALL_BUTTON_WIDTH, TOP_BUTTON_HEIGHT)
-                .build();
-        addRenderableWidget(applyButton);
-
-        discardButton = Button.builder(P2SI18n.tr("screen.p2s.chat.discard"), btn -> enterDiscardReasonMode())
-                .bounds(rowStart + SMALL_BUTTON_WIDTH + 2, rowY, SMALL_BUTTON_WIDTH, TOP_BUTTON_HEIGHT)
-                .build();
-        addRenderableWidget(discardButton);
-
-        undoButton = Button.builder(P2SI18n.tr("screen.p2s.chat.undo"), btn -> sendSessionAction("undo", ""))
-                .bounds(rowStart + (SMALL_BUTTON_WIDTH + 2) * 2, rowY, SMALL_BUTTON_WIDTH, TOP_BUTTON_HEIGHT)
-                .build();
-        addRenderableWidget(undoButton);
-
-        redoButton = Button.builder(P2SI18n.tr("screen.p2s.chat.redo"), btn -> sendSessionAction("redo", ""))
-                .bounds(rowStart + (SMALL_BUTTON_WIDTH + 2) * 3, rowY, SMALL_BUTTON_WIDTH, TOP_BUTTON_HEIGHT)
-                .build();
-        addRenderableWidget(redoButton);
-
-        int cpY = rowY + TOP_BUTTON_HEIGHT + 2;
-        int cpX = panelX + PADDING;
-        checkpointCreateButton = Button.builder(P2SI18n.tr("screen.p2s.chat.checkpoint.create_short"), btn -> createCheckpoint())
-                .bounds(cpX, cpY, 36, TOP_BUTTON_HEIGHT)
-                .build();
-        addRenderableWidget(checkpointCreateButton);
-
-        checkpointPrevButton = Button.builder(Component.literal("<"), btn -> ClientSessionState.selectPreviousCheckpoint())
-                .bounds(cpX + 38, cpY, 20, TOP_BUTTON_HEIGHT)
-                .build();
-        addRenderableWidget(checkpointPrevButton);
-
-        checkpointNextButton = Button.builder(Component.literal(">"), btn -> ClientSessionState.selectNextCheckpoint())
-                .bounds(cpX + 60, cpY, 20, TOP_BUTTON_HEIGHT)
-                .build();
-        addRenderableWidget(checkpointNextButton);
-
-        checkpointRollbackButton = Button.builder(P2SI18n.tr("screen.p2s.chat.checkpoint.rollback_short"), btn -> rollbackSelectedCheckpoint())
-                .bounds(cpX + 82, cpY, 30, TOP_BUTTON_HEIGHT)
-                .build();
-        addRenderableWidget(checkpointRollbackButton);
-
-        checkpointModeButton = Button.builder(Component.literal(modeLabel()), btn -> {
-                    ClientSessionState.toggleRollbackMode();
-                    if (checkpointModeButton != null) {
-                        checkpointModeButton.setMessage(Component.literal(modeLabel()));
-                    }
-                })
-                .bounds(cpX + 114, cpY, 54, TOP_BUTTON_HEIGHT)
-                .build();
-        addRenderableWidget(checkpointModeButton);
-
-        choiceButtons.clear();
-        int actionWidth = SMALL_BUTTON_WIDTH * 4 + 6;
-        int choiceY = cpY + TOP_BUTTON_HEIGHT + 2;
-        int choiceGap = 2;
-        int choiceWidth = (actionWidth - choiceGap * (CHOICE_BUTTON_COUNT - 1)) / CHOICE_BUTTON_COUNT;
-        for (int i = 0; i < CHOICE_BUTTON_COUNT; i++) {
-            final int index = i;
-            Button choiceBtn = Button.builder(Component.empty(), btn -> submitChoice(index))
-                    .bounds(rowStart + i * (choiceWidth + choiceGap), choiceY, choiceWidth, TOP_BUTTON_HEIGHT)
-                    .build();
-            choiceBtn.visible = false;
-            choiceBtn.active = false;
-            choiceButtons.add(choiceBtn);
-            addRenderableWidget(choiceBtn);
+        if (sessionPanelCollapsed) {
+            input = null;
+            sendButton = null;
+            configButton = null;
+            applyButton = null;
+            discardButton = null;
+            undoButton = null;
+            redoButton = null;
+            checkpointCreateButton = null;
+            checkpointPrevButton = null;
+            checkpointNextButton = null;
+            checkpointRollbackButton = null;
+            checkpointModeButton = null;
+            checkpointNameInput = null;
+            checkpointRenameButton = null;
+            infoButton = null;
+            choiceButtons.clear();
+            discardReasonInput = null;
+            discardOkButton = null;
+            discardCancelButton = null;
+            return;
         }
 
-        int discardRowY = choiceY + TOP_BUTTON_HEIGHT + 2;
-        int discardInputWidth = actionWidth - BUTTON_WIDTH * 2 - 8;
-        discardReasonInput = new EditBox(this.font, rowStart, discardRowY, discardInputWidth, INPUT_HEIGHT, Component.empty());
-        discardReasonInput.setMaxLength(256);
-        discardReasonInput.setHint(P2SI18n.tr("screen.p2s.chat.discard_reason_hint"));
-        discardReasonInput.visible = false;
-        addRenderableWidget(discardReasonInput);
+        syncCheckpointNameDraftFromSelection();
+        P2SChatSessionWidgets.BuildResult sessionWidgets = P2SChatSessionWidgets.build(
+                new P2SChatSessionWidgets.Host() {
+                    @Override
+                    public net.minecraft.client.gui.Font font() {
+                        return P2SChatScreen.this.font;
+                    }
 
-        discardOkButton = Button.builder(P2SI18n.tr("screen.p2s.common.ok"), btn -> confirmDiscard())
-                .bounds(rowStart + discardInputWidth + 4, discardRowY, BUTTON_WIDTH, INPUT_HEIGHT)
-                .build();
-        discardOkButton.visible = false;
-        addRenderableWidget(discardOkButton);
+                    @Override
+                    public Button addButton(Button button) {
+                        return P2SChatScreen.this.addRenderableWidget(button);
+                    }
 
-        discardCancelButton = Button.builder(Component.literal("X"), btn -> exitDiscardReasonMode())
-                .bounds(rowStart + discardInputWidth + BUTTON_WIDTH + 8, discardRowY, BUTTON_WIDTH, INPUT_HEIGHT)
-                .build();
-        discardCancelButton.visible = false;
-        addRenderableWidget(discardCancelButton);
+                    @Override
+                    public EditBox addEditBox(EditBox editBox) {
+                        P2SChatScreen.this.addRenderableWidget(editBox);
+                        return editBox;
+                    }
+                },
+                new P2SChatSessionWidgets.Config(
+                        panelX,
+                        panelWidth,
+                        PADDING,
+                        INPUT_HEIGHT,
+                        BUTTON_WIDTH,
+                        TOP_BUTTON_HEIGHT,
+                        SMALL_BUTTON_WIDTH,
+                        CHOICE_BUTTON_COUNT,
+                        getInputY(),
+                        contextEditorFocused,
+                        inputDraft,
+                        discardReasonDraft,
+                        checkpointNameDraft,
+                        modeLabel(),
+                        this::sendMessage,
+                        () -> this.minecraft.setScreen(new P2SProjectListScreen(this)),
+                        () -> this.minecraft.setScreen(new P2SSessionListScreen(this)),
+                        ClientAgentManager::newSession,
+                        () -> {
+                            infoOverlayVisible = !infoOverlayVisible;
+                            infoOverlayScroll = 0;
+                        },
+                        () -> this.minecraft.setScreen(new P2SConfigScreen(this)),
+                        ClientAgentManager::submitPatchApply,
+                        this::enterDiscardReasonMode,
+                        () -> sendSessionAction("undo", ""),
+                        () -> sendSessionAction("redo", ""),
+                        this::createCheckpoint,
+                        ClientSessionState::selectPreviousCheckpoint,
+                        ClientSessionState::selectNextCheckpoint,
+                        this::rollbackSelectedCheckpoint,
+                        this::renameSelectedCheckpoint,
+                        ClientSessionState::toggleRollbackMode,
+                        this::submitChoice,
+                        this::confirmDiscard,
+                        this::exitDiscardReasonMode
+                )
+        );
+
+        input = sessionWidgets.input();
+        sendButton = sessionWidgets.sendButton();
+        configButton = sessionWidgets.configButton();
+        applyButton = sessionWidgets.applyButton();
+        discardButton = sessionWidgets.discardButton();
+        undoButton = sessionWidgets.undoButton();
+        redoButton = sessionWidgets.redoButton();
+        checkpointCreateButton = sessionWidgets.checkpointCreateButton();
+        checkpointPrevButton = sessionWidgets.checkpointPrevButton();
+        checkpointNextButton = sessionWidgets.checkpointNextButton();
+        checkpointRollbackButton = sessionWidgets.checkpointRollbackButton();
+        checkpointModeButton = sessionWidgets.checkpointModeButton();
+        checkpointNameInput = sessionWidgets.checkpointNameInput();
+        checkpointRenameButton = sessionWidgets.checkpointRenameButton();
+        infoButton = sessionWidgets.infoButton();
+        discardReasonInput = sessionWidgets.discardReasonInput();
+        discardOkButton = sessionWidgets.discardOkButton();
+        discardCancelButton = sessionWidgets.discardCancelButton();
+        choiceButtons.clear();
+        choiceButtons.addAll(sessionWidgets.choiceButtons());
     }
 
     private void initContextWidgets(int panelX) {
@@ -317,24 +442,17 @@ public class P2SChatScreen extends Screen {
         }
         contextScroll = Math.max(0, contextScroll);
 
-        int leftX = PADDING;
         int leftWidth = Math.max(100, panelX - PADDING * 2);
-        int explorerWidth = Math.min(220, Math.max(130, leftWidth / 3));
-        int splitGap = 6;
-        int editorXBase = leftX + explorerWidth + splitGap;
-        int editorWidth = Math.max(120, leftWidth - explorerWidth - splitGap);
-        int rowGap = 2;
-        int row1Y = PADDING + this.font.lineHeight + 6;
-        int row2Y = row1Y + INPUT_HEIGHT + rowGap;
-
-        // Explorer (left): VSCode-like file list
-        workspaceDocButtons.clear();
+        int explorerWidth = getExplorerVisibleWidth(leftWidth);
         if (workspaceRenameMode && (workspaceRenameDraft == null || workspaceRenameDraft.isBlank())) {
             String selectedName = ClientSessionState.getSelectedWorkspaceLabel();
             workspaceRenameDraft = selectedName == null ? "" : selectedName;
         }
-        P2SWorkspaceExplorerComponent.BuildResult explorer = P2SWorkspaceExplorerComponent.build(
-                new P2SWorkspaceExplorerComponent.Host() {
+        pruneCollapsedWorkspaceFolders();
+        syncWorkspaceSelectionExpansion();
+
+        P2SChatContextWidgets.BuildResult contextWidgets = P2SChatContextWidgets.build(
+                new P2SChatContextWidgets.Host() {
                     @Override
                     public net.minecraft.client.gui.Font font() {
                         return P2SChatScreen.this.font;
@@ -356,106 +474,74 @@ public class P2SChatScreen extends Screen {
                         return editBox;
                     }
                 },
-                new P2SWorkspaceExplorerComponent.Config(
-                        leftX,
-                        row1Y,
-                        row2Y,
+                new P2SChatContextWidgets.Config(
+                        panelX,
                         explorerWidth,
+                        PADDING,
                         INPUT_HEIGHT,
                         CONTEXT_FOOTER_HEIGHT,
+                        CONTEXT_ROW_HEIGHT,
+                        CONTEXT_ROW_GAP,
+                        CONTEXT_EDITOR_PADDING,
+                        EDITOR_MIN_WIDTH,
+                        6,
+                        explorerPanelCollapsed,
                         workspaceRenameMode,
+                        contextDiffMode,
+                        selectedWorkspaceHasPendingPatch(),
                         workspaceRenameDraft,
                         ClientSessionState.getSelectedWorkspacePath(),
                         ClientSessionState.getWorkspaceFiles(),
+                        Set.copyOf(collapsedWorkspaceFolders),
                         this::createWorkspaceDoc,
                         this::enterWorkspaceRenameMode,
                         this::deleteSelectedWorkspaceDoc,
                         this::switchWorkspaceDoc,
+                        this::toggleWorkspaceFolder,
                         this::confirmWorkspaceRename,
-                        this::exitWorkspaceRenameMode
+                        this::exitWorkspaceRenameMode,
+                        this::loadWorkspaceDiff,
+                        this::fetchWorkspaceScript,
+                        this::saveWorkspaceDoc,
+                        this::clearContextQueue,
+                        this::formatContextJson,
+                        this::clearContextJson,
+                        this::applySelectedPendingPatch,
+                        this::enterDiscardReasonMode,
+                        () -> navigateContextDiffChange(-1),
+                        () -> navigateContextDiffChange(1)
                 )
         );
-        workspaceDocCreateButton = explorer.createButton();
-        workspaceRenameButton = explorer.renameButton();
-        workspaceDeleteButton = explorer.deleteButton();
-        workspaceRenameInput = explorer.renameInput();
-        workspaceRenameOkButton = explorer.renameOkButton();
-        workspaceRenameCancelButton = explorer.renameCancelButton();
-        workspaceDocButtons.addAll(explorer.fileButtons());
+
+        currentExplorerSplitterX = contextWidgets.currentExplorerSplitterX();
+        contextVisibleRows = contextWidgets.contextVisibleRows();
+        contextEditorX = contextWidgets.contextEditorX();
+        contextEditorY = contextWidgets.contextEditorY();
+        contextEditorWidth = contextWidgets.contextEditorWidth();
+        contextEditorHeight = contextWidgets.contextEditorHeight();
+        contextQueueTopY = contextWidgets.contextQueueTopY();
+        workspaceDocCreateButton = contextWidgets.workspaceDocCreateButton();
+        workspaceRenameButton = contextWidgets.workspaceRenameButton();
+        workspaceDeleteButton = contextWidgets.workspaceDeleteButton();
+        workspaceRenameInput = contextWidgets.workspaceRenameInput();
+        workspaceRenameOkButton = contextWidgets.workspaceRenameOkButton();
+        workspaceRenameCancelButton = contextWidgets.workspaceRenameCancelButton();
+        workspaceDocButtons.clear();
+        workspaceDocButtons.addAll(contextWidgets.workspaceDocButtons());
+        contextTabScriptButton = contextWidgets.contextTabScriptButton();
+        contextTabDiffButton = contextWidgets.contextTabDiffButton();
+        contextLoadButton = contextWidgets.contextLoadButton();
+        contextSaveButton = contextWidgets.contextSaveButton();
+        contextClearQueueButton = contextWidgets.contextClearQueueButton();
+        contextFormatButton = contextWidgets.contextFormatButton();
+        contextClearJsonButton = contextWidgets.contextClearJsonButton();
+        contextApplyButton = contextWidgets.contextApplyButton();
+        contextDiscardButton = contextWidgets.contextDiscardButton();
+        contextDiffPrevButton = contextWidgets.contextDiffPrevButton();
+        contextDiffNextButton = contextWidgets.contextDiffNextButton();
         if (workspaceRenameInput != null) {
             workspaceRenameInput.setFocused(true);
         }
-
-        // Editor controls (right)
-        int row1ButtonCount = 4;
-        int row1BtnWidth = Math.max(52, (editorWidth - rowGap * (row1ButtonCount - 1)) / row1ButtonCount);
-        int row1X = editorXBase;
-        contextTabScriptButton = addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.chat.context.script"), btn -> switchContextTab(ContextTab.SCRIPT))
-                .bounds(row1X, row1Y, row1BtnWidth, INPUT_HEIGHT).build());
-        contextTabScriptButton.active = activeContextTab != ContextTab.SCRIPT;
-        row1X += row1BtnWidth + rowGap;
-        contextTabDiffButton = addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.chat.context.diff"), btn -> switchContextTab(ContextTab.DIFF))
-                .bounds(row1X, row1Y, row1BtnWidth, INPUT_HEIGHT).build());
-        contextTabDiffButton.active = activeContextTab != ContextTab.DIFF;
-        row1X += row1BtnWidth + rowGap;
-        contextLoadButton = addRenderableWidget(Button.builder(P2SI18n.tr(activeContextTab == ContextTab.DIFF ? "screen.p2s.common.refresh" : "screen.p2s.chat.context.fetch"), btn -> {
-                    if (activeContextTab == ContextTab.DIFF) {
-                        loadWorkspaceDiff();
-                    } else {
-                        fetchWorkspaceScript();
-                    }
-                })
-                .bounds(row1X, row1Y, row1BtnWidth, INPUT_HEIGHT).build());
-        row1X += row1BtnWidth + rowGap;
-        contextClearQueueButton = addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.chat.context.clear_queue"), btn -> clearContextQueue())
-                .bounds(row1X, row1Y, row1BtnWidth, INPUT_HEIGHT).build());
-
-        // Row 2: Editor-specific actions
-        int row2ButtonCount = 4;
-        int row2BtnWidth = Math.max(46, (editorWidth - rowGap * (row2ButtonCount - 1)) / row2ButtonCount);
-        int row2X = editorXBase;
-        switch (activeContextTab) {
-            case SCRIPT -> {
-                contextFormatButton = addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.chat.context.format"), btn -> formatContextJson())
-                        .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
-                row2X += row2BtnWidth + rowGap;
-                contextClearJsonButton = addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.chat.context.clear"), btn -> clearContextJson())
-                        .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
-                row2X += row2BtnWidth + rowGap;
-                contextDiffPrevButton = addRenderableWidget(Button.builder(Component.literal("<D"), btn -> navigateContextDiffChange(-1))
-                        .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
-                row2X += row2BtnWidth + rowGap;
-                contextDiffNextButton = addRenderableWidget(Button.builder(Component.literal("D>"), btn -> navigateContextDiffChange(1))
-                        .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
-            }
-            case DIFF -> {
-                contextDiffPrevButton = addRenderableWidget(Button.builder(Component.literal("<D"), btn -> navigateContextDiffChange(-1))
-                        .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
-                row2X += row2BtnWidth + rowGap;
-                contextDiffNextButton = addRenderableWidget(Button.builder(Component.literal("D>"), btn -> navigateContextDiffChange(1))
-                        .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
-                row2X += row2BtnWidth + rowGap;
-                contextFormatButton = addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.chat.context.format"), btn -> formatContextJson())
-                        .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
-                row2X += row2BtnWidth + rowGap;
-                contextClearJsonButton = addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.chat.context.clear"), btn -> clearContextJson())
-                        .bounds(row2X, row2Y, row2BtnWidth, INPUT_HEIGHT).build());
-            }
-            default -> {
-            }
-        }
-
-        int editorTop = row2Y + INPUT_HEIGHT + 4;
-        int editorBottom = this.height - CONTEXT_FOOTER_HEIGHT;
-        int available = Math.max(0, editorBottom - editorTop);
-        int rowStep = CONTEXT_ROW_HEIGHT + CONTEXT_ROW_GAP;
-        contextVisibleRows = Math.max(4, Math.min(40, available / rowStep));
-        int renderedRows = Math.max(1, contextVisibleRows);
-        contextEditorX = editorXBase;
-        contextEditorY = editorTop;
-        contextEditorWidth = editorWidth;
-        contextEditorHeight = renderedRows * rowStep - CONTEXT_ROW_GAP + CONTEXT_EDITOR_PADDING * 2;
-        contextQueueTopY = contextEditorY + contextEditorHeight + 6;
 
         if (contextDiffMode) {
             clampContextScroll();
@@ -481,25 +567,99 @@ public class P2SChatScreen extends Screen {
     private void createWorkspaceDoc() {
         JsonObject payload = new JsonObject();
         int next = Math.max(1, ClientSessionState.getWorkspaceFiles().size() + 1);
-        payload.addProperty("name", "workspace/file-" + next + ".json");
-        payload.addProperty("path", "workspace/file-" + next + ".json");
+        String path = "workspace/file-" + next + ".json";
+        payload.addProperty("name", path);
+        payload.addProperty("path", path);
         payload.addProperty("type", "manual");
         payload.addProperty("switchToNew", true);
         boolean hasSelection = ClientSelectionManager.getPos1() != null && ClientSelectionManager.getPos2() != null;
-        sendSessionAction(hasSelection ? "workspace_file_create_from_selection" : "workspace_file_create", payload.toString());
+        payload.addProperty("from_selection", hasSelection);
         activeContextTab = ContextTab.SCRIPT;
         contextLoadedDocId = "";
         workspaceRenameMode = false;
         workspaceRenameDraft = "";
+        clearContextDiffView();
         setContextStatus(P2SI18n.tr(hasSelection
                 ? "screen.p2s.chat.context.status.creating_from_selection"
                 : "screen.p2s.chat.context.status.creating_empty"), 0xAAAAAA);
         createWidgets();
+        ClientToolBridge.call("create_workspace_file", payload)
+                .thenAccept(result -> {
+                    Minecraft mc = this.minecraft;
+                    if (mc != null) {
+                        mc.execute(() -> {
+                            if (!isToolOk(result)) {
+                                setContextStatus(resolveToolError(result, "screen.p2s.chat.context.status.workspace_create_failed"), 0xFF5555);
+                                return;
+                            }
+                            String createdPath = P2SI18n.getString(result, "path");
+                            ClientSessionState.setSelectedWorkspacePath(createdPath);
+                            ClientSessionState.setWorkspaceFileScriptJson(createdPath, "{\n}\n");
+                            setContextJsonText("{\n}\n");
+                            contextLoadedDocId = createdPath == null ? "" : createdPath;
+                            setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.workspace_created", createdPath), 0x55FF55);
+                            createWidgets();
+                        });
+                    }
+                })
+                .exceptionally(ex -> {
+                    Minecraft mc = this.minecraft;
+                    if (mc != null) {
+                        mc.execute(() -> setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.workspace_create_failed", shortError(ex.getMessage())), 0xFF5555));
+                    }
+                    return null;
+                });
+    }
+
+    private void saveWorkspaceDoc() {
+        if (contextDiffMode) {
+            setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.diff_read_only"), 0xFFAA55);
+            return;
+        }
+        String selectedWorkspacePath = ClientSessionState.getSelectedWorkspacePath();
+        if (selectedWorkspacePath == null || selectedWorkspacePath.isBlank()) {
+            setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.no_workspace_selected"), 0xFFAA55);
+            return;
+        }
+        JsonObject args = new JsonObject();
+        args.addProperty("path", selectedWorkspacePath);
+        args.addProperty("script_json", contextLinesToText());
+        setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.saving_workspace"), 0xAAAAAA);
+        ClientToolBridge.call("save_workspace_file", args)
+                .thenAccept(result -> {
+                    Minecraft mc = this.minecraft;
+                    if (mc != null) {
+                        mc.execute(() -> {
+                            if (!isToolOk(result)) {
+                                setContextStatus(resolveToolError(result, "screen.p2s.chat.context.status.workspace_save_failed"), 0xFF5555);
+                                return;
+                            }
+                            String json = contextLinesToText();
+                            ClientSessionState.setWorkspaceFileScriptJson(selectedWorkspacePath, json);
+                            contextLoadedDocId = selectedWorkspacePath;
+                            setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.workspace_saved", selectedWorkspacePath), 0x55FF55);
+                        });
+                    }
+                })
+                .exceptionally(ex -> {
+                    Minecraft mc = this.minecraft;
+                    if (mc != null) {
+                        mc.execute(() -> setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.workspace_save_failed", shortError(ex.getMessage())), 0xFF5555));
+                    }
+                    return null;
+                });
     }
 
     private void switchWorkspaceDoc(String pathValue) {
+        openWorkspaceDoc(pathValue, false);
+    }
+
+    private void openWorkspaceDoc(String pathValue, boolean preservePendingJump) {
         if (pathValue == null || pathValue.isBlank()) {
             return;
+        }
+        if (!preservePendingJump) {
+            pendingWorkspaceJumpPath = "";
         }
         if (!ClientSessionState.setSelectedWorkspacePath(pathValue)) {
             return;
@@ -529,6 +689,67 @@ public class P2SChatScreen extends Screen {
         return args;
     }
 
+    private void pruneCollapsedWorkspaceFolders() {
+        Set<String> validFolders = collectWorkspaceFolderPaths();
+        collapsedWorkspaceFolders.retainAll(validFolders);
+    }
+
+    private Set<String> collectWorkspaceFolderPaths() {
+        Set<String> folders = new LinkedHashSet<>();
+        for (ClientSessionState.WorkspaceFileInfo file : ClientSessionState.getWorkspaceFiles()) {
+            if (file == null || file.path() == null || file.path().isBlank()) {
+                continue;
+            }
+            String normalized = normalizeWorkspaceFolderPath(file.path());
+            int slash = normalized.indexOf('/');
+            while (slash >= 0) {
+                folders.add(normalized.substring(0, slash));
+                slash = normalized.indexOf('/', slash + 1);
+            }
+        }
+        return folders;
+    }
+
+    private void syncWorkspaceSelectionExpansion() {
+        String selectedPath = normalizeWorkspaceFolderPath(ClientSessionState.getSelectedWorkspacePath());
+        if (selectedPath.equals(workspaceExpandedSelectionPath)) {
+            return;
+        }
+        expandWorkspaceAncestors(selectedPath);
+        workspaceExpandedSelectionPath = selectedPath;
+    }
+
+    private void expandWorkspaceAncestors(String workspacePath) {
+        String normalized = normalizeWorkspaceFolderPath(workspacePath);
+        int slash = normalized.lastIndexOf('/');
+        while (slash > 0) {
+            collapsedWorkspaceFolders.remove(normalized.substring(0, slash));
+            slash = normalized.lastIndexOf('/', slash - 1);
+        }
+    }
+
+    private void toggleWorkspaceFolder(String folderPath) {
+        String normalized = normalizeWorkspaceFolderPath(folderPath);
+        if (normalized.isBlank()) {
+            return;
+        }
+        if (!collapsedWorkspaceFolders.add(normalized)) {
+            collapsedWorkspaceFolders.remove(normalized);
+        }
+        createWidgets();
+    }
+
+    private String normalizeWorkspaceFolderPath(String value) {
+        String normalized = value == null ? "" : value.trim().replace('\\', '/');
+        while (normalized.startsWith("/")) {
+            normalized = normalized.substring(1);
+        }
+        while (normalized.endsWith("/")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        return normalized.replaceAll("/{2,}", "/");
+    }
+
     private void syncActiveDocScriptIfNeeded() {
         if (activeContextTab != ContextTab.SCRIPT || contextDiffMode) {
             return;
@@ -551,6 +772,111 @@ public class P2SChatScreen extends Screen {
         }
         setContextJsonText(script);
         contextLoadedDocId = selectedWorkspacePath;
+    }
+
+    private ClientSessionState.WorkspaceFileInfo selectedWorkspaceFile() {
+        String selectedWorkspacePath = ClientSessionState.getSelectedWorkspacePath();
+        if (selectedWorkspacePath == null || selectedWorkspacePath.isBlank()) {
+            return null;
+        }
+        for (ClientSessionState.WorkspaceFileInfo file : ClientSessionState.getWorkspaceFiles()) {
+            if (file != null && selectedWorkspacePath.equals(file.path())) {
+                return file;
+            }
+        }
+        return null;
+    }
+
+    private boolean selectedWorkspaceHasPendingPatch() {
+        ClientSessionState.WorkspaceFileInfo file = selectedWorkspaceFile();
+        return file != null && file.hasPendingPatch();
+    }
+
+    private String selectedWorkspacePendingSignature() {
+        ClientSessionState.WorkspaceFileInfo file = selectedWorkspaceFile();
+        if (file == null || !file.hasPendingPatch()) {
+            return "";
+        }
+        String summary = file.path().equals(ClientSessionState.getPendingPath()) ? ClientSessionState.getPendingSummary() : "";
+        return file.path() + "|" + file.revision() + "|" + file.pendingChangedBlocks() + "|" + summary;
+    }
+
+    private boolean canActOnSelectedPendingPatch() {
+        String selectedWorkspacePath = ClientSessionState.getSelectedWorkspacePath();
+        String pendingPath = ClientSessionState.getPendingPath();
+        return ClientSessionState.hasPendingPatch()
+                && selectedWorkspacePath != null
+                && !selectedWorkspacePath.isBlank()
+                && selectedWorkspacePath.equals(pendingPath);
+    }
+
+    private void syncInlineDiffIfNeeded() {
+        if (activeContextTab != ContextTab.SCRIPT) {
+            return;
+        }
+        String selectedWorkspacePath = ClientSessionState.getSelectedWorkspacePath();
+        if (selectedWorkspacePath == null || selectedWorkspacePath.isBlank()) {
+            if (contextDiffMode) {
+                clearContextDiffView();
+            }
+            return;
+        }
+        String pendingSignature = selectedWorkspacePendingSignature();
+        if (!pendingSignature.isBlank()) {
+            if ((!contextDiffMode || !pendingSignature.equals(contextDiffLoadedSignature)) && !contextDiffLoading) {
+                loadWorkspaceDiff();
+            }
+            return;
+        }
+        if (contextDiffMode) {
+            clearContextDiffView();
+        }
+    }
+
+    private void queueNextPendingWorkspaceJump() {
+        if (!canActOnSelectedPendingPatch()) {
+            pendingWorkspaceJumpPath = "";
+            return;
+        }
+        String currentPath = ClientSessionState.getPendingPath();
+        List<ClientSessionState.WorkspaceFileInfo> files = ClientSessionState.getWorkspaceFiles();
+        if (files.isEmpty()) {
+            pendingWorkspaceJumpPath = "";
+            return;
+        }
+        int startIndex = -1;
+        for (int i = 0; i < files.size(); i++) {
+            ClientSessionState.WorkspaceFileInfo file = files.get(i);
+            if (file != null && currentPath.equals(file.path())) {
+                startIndex = i;
+                break;
+            }
+        }
+        String nextPath = "";
+        for (int offset = 1; offset <= files.size(); offset++) {
+            int index = startIndex >= 0 ? (startIndex + offset) % files.size() : offset - 1;
+            ClientSessionState.WorkspaceFileInfo file = files.get(index);
+            if (file != null && file.hasPendingPatch() && !currentPath.equals(file.path())) {
+                nextPath = file.path();
+                break;
+            }
+        }
+        pendingWorkspaceJumpPath = nextPath;
+    }
+
+    private void processPendingWorkspaceJumpIfReady() {
+        if (pendingWorkspaceJumpPath == null || pendingWorkspaceJumpPath.isBlank()) {
+            return;
+        }
+        ClientSessionState.WorkspaceFileInfo selected = selectedWorkspaceFile();
+        if (selected != null && selected.hasPendingPatch()) {
+            return;
+        }
+        String targetPath = pendingWorkspaceJumpPath;
+        pendingWorkspaceJumpPath = "";
+        if (!targetPath.isBlank()) {
+            openWorkspaceDoc(targetPath, true);
+        }
     }
 
     private void refreshWorkspaceExplorerIfNeeded() {
@@ -719,6 +1045,16 @@ public class P2SChatScreen extends Screen {
 
 
     private void loadWorkspaceDiff() {
+        String selectedWorkspacePath = ClientSessionState.getSelectedWorkspacePath();
+        if (selectedWorkspacePath == null || selectedWorkspacePath.isBlank()) {
+            return;
+        }
+        if (contextDiffLoading) {
+            return;
+        }
+        String diffSignature = selectedWorkspacePendingSignature();
+        contextDiffLoading = true;
+        contextDiffLoadedPath = selectedWorkspacePath;
         setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.loading_diff"), 0xAAAAAA);
 
         JsonObject committedArgs = workspaceReadArgs(true);
@@ -734,6 +1070,16 @@ public class P2SChatScreen extends Screen {
                     Minecraft mc = this.minecraft;
                     if (mc != null) {
                         mc.execute(() -> {
+                            contextDiffLoading = false;
+                            if (!selectedWorkspacePath.equals(ClientSessionState.getSelectedWorkspacePath())) {
+                                if (selectedWorkspacePath.equals(contextDiffLoadedPath)) {
+                                    contextDiffLoadedPath = "";
+                                    contextDiffLoadedSignature = "";
+                                }
+                                return;
+                            }
+                            contextDiffLoadedPath = selectedWorkspacePath;
+                            contextDiffLoadedSignature = diffSignature;
                             applyContextDiffView(diff);
                         });
                     }
@@ -741,7 +1087,14 @@ public class P2SChatScreen extends Screen {
                 .exceptionally(ex -> {
                     Minecraft mc = this.minecraft;
                     if (mc != null) {
-                        mc.execute(() -> setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.diff_failed", shortError(ex.getMessage())), 0xFF5555));
+                        mc.execute(() -> {
+                            contextDiffLoading = false;
+                            if (selectedWorkspacePath.equals(contextDiffLoadedPath)) {
+                                contextDiffLoadedPath = "";
+                                contextDiffLoadedSignature = "";
+                            }
+                            setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.diff_failed", shortError(ex.getMessage())), 0xFF5555);
+                        });
                     }
                     return null;
                 });
@@ -896,6 +1249,9 @@ public class P2SChatScreen extends Screen {
     private void clearContextDiffView() {
         exitDiffViewMode();
         clearDiffData();
+        contextDiffLoading = false;
+        contextDiffLoadedPath = "";
+        contextDiffLoadedSignature = "";
     }
 
     private void exitDiffViewMode() {
@@ -1618,6 +1974,41 @@ public class P2SChatScreen extends Screen {
         return text.length() <= 80 ? text : text.substring(0, 77) + "...";
     }
 
+    private static boolean isToolOk(JsonObject result) {
+        if (result == null || !result.has("ok")) {
+            return false;
+        }
+        try {
+            return result.get("ok").getAsBoolean();
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private Component resolveToolError(JsonObject result, String fallbackKey) {
+        if (result == null) {
+            return P2SI18n.tr(fallbackKey, P2SI18n.tr("screen.p2s.common.unknown"));
+        }
+        if (result.has("error_key") || result.has("error")) {
+            Component detail = P2SI18n.resolvePayload(result, "error_key", "error_args", "error");
+            return P2SI18n.tr(fallbackKey, detail.getString());
+        }
+        return P2SI18n.tr(fallbackKey, P2SI18n.tr("screen.p2s.common.unknown").getString());
+    }
+
+    private void syncCheckpointNameDraftFromSelection() {
+        ClientSessionState.CheckpointInfo selected = ClientSessionState.getSelectedCheckpoint();
+        String selectedId = selected == null || selected.id() == null ? "" : selected.id().trim();
+        if (selectedId.equals(checkpointNameSourceId)) {
+            return;
+        }
+        checkpointNameSourceId = selectedId;
+        checkpointNameDraft = selected == null || selected.label() == null ? "" : selected.label();
+        if (checkpointNameInput != null) {
+            checkpointNameInput.setValue(checkpointNameDraft);
+        }
+    }
+
     private void setContextStatus(Component text, int color) {
         contextStatus = text == null ? Component.empty() : text;
         contextStatusColor = color;
@@ -1677,7 +2068,7 @@ public class P2SChatScreen extends Screen {
     }
 
     private void refreshContextDiffControls() {
-        boolean hasChanges = activeContextTab == ContextTab.DIFF && contextDiffMode && !contextDiffChangeRows.isEmpty();
+        boolean hasChanges = contextDiffMode && !contextDiffChangeRows.isEmpty();
         if (contextDiffPrevButton != null) {
             contextDiffPrevButton.active = hasChanges;
         }
@@ -1961,6 +2352,15 @@ public class P2SChatScreen extends Screen {
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        if (button == 0 && isInsideSessionSplitter(mouseX, mouseY)) {
+            draggingSessionSplitter = true;
+            return true;
+        }
+        if (button == 0 && isInsideExplorerSplitter(mouseX, mouseY)) {
+            draggingExplorerSplitter = true;
+            return true;
+        }
+
         // Handle info overlay clicks
         if (button == 0 && infoOverlayVisible) {
             int panelWidth = getPanelWidth();
@@ -2038,6 +2438,16 @@ public class P2SChatScreen extends Screen {
 
     @Override
     public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
+        if (button == 0 && draggingSessionSplitter) {
+            updateSessionWidthFromMouse(mouseX);
+            createWidgets();
+            return true;
+        }
+        if (button == 0 && draggingExplorerSplitter) {
+            updateExplorerWidthFromMouse(mouseX);
+            createWidgets();
+            return true;
+        }
         if (contextDiffMode) {
             return super.mouseDragged(mouseX, mouseY, button, dragX, dragY);
         }
@@ -2052,6 +2462,12 @@ public class P2SChatScreen extends Screen {
     @Override
     public boolean mouseReleased(double mouseX, double mouseY, int button) {
         if (button == 0) {
+            boolean releasedSplitter = draggingSessionSplitter || draggingExplorerSplitter;
+            draggingSessionSplitter = false;
+            draggingExplorerSplitter = false;
+            if (releasedSplitter) {
+                return true;
+            }
             if (contextMouseSelecting && hasContextSelection() && !contextDiffMode) {
                 showContextSelectionConfirm(mouseX, mouseY);
             }
@@ -2091,6 +2507,10 @@ public class P2SChatScreen extends Screen {
             return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
         }
 
+        if (sessionPanelCollapsed) {
+            return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
+        }
+
         int maxScroll = getMaxScroll();
         if (maxScroll <= 0) {
             return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
@@ -2103,6 +2523,7 @@ public class P2SChatScreen extends Screen {
     @Override
     public void render(GuiGraphics gfx, int mouseX, int mouseY, float delta) {
         refreshChoiceButtons();
+        syncCheckpointNameDraftFromSelection();
         if (checkpointModeButton != null) { checkpointModeButton.setMessage(Component.literal(modeLabel())); }
         if (workspaceRenameMode) {
             String selectedWorkspacePath = ClientSessionState.getSelectedWorkspacePath();
@@ -2110,15 +2531,19 @@ public class P2SChatScreen extends Screen {
                 exitWorkspaceRenameMode();
             }
         }
+        processPendingWorkspaceJumpIfReady();
+        syncInlineDiffIfNeeded();
         if (discardReasonMode && !ClientSessionState.hasPendingPatch()) {
             exitDiscardReasonMode();
         }
-        if (applyButton != null) {
-            boolean pending = ClientSessionState.hasPendingPatch();
-            applyButton.active = pending && !discardReasonMode;
-            applyButton.visible = !discardReasonMode;
-            discardButton.active = pending && !discardReasonMode;
-            discardButton.visible = !discardReasonMode;
+        boolean selectedPending = canActOnSelectedPendingPatch();
+        if (contextApplyButton != null) {
+            contextApplyButton.active = selectedPending && !discardReasonMode;
+            contextApplyButton.visible = !discardReasonMode;
+        }
+        if (contextDiscardButton != null) {
+            contextDiscardButton.active = selectedPending && !discardReasonMode;
+            contextDiscardButton.visible = !discardReasonMode;
         }
         if (discardReasonInput != null) {
             discardReasonInput.visible = discardReasonMode;
@@ -2130,6 +2555,38 @@ public class P2SChatScreen extends Screen {
             undoButton.active = active;
             redoButton.active = active;
         }
+        boolean sessionActive = ClientSessionState.isActive();
+        boolean hasCheckpoint = ClientSessionState.getSelectedCheckpoint() != null;
+        if (checkpointCreateButton != null) {
+            checkpointCreateButton.active = sessionActive;
+        }
+        if (checkpointPrevButton != null) {
+            checkpointPrevButton.active = sessionActive && !ClientSessionState.getCheckpoints().isEmpty();
+        }
+        if (checkpointNextButton != null) {
+            checkpointNextButton.active = sessionActive && !ClientSessionState.getCheckpoints().isEmpty();
+        }
+        if (checkpointRollbackButton != null) {
+            checkpointRollbackButton.active = sessionActive && hasCheckpoint;
+        }
+        if (checkpointModeButton != null) {
+            checkpointModeButton.active = sessionActive && hasCheckpoint;
+        }
+        if (checkpointRenameButton != null) {
+            String checkpointName = checkpointNameInput == null ? checkpointNameDraft : checkpointNameInput.getValue();
+            checkpointRenameButton.active = sessionActive && hasCheckpoint && checkpointName != null && !checkpointName.trim().isEmpty();
+        }
+        boolean contextReadOnly = contextDiffMode || contextDiffLoading || selectedWorkspaceHasPendingPatch();
+        if (contextSaveButton != null) {
+            String selectedWorkspacePath = ClientSessionState.getSelectedWorkspacePath();
+            contextSaveButton.active = !contextReadOnly && selectedWorkspacePath != null && !selectedWorkspacePath.isBlank();
+        }
+        if (contextFormatButton != null) {
+            contextFormatButton.active = !contextReadOnly;
+        }
+        if (contextClearJsonButton != null) {
+            contextClearJsonButton.active = !contextReadOnly;
+        }
         refreshContextDiffControls();
         refreshWorkspaceExplorerIfNeeded();
         syncActiveDocScriptIfNeeded();
@@ -2138,18 +2595,24 @@ public class P2SChatScreen extends Screen {
         int panelX = getPanelX(panelWidth);
         drawContextPanel(gfx, panelX);
 
-        int panelLeft = panelX;
-        int panelRight = this.width;
-        int panelTop = 0;
-        int panelBottom = this.height;
-        gfx.fill(panelLeft, panelTop, panelRight, panelBottom, 0xAA000000);
+        if (!sessionPanelCollapsed) {
+            int panelLeft = panelX;
+            int panelRight = this.width;
+            int panelTop = 0;
+            int panelBottom = this.height;
+            gfx.fill(panelLeft, panelTop, panelRight, panelBottom, 0xAA000000);
 
-        drawHeader(gfx, panelX, panelWidth);
-        if (!infoOverlayVisible) {
-            drawMessages(gfx, panelX, panelWidth);
+            drawHeader(gfx, panelX, panelWidth);
+            if (!infoOverlayVisible) {
+                drawMessages(gfx, panelX, panelWidth);
+            }
+            drawInfoOverlay(gfx, panelX, panelWidth);
+            drawStatus(gfx, panelX);
+        } else {
+            drawCollapsedSessionRail(gfx, panelX, panelWidth);
         }
-        drawInfoOverlay(gfx, panelX, panelWidth);
-        drawStatus(gfx, panelX);
+
+        drawDockChrome(gfx, panelX);
 
         // Update info button label
         if (infoButton != null) {
@@ -2177,22 +2640,11 @@ public class P2SChatScreen extends Screen {
         }
         gfx.fill(0, 0, panelX, this.height, 0xC0141A26);
         gfx.fill(panelX - 1, 0, panelX, this.height, 0xFF2F3A4D);
+        if (explorerPanelCollapsed) {
+            drawCollapsedExplorerRail(gfx);
+        }
 
         int x = PADDING;
-        int y = PADDING;
-        gfx.drawString(this.font, P2SI18n.tr("screen.p2s.chat.context.workspace_files"), x, y, 0xE8F0FF, true);
-        y += this.font.lineHeight + 2;
-        String docName = ClientSessionState.getSelectedWorkspaceLabel();
-        if (docName == null || docName.isBlank()) {
-            docName = "workspace/main.json";
-        }
-        String modeHint = switch (activeContextTab) {
-            case STATE -> P2SI18n.tr("screen.p2s.chat.context.mode.state").getString();
-            case SCRIPT -> P2SI18n.tr("screen.p2s.chat.context.mode.script", docName).getString();
-            case DIFF -> P2SI18n.tr("screen.p2s.chat.context.mode.diff", docName).getString();
-        };
-        gfx.drawString(this.font, modeHint, x, y, 0x9CAECC, false);
-
         drawContextEditor(gfx);
 
         int infoY = contextQueueTopY;
@@ -2227,6 +2679,28 @@ public class P2SChatScreen extends Screen {
         }
 
         drawContextSelectionConfirm(gfx);
+    }
+
+    private void drawCollapsedExplorerRail(GuiGraphics gfx) {
+        int right = Math.max(DOCK_COLLAPSED_WIDTH, currentExplorerSplitterX);
+        gfx.fill(0, 0, right, this.height, 0xA60E141E);
+        gfx.fill(right - 1, 0, right, this.height, 0xFF4C5D78);
+    }
+
+    private void drawCollapsedSessionRail(GuiGraphics gfx, int panelX, int panelWidth) {
+        int left = panelX;
+        int right = panelX + panelWidth;
+        gfx.fill(left, 0, right, this.height, 0xB0121822);
+        gfx.fill(left, 0, left + 1, this.height, 0xFF4C5D78);
+    }
+
+    private void drawDockChrome(GuiGraphics gfx, int panelX) {
+        int splitterColor = 0xFF2F3A4D;
+        int activeColor = 0xFF5A6E91;
+        int explorerColor = (explorerPanelCollapsed || draggingExplorerSplitter) ? activeColor : splitterColor;
+        int sessionColor = (sessionPanelCollapsed || draggingSessionSplitter) ? activeColor : splitterColor;
+        gfx.fill(currentExplorerSplitterX - 1, 0, currentExplorerSplitterX + 1, this.height, explorerColor);
+        gfx.fill(panelX - 1, 0, panelX + 1, this.height, sessionColor);
     }
 
     private void drawContextEditor(GuiGraphics gfx) {
@@ -2450,44 +2924,13 @@ public class P2SChatScreen extends Screen {
         if (workspaceRenameInput != null) {
             boxes.add(workspaceRenameInput);
         }
+        if (checkpointNameInput != null) {
+            boxes.add(checkpointNameInput);
+        }
         return boxes;
     }
 
     private void drawHeader(GuiGraphics gfx, int panelX, int panelWidth) {
-        int y = PADDING;
-        gfx.drawString(this.font, P2SI18n.tr("screen.p2s.chat.title"), panelX + PADDING, y, 0xFFFFFF, true);
-        y += this.font.lineHeight + 2;
-
-        String projectName = ClientSessionState.getProjectName();
-        if (projectName != null && !projectName.isBlank()) {
-            gfx.drawString(this.font, P2SI18n.tr("screen.p2s.chat.project", projectName), panelX + PADDING, y, 0xCFE1FF, true);
-            y += this.font.lineHeight + 2;
-        }
-        if (ClientSessionState.isActive()) {
-            String info = P2SI18n.tr("screen.p2s.chat.session_info", ClientSessionState.getSessionId(), ClientSessionState.getTurnCount()).getString();
-            gfx.drawString(this.font, info, panelX + PADDING, y, 0xAAAAAA, true);
-            y += this.font.lineHeight + 2;
-
-            String regionInfo;
-            if (ClientSessionState.hasSize()) {
-                regionInfo = P2SI18n.tr("screen.p2s.chat.region_with_size",
-                        ClientSessionState.getOriginX(), ClientSessionState.getOriginY(), ClientSessionState.getOriginZ(),
-                        ClientSessionState.getSizeX(), ClientSessionState.getSizeY(), ClientSessionState.getSizeZ()).getString();
-            } else {
-                regionInfo = P2SI18n.tr("screen.p2s.chat.region_without_bounds",
-                        ClientSessionState.getOriginX(), ClientSessionState.getOriginY(), ClientSessionState.getOriginZ()).getString();
-            }
-            gfx.drawString(this.font, regionInfo, panelX + PADDING, y, 0xFFCC66, true);
-            y += this.font.lineHeight + 2;
-
-            String runtime = ClientSessionState.getRuntimeState();
-            String revision = ClientSessionState.getRevision();
-            if (runtime != null && !runtime.isBlank()) {
-                gfx.drawString(this.font, P2SI18n.tr("screen.p2s.chat.state", P2SI18n.statusComponent(runtime), revision), panelX + PADDING, y, 0x9999FF, true);
-            }
-        } else {
-            gfx.drawString(this.font, P2SI18n.tr("screen.p2s.chat.no_active_session"), panelX + PADDING, y, 0xAAAAAA, true);
-        }
     }
 
     private int countInfoSections(int contentWidth) {
@@ -2701,7 +3144,7 @@ public class P2SChatScreen extends Screen {
     }
 
     private int getPanelWidth() {
-        return Math.max(PANEL_MIN_WIDTH, this.width * 2 / 5);
+        return getSessionVisibleWidth();
     }
 
     private int getPanelX(int panelWidth) {
@@ -2709,10 +3152,34 @@ public class P2SChatScreen extends Screen {
     }
 
     private int getHeaderHeight(int panelWidth) {
-        int base = this.font.lineHeight * 5 + 12;
-        base += TOP_BUTTON_HEIGHT + 6;
-        base += TOP_BUTTON_HEIGHT + 2;
-        return base;
+        int maxBottom = PADDING + TOP_BUTTON_HEIGHT;
+        maxBottom = Math.max(maxBottom, getVisibleWidgetBottom(configButton));
+        maxBottom = Math.max(maxBottom, getVisibleWidgetBottom(infoButton));
+        maxBottom = Math.max(maxBottom, getVisibleWidgetBottom(applyButton));
+        maxBottom = Math.max(maxBottom, getVisibleWidgetBottom(discardButton));
+        maxBottom = Math.max(maxBottom, getVisibleWidgetBottom(undoButton));
+        maxBottom = Math.max(maxBottom, getVisibleWidgetBottom(redoButton));
+        maxBottom = Math.max(maxBottom, getVisibleWidgetBottom(checkpointCreateButton));
+        maxBottom = Math.max(maxBottom, getVisibleWidgetBottom(checkpointPrevButton));
+        maxBottom = Math.max(maxBottom, getVisibleWidgetBottom(checkpointNextButton));
+        maxBottom = Math.max(maxBottom, getVisibleWidgetBottom(checkpointRollbackButton));
+        maxBottom = Math.max(maxBottom, getVisibleWidgetBottom(checkpointModeButton));
+        maxBottom = Math.max(maxBottom, getVisibleWidgetBottom(checkpointNameInput));
+        maxBottom = Math.max(maxBottom, getVisibleWidgetBottom(checkpointRenameButton));
+        maxBottom = Math.max(maxBottom, getVisibleWidgetBottom(discardReasonInput));
+        maxBottom = Math.max(maxBottom, getVisibleWidgetBottom(discardOkButton));
+        maxBottom = Math.max(maxBottom, getVisibleWidgetBottom(discardCancelButton));
+        for (Button choiceButton : choiceButtons) {
+            maxBottom = Math.max(maxBottom, getVisibleWidgetBottom(choiceButton));
+        }
+        return Math.max(TOP_BUTTON_HEIGHT * 3 + 8, maxBottom - PADDING + 6);
+    }
+
+    private int getVisibleWidgetBottom(AbstractWidget widget) {
+        if (widget == null || !widget.visible) {
+            return 0;
+        }
+        return widget.getY() + widget.getHeight();
     }
 
     private int getInputY() {
@@ -2846,8 +3313,24 @@ public class P2SChatScreen extends Screen {
 
     private void createCheckpoint() {
         JsonObject payload = new JsonObject();
-        payload.addProperty("label", "manual-" + ClientSessionState.getTurnCount());
+        String label = checkpointNameInput != null ? checkpointNameInput.getValue().trim() : checkpointNameDraft.trim();
+        payload.addProperty("label", label.isEmpty() ? "manual-" + ClientSessionState.getTurnCount() : label);
         sendSessionAction("create_checkpoint", payload.toString());
+    }
+
+    private void renameSelectedCheckpoint() {
+        ClientSessionState.CheckpointInfo checkpoint = ClientSessionState.getSelectedCheckpoint();
+        if (checkpoint == null || checkpoint.id() == null || checkpoint.id().isBlank()) {
+            return;
+        }
+        String label = checkpointNameInput != null ? checkpointNameInput.getValue().trim() : checkpointNameDraft.trim();
+        if (label.isEmpty()) {
+            return;
+        }
+        JsonObject payload = new JsonObject();
+        payload.addProperty("checkpoint_id", checkpoint.id());
+        payload.addProperty("label", label);
+        sendSessionAction("rename_checkpoint", payload.toString());
     }
 
     private void enterWorkspaceRenameMode() {
@@ -3010,8 +3493,14 @@ public class P2SChatScreen extends Screen {
 
     private void confirmDiscard() {
         String reason = discardReasonInput != null ? discardReasonInput.getValue() : "";
+        queueNextPendingWorkspaceJump();
         exitDiscardReasonMode();
         ClientAgentManager.submitPatchDiscard(reason);
+    }
+
+    private void applySelectedPendingPatch() {
+        queueNextPendingWorkspaceJump();
+        ClientAgentManager.submitPatchApply();
     }
 
     private void sendMessage() {

@@ -1,4 +1,9 @@
-package com.p2s;
+package com.p2s.screen;
+
+import com.p2s.ClientAgentManager;
+import com.p2s.ClientSelectionManager;
+import com.p2s.ClientToolBridge;
+import com.p2s.P2SI18n;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -31,6 +36,8 @@ public class P2SProjectListScreen extends Screen {
     private EditBox nameInput;
     private EditBox descriptionInput;
     private Button createButton;
+    private Button renameButton;
+    private String selectedProjectId = "";
     private int scroll = 0;
     private int visibleRows = MAX_VISIBLE_ROWS;
     private boolean loading = false;
@@ -77,10 +84,9 @@ public class P2SProjectListScreen extends Screen {
             int rowY = listTop + i * (ROW_HEIGHT + 2);
             final int row = i;
 
-            Button rowBtn = Button.builder(Component.empty(), btn -> {})
+            Button rowBtn = Button.builder(Component.empty(), btn -> selectProject(row))
                     .bounds(left, rowY, listWidth, ROW_HEIGHT)
                     .build();
-            rowBtn.active = false;
             rowButtons.add(rowBtn);
             addRenderableWidget(rowBtn);
 
@@ -110,8 +116,11 @@ public class P2SProjectListScreen extends Screen {
         createButton = addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.projects.create"), btn -> createProject())
                 .bounds(left + 124, bottomY, 100, 20).build());
 
+        renameButton = addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.common.rename"), btn -> renameProject())
+                .bounds(left + 230, bottomY, 80, 20).build());
+
         addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.common.refresh"), btn -> loadProjects())
-                .bounds(left + 230, bottomY, 60, 20).build());
+                .bounds(left + 316, bottomY, 60, 20).build());
 
         addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.common.back"), btn -> onClose())
                 .bounds(left + panelWidth - 60, bottomY, 60, 20).build());
@@ -175,6 +184,17 @@ public class P2SProjectListScreen extends Screen {
                             projects = loaded;
                             loading = false;
                             scroll = Math.min(scroll, maxScroll());
+                            ProjectEntry selected = findSelectedProject();
+                            if (selected == null) {
+                                selectedProjectId = "";
+                            } else {
+                                if (nameInput != null) {
+                                    nameInput.setValue(selected.name());
+                                }
+                                if (descriptionInput != null) {
+                                    descriptionInput.setValue(selected.description());
+                                }
+                            }
                             statusText = result.has("warning_key") || result.has("warning")
                                     ? P2SI18n.resolvePayload(result, "warning_key", "warning_args", "warning")
                                     : Component.empty();
@@ -195,6 +215,111 @@ public class P2SProjectListScreen extends Screen {
                     }
                     return null;
                 });
+    }
+
+    private void selectProject(int row) {
+        int idx = scroll + row;
+        if (idx < 0 || idx >= projects.size()) {
+            return;
+        }
+        ProjectEntry entry = projects.get(idx);
+        selectedProjectId = entry.id();
+        if (nameInput != null) {
+            nameInput.setValue(entry.name());
+            nameInput.setFocused(true);
+        }
+        if (descriptionInput != null) {
+            descriptionInput.setValue(entry.description());
+        }
+        refreshRows();
+    }
+
+    private void renameProject() {
+        ProjectEntry entry = findSelectedProject();
+        if (entry == null) {
+            return;
+        }
+        JsonObject args = new JsonObject();
+        args.addProperty("id", entry.id());
+        args.addProperty("name", nameInput == null ? "" : nameInput.getValue().trim());
+        args.addProperty("description", descriptionInput == null ? "" : descriptionInput.getValue().trim());
+
+        loading = true;
+        statusText = P2SI18n.tr("screen.p2s.projects.status.renaming", entry.name());
+        statusColor = 0xAAAAAA;
+        refreshRows();
+
+        ClientToolBridge.call("rename_project", args)
+                .thenAccept(result -> {
+                    Minecraft mc = this.minecraft;
+                    if (mc != null) {
+                        mc.execute(() -> {
+                            loading = false;
+                            if (!isToolOk(result)) {
+                                statusText = resolveToolError(result, "screen.p2s.projects.status.rename_failed");
+                                statusColor = 0xFF5555;
+                                refreshRows();
+                                return;
+                            }
+                            String updatedName = getString(result, "name");
+                            String updatedDescription = getString(result, "description");
+                            if (nameInput != null) {
+                                nameInput.setValue(updatedName);
+                            }
+                            if (descriptionInput != null) {
+                                descriptionInput.setValue(updatedDescription);
+                            }
+                            List<ProjectEntry> updated = new ArrayList<>();
+                            for (ProjectEntry project : projects) {
+                                if (project != null && project.id().equals(entry.id())) {
+                                    updated.add(new ProjectEntry(
+                                            project.id(),
+                                            updatedName,
+                                            updatedDescription,
+                                            System.currentTimeMillis(),
+                                            project.workspaceCount(),
+                                            project.originX(),
+                                            project.originY(),
+                                            project.originZ(),
+                                            project.sizeX(),
+                                            project.sizeY(),
+                                            project.sizeZ()
+                                    ));
+                                } else {
+                                    updated.add(project);
+                                }
+                            }
+                            projects = updated;
+                            statusText = P2SI18n.tr("screen.p2s.projects.status.renamed", updatedName);
+                            statusColor = 0x55FF55;
+                            refreshRows();
+                        });
+                    }
+                })
+                .exceptionally(ex -> {
+                    Minecraft mc = this.minecraft;
+                    if (mc != null) {
+                        mc.execute(() -> {
+                            loading = false;
+                            statusText = P2SI18n.tr("screen.p2s.projects.status.rename_failed", shortError(ex.getMessage()));
+                            statusColor = 0xFF5555;
+                            refreshRows();
+                        });
+                    }
+                    return null;
+                });
+    }
+
+    private ProjectEntry findSelectedProject() {
+        if (selectedProjectId == null || selectedProjectId.isBlank()) {
+            return null;
+        }
+        for (ProjectEntry entry : projects) {
+            if (entry != null && selectedProjectId.equals(entry.id())) {
+                return entry;
+            }
+        }
+        return null;
     }
 
     private void createProject() {
@@ -302,6 +427,9 @@ public class P2SProjectListScreen extends Screen {
         if (createButton != null) {
             createButton.active = !loading && currentSelection().complete();
         }
+        if (renameButton != null) {
+            renameButton.active = !loading && findSelectedProject() != null;
+        }
         for (int i = 0; i < visibleRows; i++) {
             int idx = scroll + i;
             Button rowBtn = rowButtons.get(i);
@@ -312,15 +440,20 @@ public class P2SProjectListScreen extends Screen {
                 if (title.length() > 28) {
                     title = title.substring(0, 25) + "...";
                 }
+                if (entry.id().equals(selectedProjectId)) {
+                    title = "▶ " + title;
+                }
                 String bbox = "@(" + entry.originX() + "," + entry.originY() + "," + entry.originZ() + ") "
                         + entry.sizeX() + "x" + entry.sizeY() + "x" + entry.sizeZ();
                 rowBtn.setMessage(P2SI18n.tr("screen.p2s.projects.row", title, entry.workspaceCount(), bbox, formatTime(entry.updatedAt())));
                 rowBtn.visible = true;
+                rowBtn.active = !loading;
                 openBtn.visible = true;
                 openBtn.active = !loading;
             } else {
                 rowBtn.setMessage(Component.empty());
                 rowBtn.visible = false;
+                rowBtn.active = false;
                 openBtn.visible = false;
                 openBtn.active = false;
             }
@@ -493,7 +626,11 @@ public class P2SProjectListScreen extends Screen {
         }
         if ((keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER)
                 && ((nameInput != null && nameInput.isFocused()) || (descriptionInput != null && descriptionInput.isFocused()))) {
-            createProject();
+            if (findSelectedProject() != null) {
+                renameProject();
+            } else {
+                createProject();
+            }
             return true;
         }
         return super.keyPressed(keyCode, scanCode, modifiers);

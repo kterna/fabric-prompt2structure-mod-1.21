@@ -1,4 +1,8 @@
-package com.p2s;
+package com.p2s.screen;
+
+import com.p2s.P2SI18n;
+import com.p2s.screen.widget.P2SMultiLineTextEditor;
+import com.p2s.store.SkillStore;
 
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;

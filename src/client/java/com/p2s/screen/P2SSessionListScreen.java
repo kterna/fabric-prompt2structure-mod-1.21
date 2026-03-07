@@ -1,4 +1,9 @@
-package com.p2s;
+package com.p2s.screen;
+
+import com.p2s.ClientAgentManager;
+import com.p2s.ClientSessionState;
+import com.p2s.P2SI18n;
+import com.p2s.store.SessionPersistence;
 
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;

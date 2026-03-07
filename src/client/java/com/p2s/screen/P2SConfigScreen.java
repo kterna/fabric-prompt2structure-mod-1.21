@@ -1,4 +1,9 @@
-package com.p2s;
+package com.p2s.screen;
+
+import com.p2s.P2SClientConfig;
+import com.p2s.P2SI18n;
+import com.p2s.screen.widget.P2SMultiLineTextEditor;
+import com.p2s.store.SkillStore;
 
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
@@ -31,8 +36,10 @@ public class P2SConfigScreen extends Screen {
     private P2SMultiLineTextEditor systemPromptEditor;
     private Button toolCallButton;
     private Button streamingButton;
+    private Button autoApplyButton;
     private boolean useToolCall;
     private boolean useStreaming;
+    private boolean autoApplyPatch;
 
     // Skills tab
     private final List<Button> skillRowButtons = new ArrayList<>();
@@ -188,6 +195,12 @@ public class P2SConfigScreen extends Screen {
             useStreaming = !useStreaming;
             btn.setMessage(streamingLabel());
         }).bounds(left + 310, y + 14, 160, 20).build());
+
+        autoApplyPatch = P2SClientConfig.getAutoApplyPatch();
+        autoApplyButton = addRenderableWidget(Button.builder(autoApplyLabel(), btn -> {
+            autoApplyPatch = !autoApplyPatch;
+            btn.setMessage(autoApplyLabel());
+        }).bounds(left + 480, y + 14, 180, 20).build());
         y += 50;
 
         int promptY = y + 14;
@@ -215,6 +228,11 @@ public class P2SConfigScreen extends Screen {
                 P2SI18n.tr(useStreaming ? "screen.p2s.common.on" : "screen.p2s.common.off"));
     }
 
+    private Component autoApplyLabel() {
+        return P2SI18n.tr("screen.p2s.config.toggle.auto_apply",
+                P2SI18n.tr(autoApplyPatch ? "screen.p2s.common.on" : "screen.p2s.common.off"));
+    }
+
     private int llmPromptHeight(int promptY) {
         int available = this.height - promptY - 60;
         if (available <= 0) {
@@ -235,6 +253,7 @@ public class P2SConfigScreen extends Screen {
                 true
         );
         P2SClientConfig.setUseStreaming(useStreaming, true);
+        P2SClientConfig.setAutoApplyPatch(autoApplyPatch, true);
         if (ok) {
             statusText = P2SI18n.tr("screen.p2s.status.saved");
             statusColor = 0x55FF55;
@@ -255,6 +274,8 @@ public class P2SConfigScreen extends Screen {
         if (toolCallButton != null) toolCallButton.setMessage(toolCallLabel());
         useStreaming = P2SClientConfig.getUseStreaming();
         if (streamingButton != null) streamingButton.setMessage(streamingLabel());
+        autoApplyPatch = P2SClientConfig.getAutoApplyPatch();
+        if (autoApplyButton != null) autoApplyButton.setMessage(autoApplyLabel());
         statusText = P2SI18n.tr("screen.p2s.status.reset_to_defaults");
         statusColor = 0x55FF55;
     }

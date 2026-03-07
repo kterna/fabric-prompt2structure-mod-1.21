@@ -144,7 +144,9 @@ public final class ClientSessionState {
             totalBlocks = 0;
             partsSummary = "";
             structureSummary = "";
-            selectedWorkspacePath = "";
+            selectedWorkspacePath = hasProjectFlag && !workspaceFiles.isEmpty() && workspaceFiles.get(0) != null
+                    ? normalizeWorkspacePath(workspaceFiles.get(0).path())
+                    : "";
             messages.clear();
         }
 
@@ -361,6 +363,51 @@ public final class ClientSessionState {
 
     public static synchronized void clearMessages() {
         messages.clear();
+    }
+
+    public static synchronized void resetAll() {
+        hasProject = false;
+        sessionActive = false;
+        sessionId = "";
+        projectId = "";
+        projectName = "";
+        projectDescription = "";
+        partCount = 0;
+        totalBlocks = 0;
+        partsSummary = "";
+        structureSummary = "";
+        status = "";
+        runtimeState = "";
+        revision = "";
+        hasPendingPatch = false;
+        pendingPath = "";
+        pendingSummary = "";
+        pendingRisk = "";
+        pendingChangedBlocks = 0;
+        previewSummary = "";
+        previewDetail = "";
+        previewRisk = "";
+        previewChangedBlocks = 0;
+        originX = 0;
+        originY = 0;
+        originZ = 0;
+        hasSize = false;
+        sizeX = 0;
+        sizeY = 0;
+        sizeZ = 0;
+        selectedWorkspacePath = "";
+        workspaceFiles.clear();
+        workspaceFileScripts.clear();
+        todoTitle = "";
+        todoItems.clear();
+        pendingChoice = null;
+        checkpoints.clear();
+        selectedCheckpointIndex = -1;
+        rollbackMode = "workspace_and_session";
+        messages.clear();
+        streamingBuffer.setLength(0);
+        streaming = false;
+        currentScriptJson = "";
     }
 
     public static synchronized List<ChatMessage> getMessages() {

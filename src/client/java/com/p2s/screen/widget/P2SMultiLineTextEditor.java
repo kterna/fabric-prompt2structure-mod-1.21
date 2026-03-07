@@ -1,4 +1,4 @@
-package com.p2s;
+package com.p2s.screen.widget;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;

@@ -77,6 +77,7 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
             case "workspace_file_rename" -> renameWorkspaceFileAction(player, payload);
             case "workspace_file_delete" -> deleteWorkspaceFileAction(player, payload);
             case "create_checkpoint" -> createCheckpoint(player, payload);
+            case "rename_checkpoint" -> renameCheckpoint(player, payload);
             case "rollback_checkpoint" -> rollbackCheckpoint(player, payload);
             case "session_select_workspace" -> selectWorkspacePath(player, payload);
             default -> player.displayClientMessage(P2SI18n.tr("message.p2s.session.unknown_action", action), false);
@@ -109,9 +110,11 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
                 case "list_projects" -> handleListProjectsTool();
                 case "create_project" -> handleCreateProjectTool(player, arguments);
                 case "open_project" -> handleOpenProjectTool(player, arguments);
+                case "rename_project" -> handleRenameProjectTool(player, arguments);
                 case "get_project_state" -> handleGetProjectState(player);
                 case "read_workspace_file" -> handleReadWorkspaceFile(player, arguments);
                 case "create_workspace_file" -> handleCreateWorkspaceFileTool(player, arguments);
+                case "save_workspace_file" -> handleSaveWorkspaceFileTool(player, arguments);
                 case "rename_workspace_file" -> handleRenameWorkspaceFileTool(player, arguments);
                 case "delete_workspace_file" -> handleDeleteWorkspaceFileTool(player, arguments);
                 case "propose_patch" -> handleProposePatchTool(player, arguments);
@@ -281,6 +284,27 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         return payload;
     }
 
+    private static JsonObject handleRenameProjectTool(ServerPlayer player, JsonElement argsElem) {
+        JsonObject args = normalizeArgsObject(argsElem);
+        String projectId = getString(args, "id");
+        if (projectId.isBlank()) {
+            return buildToolErrorKey("rename_project", "message.p2s.project.rename_requires_id");
+        }
+        ProjectPersistence.ProjectRecord project = loadProject(projectId);
+        if (project == null) {
+            return buildToolErrorKey("rename_project", "message.p2s.project.not_found", projectId);
+        }
+        project.name = getString(args, "name");
+        project.description = getString(args, "description");
+        saveProject(project);
+        JsonObject payload = buildToolSuccess("rename_project");
+        payload.addProperty("id", project.id);
+        payload.addProperty("name", project.name);
+        payload.addProperty("description", project.description);
+        payload.addProperty("workspace_count", project.workspaceFiles == null ? 0 : project.workspaceFiles.size());
+        return payload;
+    }
+
     private static JsonObject handleGetProjectState(ServerPlayer player) {
         ProjectPersistence.ProjectRecord project = currentProject(player, sessions.get(player.getUUID()));
         if (project == null) {
@@ -331,6 +355,18 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         String path = ProjectPersistence.normalizeWorkspacePath(getString(args, "path"));
         String type = ProjectPersistence.normalizeWorkspaceType(getString(args, "type"));
         String name = getString(args, "name");
+        boolean fromSelection = false;
+        boolean switchToNew = false;
+        try {
+            fromSelection = args.has("from_selection") && args.get("from_selection").isJsonPrimitive() && args.get("from_selection").getAsBoolean();
+        } catch (Exception ignored) {
+            fromSelection = false;
+        }
+        try {
+            switchToNew = args.has("switchToNew") && args.get("switchToNew").isJsonPrimitive() && args.get("switchToNew").getAsBoolean();
+        } catch (Exception ignored) {
+            switchToNew = false;
+        }
         if (path.isBlank()) {
             return buildToolErrorKey("create_workspace_file", "message.p2s.workspace.create_requires_path");
         }
@@ -346,16 +382,65 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         workspace.type = type;
         workspace.revision = "rev-0";
         workspace.metadata = new JsonObject();
+        if (fromSelection) {
+            SelectionManager.Selection selection = SelectionManager.get(player.getUUID());
+            if (selection == null || !selection.isComplete()) {
+                return buildToolErrorKey("create_workspace_file", "message.p2s.workspace.create_from_selection_requires_selection");
+            }
+            if (!isSelectionWithinProject(selection, project)) {
+                return buildToolErrorKey("create_workspace_file", "message.p2s.workspace.selection_out_of_bounds");
+            }
+            workspace.origin = ProjectPersistence.Vec3Data.of(selection.min());
+            workspace.size = ProjectPersistence.Vec3Data.of(selection.size());
+        }
         project.workspaceFiles.put(path, workspace);
         saveProject(project);
         Session session = sessions.get(player.getUUID());
-        if (session != null && (session.selectedWorkspacePath == null || session.selectedWorkspacePath.isBlank())) {
+        if (session != null && (switchToNew || session.selectedWorkspacePath == null || session.selectedWorkspacePath.isBlank())) {
             session.selectedWorkspacePath = path;
         }
         JsonObject payload = buildToolSuccess("create_workspace_file");
         payload.addProperty("path", path);
         payload.addProperty("name", workspace.name);
         payload.addProperty("type", workspace.type);
+        return payload;
+    }
+
+    private static JsonObject handleSaveWorkspaceFileTool(ServerPlayer player, JsonElement argsElem) {
+        ProjectPersistence.ProjectRecord project = currentProject(player, sessions.get(player.getUUID()));
+        if (project == null) {
+            return buildToolErrorKey("save_workspace_file", "message.p2s.project.no_current_project");
+        }
+        JsonObject args = normalizeArgsObject(argsElem);
+        String path = ProjectPersistence.normalizeWorkspacePath(getString(args, "path"));
+        String scriptJson = getString(args, "script_json");
+        if (path.isBlank()) {
+            return buildToolErrorKey("save_workspace_file", "message.p2s.workspace.save_requires_path");
+        }
+        ProjectPersistence.WorkspaceFileRecord workspace = findWorkspace(project, path);
+        if (workspace == null) {
+            return buildToolErrorKey("save_workspace_file", "message.p2s.workspace.unknown_path", path);
+        }
+        StructureBuilder.VbsScriptV2 script;
+        try {
+            script = scriptJson == null || scriptJson.isBlank() ? new StructureBuilder.VbsScriptV2() : StructureBuilder.parseV2(scriptJson);
+        } catch (Exception e) {
+            return buildToolErrorKey("save_workspace_file", "message.p2s.workspace.invalid_script_json", e.getMessage());
+        }
+        if (script == null) {
+            script = new StructureBuilder.VbsScriptV2();
+        }
+        workspace.current = script;
+        workspace.summary = partsSummary(script);
+        workspace.revision = nextRevision();
+        workspace.pendingPatch = null;
+        workspace.undoStack.clear();
+        workspace.redoStack.clear();
+        saveProject(project);
+        JsonObject payload = buildToolSuccess("save_workspace_file");
+        payload.addProperty("path", path);
+        payload.addProperty("revision", workspace.revision == null ? "" : workspace.revision);
+        payload.addProperty("summary", workspace.summary == null ? "" : workspace.summary);
         return payload;
     }
 
@@ -856,6 +941,37 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         saveProject(project);
         sendSessionSync(player, session);
         displayMessage(player, "message.p2s.checkpoint.created");
+    }
+
+    private static void renameCheckpoint(ServerPlayer player, String payload) {
+        Session session = sessions.get(player.getUUID());
+        ProjectPersistence.ProjectRecord project = currentProject(player, session);
+        if (session == null || project == null) {
+            displayMessage(player, "message.p2s.session.no_active_project");
+            return;
+        }
+        JsonObject args = parsePayloadObject(payload);
+        String path = ProjectPersistence.normalizeWorkspacePath(getString(args, "path"));
+        String checkpointId = getString(args, "checkpoint_id");
+        String label = getString(args, "label");
+        if (label.isBlank()) {
+            displayMessage(player, "message.p2s.checkpoint.rename_requires_label");
+            return;
+        }
+        ProjectPersistence.WorkspaceFileRecord workspace = resolveWorkspace(project, session, path);
+        if (workspace == null || workspace.checkpoints == null || workspace.checkpoints.isEmpty()) {
+            displayMessage(player, "message.p2s.checkpoint.none_available");
+            return;
+        }
+        ProjectPersistence.CheckpointRecord checkpoint = findCheckpoint(workspace, checkpointId);
+        if (checkpoint == null) {
+            displayMessage(player, "message.p2s.checkpoint.not_found");
+            return;
+        }
+        checkpoint.label = label.trim();
+        saveProject(project);
+        sendSessionSync(player, session);
+        displayMessage(player, "message.p2s.checkpoint.renamed", checkpoint.label);
     }
 
     private static void rollbackCheckpoint(ServerPlayer player, String payload) {
