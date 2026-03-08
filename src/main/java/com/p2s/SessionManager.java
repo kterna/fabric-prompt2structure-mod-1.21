@@ -1721,17 +1721,58 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         if (script == null || script.structures == null || script.structures.isEmpty()) {
             return "";
         }
-        StringBuilder sb = new StringBuilder();
+        final int maxLength = 768;
+        final int maxPartNameLength = 96;
+        List<String> names = new ArrayList<>();
         for (StructureBuilder.StructurePart part : script.structures) {
             if (part == null || part.name == null) {
                 continue;
             }
-            if (sb.length() > 0) {
-                sb.append(", ");
+            String name = part.name.trim();
+            if (name.isBlank()) {
+                continue;
             }
-            sb.append(part.name);
+            names.add(trimForSummary(name, maxPartNameLength));
+        }
+        if (names.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int index = 0; index < names.size(); index++) {
+            String name = names.get(index);
+            String separator = sb.length() == 0 ? "" : ", ";
+            int remaining = names.size() - index - 1;
+            String suffix = remaining > 0 ? ", ... (+" + remaining + ")" : "";
+            if (sb.length() + separator.length() + name.length() + suffix.length() > maxLength) {
+                if (sb.length() == 0) {
+                    sb.append(trimForSummary(name, Math.max(8, maxLength - suffix.length())));
+                }
+                if (remaining >= 0) {
+                    if (sb.length() + suffix.length() > maxLength) {
+                        sb.append("...");
+                    } else {
+                        sb.append(suffix);
+                    }
+                }
+                break;
+            }
+            sb.append(separator).append(name);
         }
         return sb.toString();
+    }
+
+    private static String trimForSummary(String value, int maxLength) {
+        if (value == null) {
+            return "";
+        }
+        String normalized = value.trim();
+        if (normalized.length() <= maxLength) {
+            return normalized;
+        }
+        if (maxLength <= 3) {
+            return normalized.substring(0, Math.max(0, maxLength));
+        }
+        return normalized.substring(0, maxLength - 3) + "...";
     }
 
     private static StructureBuilder.VbsScriptV2 copyScript(StructureBuilder.VbsScriptV2 script) {

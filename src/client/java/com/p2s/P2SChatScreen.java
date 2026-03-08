@@ -62,6 +62,9 @@ public class P2SChatScreen extends Screen {
     private static final int EDITOR_MIN_WIDTH = 180;
     private static final int EXPLORER_HEADER_HEIGHT = 28;
     private static final int CHAT_HEADER_META_HEIGHT = 14;
+    private static final int TOOL_LOG_PADDING_X = 6;
+    private static final int TOOL_LOG_PADDING_Y = 4;
+    private static final int TOOL_LOG_DETAIL_GAP = 4;
 
     private EditBox input;
     private Button sendButton;
@@ -92,6 +95,8 @@ public class P2SChatScreen extends Screen {
     private int choicePopupWidth = 0;
     private int choicePopupHeight = 0;
     private double scrollOffset;
+    private final Set<String> expandedToolLogIds = new LinkedHashSet<>();
+    private final List<ToolLogToggleArea> toolLogToggleAreas = new ArrayList<>();
 
     private boolean infoOverlayVisible = false;
     private double infoOverlayScroll = 0;
@@ -2703,6 +2708,10 @@ public class P2SChatScreen extends Screen {
             }
         }
 
+        if (button == 0 && !sessionPanelCollapsed && !infoOverlayVisible && toggleToolLogAt(mouseX, mouseY)) {
+            return true;
+        }
+
         if (button == 0 && isInsideContextEditor(mouseX, mouseY)) {
             setContextEditorFocused(true);
             if (contextDiffMode) {
@@ -2905,6 +2914,7 @@ public class P2SChatScreen extends Screen {
         refreshContextDiffControls();
         refreshWorkspaceExplorerIfNeeded();
         syncActiveDocScriptIfNeeded();
+        toolLogToggleAreas.clear();
 
         int panelWidth = getPanelWidth();
         int panelX = getPanelX(panelWidth);
@@ -3461,6 +3471,23 @@ public class P2SChatScreen extends Screen {
 
     private record OverlayLine(FormattedCharSequence formatted, int color, boolean isTitle, String title) {}
 
+    private record ChatRenderEntry(
+            ClientSessionState.ChatMessage message,
+            List<FormattedCharSequence> headerLines,
+            List<FormattedCharSequence> detailLines,
+            int totalHeight,
+            int visualHeight,
+            boolean toolLog,
+            boolean error,
+            boolean expanded
+    ) {}
+
+    private record ToolLogToggleArea(String messageId, int left, int top, int right, int bottom) {
+        private boolean contains(double mouseX, double mouseY) {
+            return mouseX >= left && mouseX <= right && mouseY >= top && mouseY <= bottom;
+        }
+    }
+
     private void drawStatus(GuiGraphics gfx, int panelX) {
         String status = ClientSessionState.getStatus();
         if (status == null || status.isBlank()) {
@@ -3469,73 +3496,243 @@ public class P2SChatScreen extends Screen {
         gfx.drawString(this.font, P2SI18n.tr("screen.p2s.chat.status", P2SI18n.statusComponent(status)), panelX + PADDING, getStatusY(), 0xAAAAAA, true);
     }
 
+
     private void drawMessages(GuiGraphics gfx, int panelX, int panelWidth) {
-        int contentWidth = panelWidth - PADDING * 2;
-        int messageTop = getMessageTop(panelWidth);
-        int messageBottom = getMessageBottom();
-        int messageAreaHeight = Math.max(0, messageBottom - messageTop);
+    int contentWidth = panelWidth - PADDING * 2;
+    int messageTop = getMessageTop(panelWidth);
+    int messageBottom = getMessageBottom();
+    int messageAreaHeight = Math.max(0, messageBottom - messageTop);
 
-        int totalHeight = computeContentHeight(contentWidth);
-        int maxScroll = Math.max(0, totalHeight - messageAreaHeight);
-        scrollOffset = clamp(scrollOffset, 0, maxScroll);
+    int totalHeight = computeContentHeight(contentWidth);
+    int maxScroll = Math.max(0, totalHeight - messageAreaHeight);
+    scrollOffset = clamp(scrollOffset, 0, maxScroll);
 
-        int y = messageBottom + (int) scrollOffset;
-        List<ClientSessionState.ChatMessage> messages = ClientSessionState.getMessages();
+    toolLogToggleAreas.clear();
+    int y = messageBottom + (int) scrollOffset;
+    List<ChatRenderEntry> entries = buildChatRenderEntries(contentWidth);
 
-        boolean isStreaming = ClientSessionState.isStreaming();
-        String streamingText = isStreaming ? ClientSessionState.getStreamingText() : null;
-        if (isStreaming && streamingText != null && !streamingText.isBlank()) {
-            String streamPrefix = P2SI18n.rolePrefix(P2SI18n.ROLE_ASSISTANT);
-            List<FormattedCharSequence> streamLines = this.font.split(Component.literal(streamPrefix + streamingText), contentWidth);
-            for (int li = streamLines.size() - 1; li >= 0; li--) {
-                y -= this.font.lineHeight + LINE_SPACING;
-                if (y < messageTop) {
-                    return;
-                }
+    boolean isStreaming = ClientSessionState.isStreaming();
+    String streamingText = isStreaming ? ClientSessionState.getStreamingText() : null;
+    if (isStreaming && streamingText != null && !streamingText.isBlank()) {
+        String streamPrefix = P2SI18n.rolePrefix(P2SI18n.ROLE_ASSISTANT);
+        List<FormattedCharSequence> streamLines = this.font.split(Component.literal(streamPrefix + streamingText), contentWidth);
+        for (int li = streamLines.size() - 1; li >= 0; li--) {
+            y -= this.font.lineHeight + LINE_SPACING;
+            if (y < messageTop) {
+                return;
+            }
+            if (y <= messageBottom - this.font.lineHeight) {
                 gfx.drawString(this.font, streamLines.get(li), panelX + PADDING, y, 0x55FF55, true);
             }
-            y -= LINE_SPACING;
         }
-
-        for (int i = messages.size() - 1; i >= 0 && y > messageTop; i--) {
-            ClientSessionState.ChatMessage msg = messages.get(i);
-            String role = msg.role();
-            String prefix = rolePrefix(role);
-            int color = roleColor(role);
-
-            List<FormattedCharSequence> lines = this.font.split(Component.literal(prefix + msg.text()), contentWidth);
-            for (int li = lines.size() - 1; li >= 0; li--) {
-                y -= this.font.lineHeight + LINE_SPACING;
-                if (y < messageTop) {
-                    return;
-                }
-                gfx.drawString(this.font, lines.get(li), panelX + PADDING, y, color, true);
-            }
-            y -= LINE_SPACING;
-        }
+        y -= LINE_SPACING;
     }
 
+    for (int i = entries.size() - 1; i >= 0 && y > messageTop; i--) {
+        ChatRenderEntry entry = entries.get(i);
+        int blockTop = y - entry.totalHeight();
+        int visualBottom = blockTop + entry.visualHeight();
+        if (visualBottom < messageTop) {
+            return;
+        }
+        if (entry.toolLog()) {
+            drawToolLogEntry(gfx, panelX, panelWidth, messageTop, messageBottom, blockTop, entry);
+        } else {
+            drawPlainChatEntry(gfx, panelX, messageTop, messageBottom, blockTop, entry);
+        }
+        y = blockTop;
+    }
+}
+
     private int computeContentHeight(int contentWidth) {
-        int total = 0;
-        List<ClientSessionState.ChatMessage> messages = ClientSessionState.getMessages();
-        for (ClientSessionState.ChatMessage msg : messages) {
-            String line = rolePrefix(msg.role()) + msg.text();
-            int lines = this.font.split(Component.literal(line), contentWidth).size();
+    int total = 0;
+    for (ChatRenderEntry entry : buildChatRenderEntries(contentWidth)) {
+        total += entry.totalHeight();
+    }
+
+    if (ClientSessionState.isStreaming()) {
+        String streamingText = ClientSessionState.getStreamingText();
+        if (streamingText != null && !streamingText.isBlank()) {
+            int lines = this.font.split(Component.literal(P2SI18n.rolePrefix(P2SI18n.ROLE_ASSISTANT) + streamingText), contentWidth).size();
             total += lines * (this.font.lineHeight + LINE_SPACING);
             total += LINE_SPACING;
         }
+    }
 
-        if (ClientSessionState.isStreaming()) {
-            String streamingText = ClientSessionState.getStreamingText();
-            if (streamingText != null && !streamingText.isBlank()) {
-                int lines = this.font.split(Component.literal(P2SI18n.rolePrefix(P2SI18n.ROLE_ASSISTANT) + streamingText), contentWidth).size();
-                total += lines * (this.font.lineHeight + LINE_SPACING);
-                total += LINE_SPACING;
+    return total;
+}
+
+    private List<ChatRenderEntry> buildChatRenderEntries(int contentWidth) {
+    List<ClientSessionState.ChatMessage> messages = ClientSessionState.getMessages();
+    pruneExpandedToolLogIds(messages);
+
+    List<ChatRenderEntry> entries = new ArrayList<>(messages.size());
+    int lineStep = this.font.lineHeight + LINE_SPACING;
+    int plainWidth = Math.max(40, contentWidth);
+    int toolWidth = Math.max(40, contentWidth - TOOL_LOG_PADDING_X * 2);
+    for (ClientSessionState.ChatMessage message : messages) {
+        if (message == null) {
+            continue;
+        }
+        if (isToolLogMessage(message)) {
+            boolean expanded = message.id() != null && expandedToolLogIds.contains(message.id());
+            String prefix = expanded ? "v " : "> ";
+            List<FormattedCharSequence> headerLines = this.font.split(Component.literal(prefix + message.text()), toolWidth);
+            List<FormattedCharSequence> detailLines = expanded ? wrapToolLogDetailLines(message.detail(), toolWidth) : List.of();
+            int visualHeight = TOOL_LOG_PADDING_Y * 2 + headerLines.size() * lineStep;
+            if (expanded && !detailLines.isEmpty()) {
+                visualHeight += TOOL_LOG_DETAIL_GAP + detailLines.size() * lineStep;
             }
+            entries.add(new ChatRenderEntry(
+                    message,
+                    headerLines,
+                    detailLines,
+                    visualHeight + LINE_SPACING,
+                    visualHeight,
+                    true,
+                    ClientSessionState.MESSAGE_KIND_TOOL_ERROR.equals(message.kind()),
+                    expanded
+            ));
+            continue;
         }
 
-        return total;
+        String line = rolePrefix(message.role()) + message.text();
+        List<FormattedCharSequence> lines = this.font.split(Component.literal(line), plainWidth);
+        int totalHeight = lines.size() * lineStep + LINE_SPACING;
+        entries.add(new ChatRenderEntry(message, lines, List.of(), totalHeight, totalHeight - LINE_SPACING, false, false, false));
     }
+    return entries;
+}
+
+    private void drawPlainChatEntry(
+        GuiGraphics gfx,
+        int panelX,
+        int messageTop,
+        int messageBottom,
+        int blockTop,
+        ChatRenderEntry entry
+) {
+    int lineStep = this.font.lineHeight + LINE_SPACING;
+    int textX = panelX + PADDING;
+    int color = roleColor(entry.message().role());
+    for (int lineIndex = 0; lineIndex < entry.headerLines().size(); lineIndex++) {
+        int lineY = blockTop + lineIndex * lineStep;
+        if (lineY < messageTop || lineY > messageBottom - this.font.lineHeight) {
+            continue;
+        }
+        gfx.drawString(this.font, entry.headerLines().get(lineIndex), textX, lineY, color, true);
+    }
+}
+
+    private void drawToolLogEntry(
+        GuiGraphics gfx,
+        int panelX,
+        int panelWidth,
+        int messageTop,
+        int messageBottom,
+        int blockTop,
+        ChatRenderEntry entry
+) {
+    int boxLeft = panelX + PADDING;
+    int boxRight = panelX + panelWidth - PADDING;
+    int visualTop = blockTop;
+    int visualBottom = blockTop + entry.visualHeight();
+    int fillTop = Math.max(messageTop, visualTop);
+    int fillBottom = Math.min(messageBottom, visualBottom);
+    if (fillBottom > fillTop) {
+        int background = entry.error() ? 0xD0452A22 : 0xD0222C38;
+        int border = entry.error() ? 0xCCB77960 : 0xCC7489A6;
+        gfx.fill(boxLeft, fillTop, boxRight, fillBottom, background);
+        gfx.fill(boxLeft, fillTop, boxRight, fillTop + 1, border);
+        gfx.fill(boxLeft, fillBottom - 1, boxRight, fillBottom, border);
+    }
+
+    if (entry.message().id() != null && !entry.message().id().isBlank() && fillBottom > fillTop) {
+        toolLogToggleAreas.add(new ToolLogToggleArea(entry.message().id(), boxLeft, fillTop, boxRight, fillBottom));
+    }
+
+    int lineStep = this.font.lineHeight + LINE_SPACING;
+    int textX = boxLeft + TOOL_LOG_PADDING_X;
+    int headerY = visualTop + TOOL_LOG_PADDING_Y;
+    int summaryColor = entry.error() ? 0xFFD0A2 : 0xDCE8FF;
+    for (int lineIndex = 0; lineIndex < entry.headerLines().size(); lineIndex++) {
+        int lineY = headerY + lineIndex * lineStep;
+        if (lineY < messageTop || lineY > messageBottom - this.font.lineHeight) {
+            continue;
+        }
+        gfx.drawString(this.font, entry.headerLines().get(lineIndex), textX, lineY, summaryColor, true);
+    }
+
+    if (!entry.expanded() || entry.detailLines().isEmpty()) {
+        return;
+    }
+
+    int dividerY = headerY + entry.headerLines().size() * lineStep + 1;
+    if (dividerY >= messageTop && dividerY < messageBottom) {
+        gfx.fill(boxLeft + TOOL_LOG_PADDING_X, dividerY, boxRight - TOOL_LOG_PADDING_X, dividerY + 1, 0x66FFFFFF);
+    }
+
+    int detailY = headerY + entry.headerLines().size() * lineStep + TOOL_LOG_DETAIL_GAP;
+    int detailColor = entry.error() ? 0xFFE7D2 : 0xFFBEC9D9;
+    for (int lineIndex = 0; lineIndex < entry.detailLines().size(); lineIndex++) {
+        int lineY = detailY + lineIndex * lineStep;
+        if (lineY < messageTop || lineY > messageBottom - this.font.lineHeight) {
+            continue;
+        }
+        gfx.drawString(this.font, entry.detailLines().get(lineIndex), textX, lineY, detailColor, false);
+    }
+}
+
+    private List<FormattedCharSequence> wrapToolLogDetailLines(String detail, int contentWidth) {
+    List<FormattedCharSequence> lines = new ArrayList<>();
+    if (detail == null || detail.isBlank()) {
+        return lines;
+    }
+    String[] rawLines = detail.split("\\R");
+    for (String rawLine : rawLines) {
+        String normalized = rawLine == null ? "" : rawLine.trim();
+        if (normalized.isBlank()) {
+            continue;
+        }
+        lines.addAll(this.font.split(Component.literal("  " + normalized), contentWidth));
+    }
+    return lines;
+}
+
+    private boolean isToolLogMessage(ClientSessionState.ChatMessage message) {
+    if (message == null) {
+        return false;
+    }
+    return ClientSessionState.MESSAGE_KIND_TOOL_CALL.equals(message.kind())
+            || ClientSessionState.MESSAGE_KIND_TOOL_ERROR.equals(message.kind());
+}
+
+    private void pruneExpandedToolLogIds(List<ClientSessionState.ChatMessage> messages) {
+    Set<String> validIds = new LinkedHashSet<>();
+    for (ClientSessionState.ChatMessage message : messages) {
+        if (isToolLogMessage(message) && message.id() != null && !message.id().isBlank()) {
+            validIds.add(message.id());
+        }
+    }
+    expandedToolLogIds.retainAll(validIds);
+}
+
+    private boolean toggleToolLogAt(double mouseX, double mouseY) {
+    for (int index = toolLogToggleAreas.size() - 1; index >= 0; index--) {
+        ToolLogToggleArea area = toolLogToggleAreas.get(index);
+        if (!area.contains(mouseX, mouseY)) {
+            continue;
+        }
+        if (expandedToolLogIds.contains(area.messageId())) {
+            expandedToolLogIds.remove(area.messageId());
+        } else {
+            expandedToolLogIds.add(area.messageId());
+        }
+        clampScroll();
+        return true;
+    }
+    return false;
+}
 
     private int getMaxScroll() {
         int panelWidth = getPanelWidth();

@@ -43,7 +43,7 @@ public record S2CSessionSyncPayload(
                 buf.writeUtf(payload.sessionId == null ? "" : payload.sessionId, 64);
                 buf.writeUtf(payload.projectId == null ? "" : payload.projectId, 128);
                 buf.writeUtf(payload.projectName == null ? "" : payload.projectName, 256);
-                buf.writeUtf(payload.projectDescription == null ? "" : payload.projectDescription, 1024);
+                buf.writeUtf(fitDisplayText(payload.projectDescription, 1024), 1024);
                 buf.writeInt(payload.originX);
                 buf.writeInt(payload.originY);
                 buf.writeInt(payload.originZ);
@@ -54,13 +54,13 @@ public record S2CSessionSyncPayload(
                 buf.writeUtf(payload.selectedWorkspacePath == null ? "" : payload.selectedWorkspacePath, 256);
                 buf.writeVarInt(payload.partCount);
                 buf.writeVarInt(payload.totalBlocks);
-                buf.writeUtf(payload.partsSummary == null ? "" : payload.partsSummary, 1024);
-                buf.writeUtf(payload.structureSummary == null ? "" : payload.structureSummary, 8192);
+                buf.writeUtf(fitDisplayText(payload.partsSummary, 1024), 1024);
+                buf.writeUtf(fitDisplayText(payload.structureSummary, 8192), 8192);
                 buf.writeUtf(payload.runtimeState == null ? "" : payload.runtimeState, 64);
                 buf.writeUtf(payload.revision == null ? "" : payload.revision, 128);
                 buf.writeBoolean(payload.hasPendingPatch);
                 buf.writeUtf(payload.pendingPath == null ? "" : payload.pendingPath, 256);
-                buf.writeUtf(payload.pendingSummary == null ? "" : payload.pendingSummary, 2048);
+                buf.writeUtf(fitDisplayText(payload.pendingSummary, 2048), 2048);
                 buf.writeUtf(payload.pendingRisk == null ? "" : payload.pendingRisk, 32);
                 buf.writeVarInt(payload.pendingChangedBlocks);
                 buf.writeUtf(payload.checkpointsJson == null ? "[]" : payload.checkpointsJson, 16384);
@@ -98,6 +98,20 @@ public record S2CSessionSyncPayload(
                     buf.readUtf(32767)
             )
     );
+
+
+    private static String fitDisplayText(String value, int maxLength) {
+        if (value == null || value.isEmpty()) {
+            return "";
+        }
+        if (value.length() <= maxLength) {
+            return value;
+        }
+        if (maxLength <= 3) {
+            return value.substring(0, Math.max(0, maxLength));
+        }
+        return value.substring(0, maxLength - 3) + "...";
+    }
 
     @Override
     public Type<? extends CustomPacketPayload> type() {

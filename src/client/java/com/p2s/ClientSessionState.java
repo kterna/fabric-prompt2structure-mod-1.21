@@ -13,9 +13,13 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.UUID;
 
 public final class ClientSessionState {
     private static final Gson DISPLAY_GSON = new GsonBuilder().setPrettyPrinting().create();
+    public static final String MESSAGE_KIND_NORMAL = "normal";
+    public static final String MESSAGE_KIND_TOOL_CALL = "tool_call";
+    public static final String MESSAGE_KIND_TOOL_ERROR = "tool_error";
     private static boolean hasProject = false;
     private static boolean sessionActive = false;
     private static String sessionId = "";
@@ -226,6 +230,18 @@ public final class ClientSessionState {
         }
     }
 
+    public static synchronized void addToolCallMessage(String summary, String detail) {
+        if (summary != null && !summary.isBlank()) {
+            addMessage(P2SI18n.ROLE_SYSTEM, summary.trim(), MESSAGE_KIND_TOOL_CALL, detail);
+        }
+    }
+
+    public static synchronized void addToolErrorMessage(String summary, String detail) {
+        if (summary != null && !summary.isBlank()) {
+            addMessage(P2SI18n.ROLE_SYSTEM, summary.trim(), MESSAGE_KIND_TOOL_ERROR, detail);
+        }
+    }
+
     public static synchronized void setTodo(String title, List<TodoItem> items) {
         todoTitle = title == null ? "" : title.trim();
         todoItems.clear();
@@ -364,7 +380,25 @@ public final class ClientSessionState {
     }
 
     static synchronized void addMessage(String role, String text) {
-        messages.add(new ChatMessage(P2SI18n.normalizeRole(role), text));
+        addMessage(role, text, MESSAGE_KIND_NORMAL, "");
+    }
+
+    static synchronized void addMessage(String role, String text, String kind, String detail) {
+        addMessage(UUID.randomUUID().toString(), role, text, kind, detail);
+    }
+
+    static synchronized void addMessage(String id, String role, String text, String kind, String detail) {
+        if (text == null || text.isBlank()) {
+            return;
+        }
+        String messageId = (id == null || id.isBlank()) ? UUID.randomUUID().toString() : id.trim();
+        messages.add(new ChatMessage(
+                messageId,
+                P2SI18n.normalizeRole(role),
+                text.trim(),
+                normalizeMessageKind(kind),
+                detail == null ? "" : detail.trim()
+        ));
         if (messages.size() > 200) {
             messages.remove(0);
         }
@@ -837,7 +871,16 @@ public final class ClientSessionState {
         }
     }
 
-    public record ChatMessage(String role, String text) {
+    private static String normalizeMessageKind(String kind) {
+        String value = kind == null ? "" : kind.trim().toLowerCase(Locale.ROOT);
+        return switch (value) {
+            case MESSAGE_KIND_TOOL_CALL -> MESSAGE_KIND_TOOL_CALL;
+            case MESSAGE_KIND_TOOL_ERROR -> MESSAGE_KIND_TOOL_ERROR;
+            default -> MESSAGE_KIND_NORMAL;
+        };
+    }
+
+    public record ChatMessage(String id, String role, String text, String kind, String detail) {
     }
 
     public record TodoItem(String id, String content, String status) {

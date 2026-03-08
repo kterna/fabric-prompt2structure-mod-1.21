@@ -453,6 +453,7 @@ public final class ClientAgentManager {
         List<LLMService.ToolCall> toolCalls = result.toolCalls() == null ? List.of() : result.toolCalls();
         if (!toolCalls.isEmpty()) {
             List<ToolCallResult> results = executeToolCallsBatch(session, toolCalls);
+            postVisibleToolResults(results);
             for (ToolCallResult tcr : results) {
                 if (P2SMod.DEBUG) {
                     P2SMod.LOGGER.info("[DEBUG] ClientAgent tool call -> name={}, args={}, result={}", tcr.call().name(), tcr.call().arguments(), GSON.toJson(tcr.payload()));
@@ -503,6 +504,9 @@ public final class ClientAgentManager {
     }
 
     private record ToolCallResult(LLMService.ToolCall call, JsonObject payload) {
+    }
+
+    private record ToolLogPresentation(String summary, String detail, boolean error) {
     }
 
     private static void runUserTurn(LocalSession session, String message) {
@@ -1244,6 +1248,169 @@ public final class ClientAgentManager {
         return message == null || message.isBlank() ? "Unknown error" : message;
     }
 
+
+    private static void postVisibleToolResults(List<ToolCallResult> results) {
+        if (results == null || results.isEmpty()) {
+            return;
+        }
+        postToClient(() -> {
+            for (ToolCallResult result : results) {
+                ToolLogPresentation presentation = buildToolLogPresentation(
+                        result == null ? null : result.call(),
+                        result == null ? null : result.payload()
+                );
+                if (presentation == null || presentation.summary() == null || presentation.summary().isBlank()) {
+                    continue;
+                }
+                if (presentation.error()) {
+                    ClientSessionState.addToolErrorMessage(presentation.summary(), presentation.detail());
+                } else {
+                    ClientSessionState.addToolCallMessage(presentation.summary(), presentation.detail());
+                }
+            }
+        });
+    }
+
+    private static ToolLogPresentation buildToolLogPresentation(LLMService.ToolCall call, JsonObject payload) {
+        boolean error = payload == null || !asBoolean(payload, "ok", true);
+        String summary = error
+                ? P2SI18n.tr("message.p2s.agent.tool.failed", toolSummaryText(call)).getString()
+                : toolSummaryText(call);
+        String detail = buildToolDetail(call, payload);
+        return new ToolLogPresentation(summary, detail, error);
+    }
+
+    private static String toolSummaryText(LLMService.ToolCall call) {
+        String key = toolSummaryKey(call);
+        if (key == null || key.isBlank()) {
+            return rawToolName(call);
+        }
+        return P2SI18n.tr(key).getString();
+    }
+
+    private static String toolSummaryKey(LLMService.ToolCall call) {
+        String toolName = rawToolName(call);
+        JsonObject args = normalizeArgsObject(call == null ? null : call.arguments());
+        return switch (toolName) {
+            case "list_skills" -> "message.p2s.agent.tool.summary.list_skills";
+            case "read_skill" -> "message.p2s.agent.tool.summary.read_skill";
+            case "read_subdoc" -> "message.p2s.agent.tool.summary.read_subdoc";
+            case "search_skill" -> "message.p2s.agent.tool.summary.search_skill";
+            case "todo" -> todoSummaryKey(asString(args, "action"));
+            case "get_todo" -> "message.p2s.agent.tool.summary.todo_get";
+            case "set_todo" -> "message.p2s.agent.tool.summary.todo_set";
+            case "edit_todo_item" -> "message.p2s.agent.tool.summary.todo_upsert";
+            case "delete_todo_item" -> "message.p2s.agent.tool.summary.todo_delete";
+            case "clear_todo" -> "message.p2s.agent.tool.summary.todo_clear";
+            case "request_user_choice" -> "message.p2s.agent.tool.summary.request_user_choice";
+            case "clear_user_choice" -> "message.p2s.agent.tool.summary.clear_user_choice";
+            case "list_subagents" -> "message.p2s.agent.tool.summary.list_subagents";
+            case "create_subagent" -> "message.p2s.agent.tool.summary.create_subagent";
+            case "continue_subagent" -> "message.p2s.agent.tool.summary.continue_subagent";
+            case "get_subagent" -> "message.p2s.agent.tool.summary.get_subagent";
+            case "delete_subagent" -> "message.p2s.agent.tool.summary.delete_subagent";
+            case "list_profiles" -> "message.p2s.agent.tool.summary.list_profiles";
+            case "get_profile" -> "message.p2s.agent.tool.summary.get_profile";
+            case "explain_plan" -> "message.p2s.agent.tool.summary.explain_plan";
+            case "get_project_state" -> "message.p2s.agent.tool.summary.get_project_state";
+            case "read_workspace_file" -> "message.p2s.agent.tool.summary.read_workspace_file";
+            case "create_workspace_file" -> "message.p2s.agent.tool.summary.create_workspace_file";
+            case "rename_workspace_file" -> "message.p2s.agent.tool.summary.rename_workspace_file";
+            case "delete_workspace_file" -> "message.p2s.agent.tool.summary.delete_workspace_file";
+            case "propose_patch" -> "message.p2s.agent.tool.summary.propose_patch";
+            case "search_block_ids" -> "message.p2s.agent.tool.summary.search_block_ids";
+            default -> "";
+        };
+    }
+
+    private static String todoSummaryKey(String action) {
+        String normalized = action == null ? "" : action.trim().toLowerCase();
+        return switch (normalized) {
+            case "get" -> "message.p2s.agent.tool.summary.todo_get";
+            case "set" -> "message.p2s.agent.tool.summary.todo_set";
+            case "upsert", "edit", "update", "create" -> "message.p2s.agent.tool.summary.todo_upsert";
+            case "delete", "remove" -> "message.p2s.agent.tool.summary.todo_delete";
+            case "clear" -> "message.p2s.agent.tool.summary.todo_clear";
+            default -> "message.p2s.agent.tool.summary.todo";
+        };
+    }
+
+    private static String rawToolName(LLMService.ToolCall call) {
+        if (call == null || call.name() == null) {
+            return "unknown";
+        }
+        String name = call.name().trim();
+        return name.isBlank() ? "unknown" : name;
+    }
+
+    private static String buildToolDetail(LLMService.ToolCall call, JsonObject payload) {
+        List<String> lines = new ArrayList<>();
+        lines.add(P2SI18n.tr("message.p2s.agent.tool.detail.name", rawToolName(call)).getString());
+        appendToolArgumentDetails(lines, normalizeArgsObject(call == null ? null : call.arguments()));
+        if (payload == null || !asBoolean(payload, "ok", true)) {
+            String error = payload == null ? "Execution failed" : asString(payload, "error");
+            if (error.isBlank()) {
+                error = "Execution failed";
+            }
+            lines.add(P2SI18n.tr("message.p2s.agent.tool.detail.error", error).getString());
+        }
+        return String.join("\n", lines);
+    }
+
+    private static void appendToolArgumentDetails(List<String> lines, JsonObject args) {
+        if (args == null || args.entrySet().isEmpty()) {
+            return;
+        }
+        List<String> handledKeys = new ArrayList<>();
+        String[] preferredKeys = {"path", "query", "name", "id", "action", "request_id", "profile_id", "instructions", "prompt", "content"};
+        for (String key : preferredKeys) {
+            if (args.has(key)) {
+                appendToolArgumentLine(lines, args, key);
+                handledKeys.add(key);
+            }
+        }
+        for (Map.Entry<String, JsonElement> entry : args.entrySet()) {
+            String key = entry.getKey();
+            if (key == null || key.isBlank() || handledKeys.contains(key)) {
+                continue;
+            }
+            appendToolArgumentLine(lines, args, key);
+        }
+    }
+
+    private static void appendToolArgumentLine(List<String> lines, JsonObject args, String key) {
+        if (args == null || key == null || key.isBlank() || !args.has(key)) {
+            return;
+        }
+        String value = formatToolArgumentValue(args.get(key));
+        if (value.isBlank()) {
+            return;
+        }
+        lines.add(key + ": " + value);
+    }
+
+    private static String formatToolArgumentValue(JsonElement value) {
+        if (value == null || value.isJsonNull()) {
+            return "";
+        }
+        String formatted;
+        if (value.isJsonPrimitive()) {
+            try {
+                formatted = value.getAsString();
+            } catch (Exception ignored) {
+                formatted = value.toString();
+            }
+        } else {
+            formatted = GSON.toJson(value);
+        }
+        String normalized = formatted.replace('\n', ' ').replace('\r', ' ').trim();
+        int maxLength = 180;
+        if (normalized.length() > maxLength) {
+            normalized = normalized.substring(0, maxLength - 3) + "...";
+        }
+        return normalized;
+    }
+
     private static JsonObject buildToolMessage(LLMService.ToolCall call, JsonObject payload) {
         JsonObject toolMsg = new JsonObject();
         toolMsg.addProperty("role", "tool");
@@ -1357,7 +1524,13 @@ public final class ClientAgentManager {
             List<ClientSessionState.ChatMessage> chatMessages = ClientSessionState.getMessages();
             List<SessionPersistence.ChatMessageEntry> chatLog = new ArrayList<>();
             for (ClientSessionState.ChatMessage message : chatMessages) {
-                chatLog.add(new SessionPersistence.ChatMessageEntry(message.role(), message.text()));
+                chatLog.add(new SessionPersistence.ChatMessageEntry(
+                        message.id(),
+                        message.role(),
+                        message.text(),
+                        message.kind(),
+                        message.detail()
+                ));
             }
 
             List<SessionPersistence.TodoItemEntry> todoEntries = new ArrayList<>();
@@ -1552,7 +1725,7 @@ public final class ClientAgentManager {
             clearLocalSessionView();
             if (saved.chatLog() != null) {
                 for (SessionPersistence.ChatMessageEntry entry : saved.chatLog()) {
-                    ClientSessionState.addMessage(entry.role(), entry.text());
+                    ClientSessionState.addMessage(entry.id(), entry.role(), entry.text(), entry.kind(), entry.detail());
                 }
             }
             if (saved.todoItems() != null && !saved.todoItems().isEmpty()) {

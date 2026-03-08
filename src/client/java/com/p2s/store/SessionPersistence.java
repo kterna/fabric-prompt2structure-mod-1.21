@@ -46,7 +46,7 @@ public final class SessionPersistence {
     ) {
     }
 
-    public record ChatMessageEntry(String role, String text) {
+    public record ChatMessageEntry(String id, String role, String text, String kind, String detail) {
     }
 
     public record TodoItemEntry(String id, String content, String status) {
@@ -87,8 +87,11 @@ public final class SessionPersistence {
             if (session.chatLog() != null) {
                 for (ChatMessageEntry entry : session.chatLog()) {
                     JsonObject obj = new JsonObject();
+                    obj.addProperty("id", entry.id() == null ? "" : entry.id());
                     obj.addProperty("role", entry.role() == null ? "" : entry.role());
                     obj.addProperty("text", entry.text() == null ? "" : entry.text());
+                    obj.addProperty("kind", entry.kind() == null ? "" : entry.kind());
+                    obj.addProperty("detail", entry.detail() == null ? "" : entry.detail());
                     chatArray.add(obj);
                 }
             }
@@ -214,7 +217,13 @@ public final class SessionPersistence {
                         continue;
                     }
                     JsonObject obj = elem.getAsJsonObject();
-                    chatLog.add(new ChatMessageEntry(getStr(obj, "role"), getStr(obj, "text")));
+                    chatLog.add(new ChatMessageEntry(
+                            getStr(obj, "id"),
+                            getStr(obj, "role"),
+                            getStr(obj, "text"),
+                            getStr(obj, "kind"),
+                            getStr(obj, "detail")
+                    ));
                 }
             }
 
