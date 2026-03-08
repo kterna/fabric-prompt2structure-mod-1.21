@@ -10,7 +10,6 @@ import net.minecraft.network.chat.Component;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -88,7 +87,14 @@ final class P2SWorkspaceExplorerComponent {
 
         List<Button> rowButtons = new ArrayList<>();
         int fileBottom = host.screenHeight() - config.contextFooterHeight() - PADDING;
-        for (ExplorerRow row : buildExplorerRows(config.files(), config.folders(), config.collapsedFolders(), config.selectedFolderPath())) {
+        List<ExplorerRow> rows = buildExplorerRows(
+                config.files(),
+                config.folders(),
+                config.collapsedFolders(),
+                config.selectedFolderPath(),
+                config.selectedWorkspacePath()
+        );
+        for (ExplorerRow row : rows) {
             if (row == null) {
                 continue;
             }
@@ -97,15 +103,16 @@ final class P2SWorkspaceExplorerComponent {
             }
 
             Button rowButton = host.addButton(Button.builder(Component.literal(row.label()), btn -> {
+                if (row.placeholder()) {
+                    return;
+                }
                 if (row.folder()) {
                     config.onToggleFolder().accept(row.path());
                 } else {
                     config.onSwitch().accept(row.path());
                 }
             }).bounds(config.leftX(), fileY, config.explorerWidth(), config.inputHeight()).build());
-            if (!row.folder()) {
-                rowButton.active = !row.path().equals(config.selectedWorkspacePath());
-            }
+            rowButton.active = !row.placeholder();
             rowButtons.add(rowButton);
             fileY += config.inputHeight() + 1;
         }
@@ -129,7 +136,8 @@ final class P2SWorkspaceExplorerComponent {
             List<ClientSessionState.WorkspaceFileInfo> files,
             List<String> folders,
             Set<String> collapsedFolders,
-            String selectedFolderPath
+            String selectedFolderPath,
+            String selectedWorkspacePath
     ) {
         List<ExplorerRow> rows = new ArrayList<>();
         FolderNode root = new FolderNode("", "");
@@ -153,7 +161,17 @@ final class P2SWorkspaceExplorerComponent {
             insertFile(root, file);
         }
 
-        collectRows(root, 0, collapsedFolders, normalizeFolderPath(selectedFolderPath), rows);
+        collectRows(
+                root,
+                0,
+                collapsedFolders,
+                normalizeFolderPath(selectedFolderPath),
+                normalizeFolderPath(selectedWorkspacePath),
+                rows
+        );
+        if (rows.isEmpty()) {
+            rows.add(new ExplorerRow("", "  " + P2SI18n.tr("screen.p2s.workspace.empty").getString(), false, true));
+        }
         return rows;
     }
 
@@ -200,37 +218,48 @@ final class P2SWorkspaceExplorerComponent {
         current.files.add(file);
     }
 
-    private static void collectRows(FolderNode folder, int depth, Set<String> collapsedFolders, String selectedFolderPath, List<ExplorerRow> rows) {
+    private static void collectRows(
+            FolderNode folder,
+            int depth,
+            Set<String> collapsedFolders,
+            String selectedFolderPath,
+            String selectedWorkspacePath,
+            List<ExplorerRow> rows
+    ) {
         List<FolderNode> childFolders = new ArrayList<>(folder.folders.values());
         childFolders.sort(Comparator.comparing(node -> node.name.toLowerCase(java.util.Locale.ROOT)));
         for (FolderNode child : childFolders) {
             boolean collapsed = collapsedFolders != null && collapsedFolders.contains(child.path);
             boolean selected = child.path.equals(selectedFolderPath);
-            rows.add(new ExplorerRow(child.path, folderLabel(child.name, depth, collapsed, selected), true));
+            rows.add(new ExplorerRow(child.path, folderLabel(child.name, depth, collapsed, selected), true, false));
             if (!collapsed) {
-                collectRows(child, depth + 1, collapsedFolders, selectedFolderPath, rows);
+                collectRows(child, depth + 1, collapsedFolders, selectedFolderPath, selectedWorkspacePath, rows);
             }
         }
 
         List<ClientSessionState.WorkspaceFileInfo> childFiles = new ArrayList<>(folder.files);
         childFiles.sort(Comparator.comparing(file -> file.path().toLowerCase(java.util.Locale.ROOT)));
         for (ClientSessionState.WorkspaceFileInfo file : childFiles) {
+            String normalizedPath = normalizeFolderPath(file.path());
             String fileName = leafName(file.path());
-            String label = fileLabel(fileName, depth);
-            if (file.hasPendingPatch()) {
-                label += file.pendingChangedBlocks() > 0 ? " * (" + file.pendingChangedBlocks() + ")" : " *";
-            }
-            rows.add(new ExplorerRow(file.path(), label, false));
+            boolean selected = normalizedPath.equals(selectedWorkspacePath);
+            String label = fileLabel(fileName, depth, selected, file.hasPendingPatch(), file.pendingChangedBlocks());
+            rows.add(new ExplorerRow(file.path(), label, false, false));
         }
     }
 
     private static String folderLabel(String name, int depth, boolean collapsed, boolean selected) {
-        String display = selected ? "[" + name + "]" : name;
-        return indent(depth) + (collapsed ? "▸ " : "▾ ") + display;
+        String marker = selected ? "› " : "  ";
+        return indent(depth) + marker + (collapsed ? "▸ " : "▾ ") + name;
     }
 
-    private static String fileLabel(String name, int depth) {
-        return indent(depth) + "  " + name;
+    private static String fileLabel(String name, int depth, boolean selected, boolean pending, int changedBlocks) {
+        String marker = selected ? "› " : "  ";
+        String badge = "";
+        if (pending) {
+            badge = changedBlocks > 0 ? "  [M" + changedBlocks + "]" : "  [M]";
+        }
+        return indent(depth) + marker + "  " + name + badge;
     }
 
     private static String indent(int depth) {
@@ -309,7 +338,7 @@ final class P2SWorkspaceExplorerComponent {
     ) {
     }
 
-    private record ExplorerRow(String path, String label, boolean folder) {
+    private record ExplorerRow(String path, String label, boolean folder, boolean placeholder) {
     }
 
     private static final class FolderNode {

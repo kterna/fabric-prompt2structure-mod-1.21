@@ -62,6 +62,8 @@ public class P2SChatScreen extends Screen {
     private static final int DOCK_TOGGLE_BUTTON_SIZE = 18;
     private static final int EXPLORER_MIN_WIDTH = 130;
     private static final int EDITOR_MIN_WIDTH = 180;
+    private static final int EXPLORER_HEADER_HEIGHT = 28;
+    private static final int CHAT_HEADER_META_HEIGHT = 14;
 
     private EditBox input;
     private Button sendButton;
@@ -1296,9 +1298,20 @@ public class P2SChatScreen extends Screen {
             return CONTEXT_GSON.toJson(state.get("script"));
         }
         if (state.has("script_json") && state.get("script_json").isJsonPrimitive()) {
-            return state.get("script_json").getAsString();
+            return formatJsonForEditor(state.get("script_json").getAsString());
         }
         return "";
+    }
+
+    private String formatJsonForEditor(String text) {
+        if (text == null || text.isBlank()) {
+            return text == null ? "" : text;
+        }
+        try {
+            return CONTEXT_GSON.toJson(JsonParser.parseString(text));
+        } catch (Exception ignored) {
+            return text;
+        }
     }
 
     private String[] normalizeLines(String text) {
@@ -1557,7 +1570,8 @@ public class P2SChatScreen extends Screen {
     private void setContextJsonText(String text) {
         exitDiffViewMode();
         contextJsonLines.clear();
-        String[] lines = (text == null ? "" : text).replace("\r\n", "\n").replace('\r', '\n').split("\n", -1);
+        String normalized = formatJsonForEditor(text == null ? "" : text);
+        String[] lines = normalized.replace("\r\n", "\n").replace('\r', '\n').split("\n", -1);
         if (lines.length == 0) {
             contextJsonLines.add("");
         } else {
@@ -2853,6 +2867,8 @@ public class P2SChatScreen extends Screen {
         gfx.fill(panelX - 1, 0, panelX, this.height, 0xFF2F3A4D);
         if (explorerPanelCollapsed) {
             drawCollapsedExplorerRail(gfx);
+        } else {
+            drawExplorerHeader(gfx);
         }
 
         int x = PADDING;
@@ -2890,6 +2906,78 @@ public class P2SChatScreen extends Screen {
         }
 
         drawContextSelectionConfirm(gfx);
+    }
+
+    private void drawExplorerHeader(GuiGraphics gfx) {
+        int left = PADDING + 2;
+        int right = Math.max(left + 24, currentExplorerSplitterX - DOCK_SPLITTER_WIDTH - 4);
+        int titleY = 6;
+        gfx.drawString(this.font, P2SI18n.tr("screen.p2s.workspace.section"), left, titleY, 0x93A9C9, false);
+
+        String breadcrumb = buildExplorerBreadcrumb();
+        if (!breadcrumb.isBlank()) {
+            gfx.drawString(this.font, trimMiddleToWidth(breadcrumb, Math.max(40, right - left)), left, titleY + this.font.lineHeight + 2, 0xE8F0FF, false);
+        }
+
+        int dividerY = titleY + this.font.lineHeight * 2 + 5;
+        gfx.fill(left, dividerY, right, dividerY + 1, 0x6637465E);
+    }
+
+    private String buildExplorerBreadcrumb() {
+        String selectedPath = ClientSessionState.getSelectedWorkspaceLabel();
+        if (selectedPath != null && !selectedPath.isBlank()) {
+            return selectedPath.replace("/", " › ");
+        }
+        if (selectedExplorerFolderPath != null && !selectedExplorerFolderPath.isBlank()) {
+            return selectedExplorerFolderPath.replace("/", " › ");
+        }
+        return P2SI18n.tr("screen.p2s.workspace.empty").getString();
+    }
+
+    private String buildSessionHeaderMeta() {
+        List<String> parts = new ArrayList<>();
+        String projectName = ClientSessionState.getProjectName();
+        if (projectName != null && !projectName.isBlank()) {
+            parts.add(P2SI18n.tr("screen.p2s.chat.project", projectName).getString());
+        }
+        if (ClientSessionState.isActive()) {
+            parts.add(P2SI18n.tr("screen.p2s.chat.session_info", shortId(ClientSessionState.getSessionId()), ClientSessionState.getTurnCount()).getString());
+        }
+        String selectedPath = ClientSessionState.getSelectedWorkspaceLabel();
+        if (selectedPath != null && !selectedPath.isBlank()) {
+            parts.add(selectedPath.replace("/", " › "));
+        }
+        return String.join(" · ", parts);
+    }
+
+    private String trimMiddleToWidth(String text, int maxWidth) {
+        if (text == null || text.isBlank() || this.font == null || maxWidth <= 0) {
+            return text == null ? "" : text;
+        }
+        if (this.font.width(text) <= maxWidth) {
+            return text;
+        }
+        String ellipsis = "...";
+        if (this.font.width(ellipsis) >= maxWidth) {
+            return ellipsis;
+        }
+        int leftChars = Math.max(1, (text.length() - 3) / 2);
+        int rightChars = Math.max(1, text.length() - 3 - leftChars);
+        String candidate = text;
+        while (leftChars > 1 || rightChars > 1) {
+            candidate = text.substring(0, leftChars) + ellipsis + text.substring(text.length() - rightChars);
+            if (this.font.width(candidate) <= maxWidth) {
+                return candidate;
+            }
+            if (leftChars >= rightChars && leftChars > 1) {
+                leftChars--;
+            } else if (rightChars > 1) {
+                rightChars--;
+            } else {
+                leftChars--;
+            }
+        }
+        return candidate;
     }
 
     private void drawCollapsedExplorerRail(GuiGraphics gfx) {
@@ -3145,6 +3233,16 @@ public class P2SChatScreen extends Screen {
     }
 
     private void drawHeader(GuiGraphics gfx, int panelX, int panelWidth) {
+        String meta = buildSessionHeaderMeta();
+        if (meta.isBlank()) {
+            return;
+        }
+        int metaTop = getMessageTop(panelWidth) - CHAT_HEADER_META_HEIGHT;
+        int dividerY = metaTop - 2;
+        int left = panelX + PADDING;
+        int right = panelX + panelWidth - PADDING;
+        gfx.fill(left, dividerY, right, dividerY + 1, 0x6637465E);
+        gfx.drawString(this.font, trimMiddleToWidth(meta, Math.max(40, right - left)), left, metaTop + 1, 0xAFC2DE, false);
     }
 
     private int countInfoSections(int contentWidth) {
@@ -3387,7 +3485,7 @@ public class P2SChatScreen extends Screen {
         for (Button choiceButton : choiceButtons) {
             maxBottom = Math.max(maxBottom, getVisibleWidgetBottom(choiceButton));
         }
-        return Math.max(TOP_BUTTON_HEIGHT * 3 + 8, maxBottom - PADDING + 6);
+        return Math.max(TOP_BUTTON_HEIGHT * 3 + 8, maxBottom - PADDING + 6) + CHAT_HEADER_META_HEIGHT;
     }
 
     private int getVisibleWidgetBottom(AbstractWidget widget) {

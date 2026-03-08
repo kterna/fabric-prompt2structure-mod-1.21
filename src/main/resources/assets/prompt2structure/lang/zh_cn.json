@@ -315,5 +315,7 @@
   "screen.p2s.checkpoints.mode": "回滚模式：%s",
   "screen.p2s.checkpoints.status.creating": "正在创建检查点...",
   "screen.p2s.checkpoints.status.renaming": "正在重命名检查点：%s",
-  "screen.p2s.checkpoints.status.rolling_back": "正在回滚到：%s"
+  "screen.p2s.checkpoints.status.rolling_back": "正在回滚到：%s",
+  "screen.p2s.workspace.empty": "当前还没有文件",
+  "screen.p2s.workspace.section": "工作区"
 }

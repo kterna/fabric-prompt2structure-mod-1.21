@@ -114,6 +114,9 @@ public final class P2SChatContextWidgets {
         int rowGap = 2;
         int row1Y = config.padding();
         int row2Y = row1Y + config.inputHeight() + rowGap;
+        int explorerHeaderHeight = config.explorerPanelCollapsed() ? 0 : 28;
+        int explorerRow1Y = row1Y + explorerHeaderHeight;
+        int explorerRow2Y = explorerRow1Y + config.inputHeight() + rowGap;
 
         List<Button> workspaceDocButtons = new ArrayList<>();
         Button workspaceDocCreateButton = null;
@@ -152,8 +155,8 @@ public final class P2SChatContextWidgets {
                     },
                     new P2SWorkspaceExplorerComponent.Config(
                             leftX,
-                            row1Y,
-                            row2Y,
+                            explorerRow1Y,
+                            explorerRow2Y,
                             config.explorerWidth(),
                             config.inputHeight(),
                             config.contextFooterHeight(),

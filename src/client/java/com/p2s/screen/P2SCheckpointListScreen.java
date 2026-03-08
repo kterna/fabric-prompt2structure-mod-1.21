@@ -16,14 +16,28 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class P2SCheckpointListScreen extends Screen {
-    private static final int VISIBLE_ROWS = 10;
     private static final int ROW_HEIGHT = 22;
-    private static final int BUTTON_WIDTH = 50;
+    private static final int ROW_GAP = 2;
+    private static final int BUTTON_HEIGHT = 20;
+    private static final int MIN_VISIBLE_ROWS = 6;
+    private static final int MAX_VISIBLE_ROWS = 18;
 
     private final Screen parent;
     private final List<Button> rowButtons = new ArrayList<>();
     private int scroll = 0;
+    private int visibleRows = MIN_VISIBLE_ROWS;
+    private int listLeft = 0;
+    private int listTop = 0;
+    private int listRight = 0;
+    private int listBottom = 0;
+
     private EditBox checkpointNameInput;
+    private Button scrollUpButton;
+    private Button scrollDownButton;
+    private Button createButton;
+    private Button renameButton;
+    private Button rollbackButton;
+    private Button modeButton;
     private Component statusText = Component.empty();
     private int statusColor = 0xAAAAAA;
     private String lastSignature = "";
@@ -41,11 +55,21 @@ public class P2SCheckpointListScreen extends Screen {
         clearWidgets();
         rowButtons.clear();
 
-        int panelWidth = Math.min(700, this.width - 40);
+        int panelWidth = Math.min(760, this.width - 40);
         int left = (this.width - panelWidth) / 2;
         int top = 40;
-        int listTop = 92;
-        int listWidth = panelWidth;
+        int rowStep = ROW_HEIGHT + ROW_GAP;
+        listTop = 92;
+
+        int reservedBottom = 58;
+        int availableListHeight = Math.max(ROW_HEIGHT, this.height - listTop - reservedBottom - BUTTON_HEIGHT - 12);
+        visibleRows = Math.max(MIN_VISIBLE_ROWS, Math.min(MAX_VISIBLE_ROWS, availableListHeight / rowStep));
+        int listHeight = visibleRows * rowStep - ROW_GAP;
+        int bottomY = listTop + listHeight + 8;
+
+        listLeft = left;
+        listRight = left + panelWidth;
+        listBottom = listTop + listHeight;
 
         checkpointNameInput = new EditBox(this.font, left, top, panelWidth, 20, P2SI18n.tr("screen.p2s.chat.checkpoint.name_hint"));
         checkpointNameInput.setMaxLength(120);
@@ -53,72 +77,66 @@ public class P2SCheckpointListScreen extends Screen {
         checkpointNameInput.setHint(P2SI18n.tr("screen.p2s.chat.checkpoint.name_hint"));
         addRenderableWidget(checkpointNameInput);
 
-        for (int i = 0; i < VISIBLE_ROWS; i++) {
-            int rowY = listTop + i * (ROW_HEIGHT + 2);
+        for (int i = 0; i < visibleRows; i++) {
+            int rowY = listTop + i * rowStep;
             final int row = i;
             Button rowBtn = Button.builder(Component.empty(), btn -> selectCheckpoint(row))
-                    .bounds(left, rowY, listWidth, ROW_HEIGHT)
+                    .bounds(left, rowY, panelWidth, ROW_HEIGHT)
                     .build();
             rowButtons.add(rowBtn);
             addRenderableWidget(rowBtn);
         }
 
-        int bottomY = listTop + VISIBLE_ROWS * (ROW_HEIGHT + 2) + 6;
-        addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.common.up"), btn -> {
-            if (scroll > 0) {
-                scroll--;
-                refreshRows();
-            }
-        }).bounds(left, bottomY, 50, 20).build());
+        scrollUpButton = addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.common.up"), btn -> scrollBy(-1))
+                .bounds(left, bottomY, 50, BUTTON_HEIGHT).build());
 
-        addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.common.down"), btn -> {
-            int maxScroll = Math.max(0, ClientSessionState.getCheckpoints().size() - VISIBLE_ROWS);
-            if (scroll < maxScroll) {
-                scroll++;
-                refreshRows();
-            }
-        }).bounds(left + 56, bottomY, 60, 20).build());
+        scrollDownButton = addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.common.down"), btn -> scrollBy(1))
+                .bounds(left + 56, bottomY, 60, BUTTON_HEIGHT).build());
 
-        addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.chat.checkpoint.create_short"), btn -> createCheckpoint())
-                .bounds(left + 124, bottomY, 60, 20).build());
+        createButton = addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.chat.checkpoint.create_short"), btn -> createCheckpoint())
+                .bounds(left + 124, bottomY, 60, BUTTON_HEIGHT).build());
 
-        addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.chat.checkpoint.rename_short"), btn -> renameCheckpoint())
-                .bounds(left + 190, bottomY, 70, 20).build());
+        renameButton = addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.chat.checkpoint.rename_short"), btn -> renameCheckpoint())
+                .bounds(left + 190, bottomY, 70, BUTTON_HEIGHT).build());
 
-        addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.chat.checkpoint.rollback_short"), btn -> rollbackCheckpoint())
-                .bounds(left + 266, bottomY, 70, 20).build());
+        rollbackButton = addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.chat.checkpoint.rollback_short"), btn -> rollbackCheckpoint())
+                .bounds(left + 266, bottomY, 70, BUTTON_HEIGHT).build());
 
-        addRenderableWidget(Button.builder(modeLabel(), btn -> {
+        modeButton = addRenderableWidget(Button.builder(modeLabel(), btn -> {
             ClientSessionState.toggleRollbackMode();
             btn.setMessage(modeLabel());
             refreshRows();
-        }).bounds(left + 342, bottomY, 120, 20).build());
+            refreshControls();
+        }).bounds(left + 342, bottomY, 120, BUTTON_HEIGHT).build());
 
         addRenderableWidget(Button.builder(P2SI18n.tr("screen.p2s.common.back"), btn -> onClose())
-                .bounds(left + panelWidth - 60, bottomY, 60, 20).build());
+                .bounds(left + panelWidth - 60, bottomY, 60, BUTTON_HEIGHT).build());
 
         refreshRows();
+        refreshControls();
         lastSignature = buildSignature();
     }
 
     private void refreshFromStateIfNeeded() {
         String signature = buildSignature();
         if (signature.equals(lastSignature)) {
+            refreshControls();
             return;
         }
         lastSignature = signature;
-        scroll = Math.min(scroll, Math.max(0, ClientSessionState.getCheckpoints().size() - VISIBLE_ROWS));
+        scroll = Math.min(scroll, maxScroll());
         if (checkpointNameInput != null && !checkpointNameInput.isFocused()) {
             checkpointNameInput.setValue(currentCheckpointLabel());
         }
         refreshRows();
+        refreshControls();
     }
 
     private void refreshRows() {
         List<ClientSessionState.CheckpointInfo> checkpoints = ClientSessionState.getCheckpoints();
         ClientSessionState.CheckpointInfo selected = ClientSessionState.getSelectedCheckpoint();
         String selectedId = selected == null ? "" : selected.id();
-        for (int i = 0; i < VISIBLE_ROWS; i++) {
+        for (int i = 0; i < visibleRows; i++) {
             int idx = scroll + i;
             Button rowBtn = rowButtons.get(i);
             if (idx >= 0 && idx < checkpoints.size()) {
@@ -126,8 +144,8 @@ public class P2SCheckpointListScreen extends Screen {
                 String label = checkpoint.label() == null || checkpoint.label().isBlank() ? checkpoint.id() : checkpoint.label();
                 String revision = checkpoint.revision() == null || checkpoint.revision().isBlank() ? "-" : shortRevision(checkpoint.revision());
                 boolean isSelected = checkpoint.id() != null && checkpoint.id().equals(selectedId);
-                String prefix = isSelected ? "▶ " : "  ";
-                rowBtn.setMessage(Component.literal(prefix + label + " · " + revision));
+                String prefix = isSelected ? "› " : "  ";
+                rowBtn.setMessage(Component.literal(prefix + label + "  [" + revision + "]"));
                 rowBtn.visible = true;
                 rowBtn.active = !isSelected;
             } else {
@@ -136,6 +154,85 @@ public class P2SCheckpointListScreen extends Screen {
                 rowBtn.active = false;
             }
         }
+    }
+
+    private void refreshControls() {
+        boolean hasSelected = ClientSessionState.getSelectedCheckpoint() != null;
+        String label = checkpointNameInput == null ? "" : checkpointNameInput.getValue().trim();
+        if (scrollUpButton != null) {
+            scrollUpButton.active = scroll > 0;
+        }
+        if (scrollDownButton != null) {
+            scrollDownButton.active = scroll < maxScroll();
+        }
+        if (createButton != null) {
+            createButton.active = true;
+        }
+        if (renameButton != null) {
+            renameButton.active = hasSelected && !label.isEmpty();
+        }
+        if (rollbackButton != null) {
+            rollbackButton.active = hasSelected;
+        }
+        if (modeButton != null) {
+            modeButton.active = hasSelected;
+            modeButton.setMessage(modeLabel());
+        }
+    }
+
+    private int maxScroll() {
+        return Math.max(0, ClientSessionState.getCheckpoints().size() - visibleRows);
+    }
+
+    private void scrollBy(int amount) {
+        scroll = Math.max(0, Math.min(maxScroll(), scroll + amount));
+        refreshRows();
+        refreshControls();
+    }
+
+    private void ensureVisible(int index) {
+        if (index < 0) {
+            return;
+        }
+        if (index < scroll) {
+            scroll = index;
+        } else if (index >= scroll + visibleRows) {
+            scroll = Math.max(0, index - visibleRows + 1);
+        }
+    }
+
+    private void moveSelection(int delta) {
+        List<ClientSessionState.CheckpointInfo> checkpoints = ClientSessionState.getCheckpoints();
+        if (checkpoints.isEmpty()) {
+            return;
+        }
+        int selectedIndex = -1;
+        ClientSessionState.CheckpointInfo selected = ClientSessionState.getSelectedCheckpoint();
+        String selectedId = selected == null ? "" : selected.id();
+        for (int i = 0; i < checkpoints.size(); i++) {
+            ClientSessionState.CheckpointInfo checkpoint = checkpoints.get(i);
+            if (checkpoint != null && checkpoint.id() != null && checkpoint.id().equals(selectedId)) {
+                selectedIndex = i;
+                break;
+            }
+        }
+        int targetIndex;
+        if (selectedIndex < 0) {
+            targetIndex = delta > 0 ? 0 : checkpoints.size() - 1;
+        } else {
+            targetIndex = Math.max(0, Math.min(checkpoints.size() - 1, selectedIndex + delta));
+        }
+        ClientSessionState.CheckpointInfo checkpoint = checkpoints.get(targetIndex);
+        if (checkpoint == null || checkpoint.id() == null || checkpoint.id().isBlank()) {
+            return;
+        }
+        ClientSessionState.selectCheckpointById(checkpoint.id());
+        if (checkpointNameInput != null && !checkpointNameInput.isFocused()) {
+            checkpointNameInput.setValue(checkpoint.label() == null ? "" : checkpoint.label());
+        }
+        ensureVisible(targetIndex);
+        refreshRows();
+        refreshControls();
     }
 
     private void selectCheckpoint(int row) {
@@ -153,6 +250,7 @@ public class P2SCheckpointListScreen extends Screen {
             checkpointNameInput.setValue(checkpoint.label() == null ? "" : checkpoint.label());
         }
         refreshRows();
+        refreshControls();
     }
 
     private void createCheckpoint() {
@@ -232,10 +330,21 @@ public class P2SCheckpointListScreen extends Screen {
     public void render(GuiGraphics gfx, int mouseX, int mouseY, float delta) {
         refreshFromStateIfNeeded();
         super.renderBackground(gfx, mouseX, mouseY, delta);
+
+        int panelWidth = Math.min(760, this.width - 40);
+        int left = (this.width - panelWidth) / 2;
+        int panelLeft = left - 8;
+        int panelTop = 18;
+        int panelRight = left + panelWidth + 8;
+        int panelBottom = Math.min(this.height - 18, listBottom + 38);
+        gfx.fill(panelLeft, panelTop, panelRight, panelBottom, 0xC0141A26);
+        gfx.fill(panelLeft, panelTop, panelRight, panelTop + 1, 0xFF2F3A4D);
+        gfx.fill(panelLeft, panelBottom - 1, panelRight, panelBottom, 0xFF2F3A4D);
+        gfx.fill(panelLeft, panelTop, panelLeft + 1, panelBottom, 0xFF2F3A4D);
+        gfx.fill(panelRight - 1, panelTop, panelRight, panelBottom, 0xFF2F3A4D);
+
         super.render(gfx, mouseX, mouseY, delta);
 
-        int panelWidth = Math.min(700, this.width - 40);
-        int left = (this.width - panelWidth) / 2;
         String fileName = ClientSessionState.getSelectedWorkspaceLabel();
         if (fileName == null || fileName.isBlank()) {
             fileName = P2SI18n.tr("screen.p2s.workspace.unnamed").getString();
@@ -253,7 +362,44 @@ public class P2SCheckpointListScreen extends Screen {
             onClose();
             return true;
         }
+        if (keyCode == GLFW.GLFW_KEY_UP && (checkpointNameInput == null || !checkpointNameInput.isFocused())) {
+            moveSelection(-1);
+            return true;
+        }
+        if (keyCode == GLFW.GLFW_KEY_DOWN && (checkpointNameInput == null || !checkpointNameInput.isFocused())) {
+            moveSelection(1);
+            return true;
+        }
+        if (keyCode == GLFW.GLFW_KEY_PAGE_UP) {
+            moveSelection(-Math.max(1, visibleRows - 1));
+            return true;
+        }
+        if (keyCode == GLFW.GLFW_KEY_PAGE_DOWN) {
+            moveSelection(Math.max(1, visibleRows - 1));
+            return true;
+        }
+        if ((keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) && checkpointNameInput != null && checkpointNameInput.isFocused()) {
+            if (ClientSessionState.getSelectedCheckpoint() != null) {
+                renameCheckpoint();
+            } else {
+                createCheckpoint();
+            }
+            return true;
+        }
         return super.keyPressed(keyCode, scanCode, modifiers);
+    }
+
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+        if (mouseX >= listLeft && mouseX <= listRight && mouseY >= listTop && mouseY <= listBottom) {
+            if (verticalAmount > 0) {
+                scrollBy(-1);
+            } else if (verticalAmount < 0) {
+                scrollBy(1);
+            }
+            return true;
+        }
+        return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
     }
 
     @Override

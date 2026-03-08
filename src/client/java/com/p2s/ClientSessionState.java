@@ -1,5 +1,7 @@
 package com.p2s;
 
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -13,6 +15,7 @@ import java.util.Locale;
 import java.util.Map;
 
 public final class ClientSessionState {
+    private static final Gson DISPLAY_GSON = new GsonBuilder().setPrettyPrinting().create();
     private static boolean hasProject = false;
     private static boolean sessionActive = false;
     private static String sessionId = "";
@@ -114,7 +117,7 @@ public final class ClientSessionState {
         pendingSummary = pendingPatchSummary == null ? "" : pendingPatchSummary;
         pendingRisk = risk == null ? "" : risk;
         pendingChangedBlocks = Math.max(0, changed);
-        currentScriptJson = scriptJson == null ? "" : scriptJson;
+        currentScriptJson = formatJsonForDisplay(scriptJson);
 
         updateWorkspaceFiles(workspaceFilesJson);
         if (sessionActive && !selectedWorkspacePath.isBlank() && !currentScriptJson.isBlank()) {
@@ -604,7 +607,18 @@ public final class ClientSessionState {
             workspaceFileScripts.remove(normalized);
             return;
         }
-        workspaceFileScripts.put(normalized, scriptJson);
+        workspaceFileScripts.put(normalized, formatJsonForDisplay(scriptJson));
+    }
+
+    private static String formatJsonForDisplay(String scriptJson) {
+        if (scriptJson == null || scriptJson.isBlank()) {
+            return "";
+        }
+        try {
+            return DISPLAY_GSON.toJson(JsonParser.parseString(scriptJson));
+        } catch (Exception ignored) {
+            return scriptJson;
+        }
     }
 
     private static synchronized void updateWorkspaceFiles(String workspaceFilesJson) {

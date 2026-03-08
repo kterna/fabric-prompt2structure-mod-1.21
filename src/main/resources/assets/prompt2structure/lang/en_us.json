@@ -315,5 +315,7 @@
   "screen.p2s.checkpoints.mode": "Mode: %s",
   "screen.p2s.checkpoints.status.creating": "Creating checkpoint...",
   "screen.p2s.checkpoints.status.renaming": "Renaming checkpoint: %s",
-  "screen.p2s.checkpoints.status.rolling_back": "Rolling back to: %s"
+  "screen.p2s.checkpoints.status.rolling_back": "Rolling back to: %s",
+  "screen.p2s.workspace.empty": "No files yet",
+  "screen.p2s.workspace.section": "WORKSPACE"
 }
