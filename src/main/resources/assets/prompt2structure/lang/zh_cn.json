@@ -67,6 +67,7 @@
   "message.p2s.session.no_project_open": "当前没有打开的项目",
   "message.p2s.session.opened": "会话已打开：%s",
   "message.p2s.session.server_chat_unavailable": "当前构建不支持服务端聊天",
+  "message.p2s.multiplayer.requires_client_and_server": "Prompt2Structure 需要客户端与服务端同时安装本模组才能使用。",
   "message.p2s.session.unknown_action": "未知会话操作：%s",
   "message.p2s.tool.unknown_tool": "未知工具",
   "message.p2s.workspace.create_from_selection_requires_selection": "从选区创建工作区文件需要完整选区",
@@ -326,5 +327,8 @@
   "screen.p2s.checkpoints.status.renaming": "正在重命名检查点：%s",
   "screen.p2s.checkpoints.status.rolling_back": "正在回滚到：%s",
   "screen.p2s.workspace.empty": "当前还没有文件",
-  "screen.p2s.workspace.section": "工作区"
+  "screen.p2s.workspace.section": "工作区",
+  "screen.p2s.chat.choice.ask": "Ask",
+  "screen.p2s.chat.choice.custom_hint": "自定义输入作为选项",
+  "screen.p2s.chat.choice.use": "提交"
 }

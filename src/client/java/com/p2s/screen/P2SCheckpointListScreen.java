@@ -1,10 +1,9 @@
 package com.p2s.screen;
 
+import com.p2s.ClientServerBridge;
 import com.google.gson.JsonObject;
 import com.p2s.ClientSessionState;
 import com.p2s.P2SI18n;
-import com.p2s.network.C2SSessionActionPayload;
-import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
@@ -257,7 +256,9 @@ public class P2SCheckpointListScreen extends Screen {
         JsonObject payload = new JsonObject();
         String label = checkpointNameInput == null ? "" : checkpointNameInput.getValue().trim();
         payload.addProperty("label", label.isEmpty() ? "manual-" + ClientSessionState.getTurnCount() : label);
-        sendSessionAction("create_checkpoint", payload.toString());
+        if (!sendSessionAction("create_checkpoint", payload.toString())) {
+            return;
+        }
         statusText = P2SI18n.tr("screen.p2s.checkpoints.status.creating");
         statusColor = 0xAAAAAA;
     }
@@ -274,7 +275,9 @@ public class P2SCheckpointListScreen extends Screen {
         JsonObject payload = new JsonObject();
         payload.addProperty("checkpoint_id", checkpoint.id());
         payload.addProperty("label", label);
-        sendSessionAction("rename_checkpoint", payload.toString());
+        if (!sendSessionAction("rename_checkpoint", payload.toString())) {
+            return;
+        }
         statusText = P2SI18n.tr("screen.p2s.checkpoints.status.renaming", label);
         statusColor = 0xAAAAAA;
     }
@@ -287,13 +290,15 @@ public class P2SCheckpointListScreen extends Screen {
         JsonObject payload = new JsonObject();
         payload.addProperty("id", checkpoint.id());
         payload.addProperty("mode", ClientSessionState.getRollbackMode());
-        sendSessionAction("rollback_checkpoint", payload.toString());
+        if (!sendSessionAction("rollback_checkpoint", payload.toString())) {
+            return;
+        }
         statusText = P2SI18n.tr("screen.p2s.checkpoints.status.rolling_back", checkpoint.label() == null ? checkpoint.id() : checkpoint.label());
         statusColor = 0xAAAAAA;
     }
 
-    private void sendSessionAction(String action, String payload) {
-        ClientPlayNetworking.send(new C2SSessionActionPayload(action, payload == null ? "" : payload));
+    private boolean sendSessionAction(String action, String payload) {
+        return ClientServerBridge.sendSessionAction(action, payload);
     }
 
     private Component modeLabel() {

@@ -41,7 +41,8 @@ public final class SessionPersistence {
             List<ChatMessageEntry> chatLog,
             List<TodoItemEntry> todoItems,
             String todoTitle,
-            String selectedWorkspacePath
+            String selectedWorkspacePath,
+            ChoiceRequestEntry pendingChoice
     ) {
     }
 
@@ -49,6 +50,12 @@ public final class SessionPersistence {
     }
 
     public record TodoItemEntry(String id, String content, String status) {
+    }
+
+    public record ChoiceRequestEntry(String requestId, String prompt, List<ChoiceOptionEntry> options) {
+    }
+
+    public record ChoiceOptionEntry(String id, String label, String description) {
     }
 
     public static synchronized void saveSession(SavedSession session) {
@@ -98,6 +105,27 @@ public final class SessionPersistence {
                 }
             }
             sessionJson.add("todoItems", todoArray);
+
+            if (session.pendingChoice() != null) {
+                JsonObject pendingChoice = new JsonObject();
+                pendingChoice.addProperty("requestId", session.pendingChoice().requestId() == null ? "" : session.pendingChoice().requestId());
+                pendingChoice.addProperty("prompt", session.pendingChoice().prompt() == null ? "" : session.pendingChoice().prompt());
+                JsonArray optionsArray = new JsonArray();
+                if (session.pendingChoice().options() != null) {
+                    for (ChoiceOptionEntry option : session.pendingChoice().options()) {
+                        if (option == null) {
+                            continue;
+                        }
+                        JsonObject optionJson = new JsonObject();
+                        optionJson.addProperty("id", option.id() == null ? "" : option.id());
+                        optionJson.addProperty("label", option.label() == null ? "" : option.label());
+                        optionJson.addProperty("description", option.description() == null ? "" : option.description());
+                        optionsArray.add(optionJson);
+                    }
+                }
+                pendingChoice.add("options", optionsArray);
+                sessionJson.add("pendingChoice", pendingChoice);
+            }
 
             Files.writeString(SESSIONS_DIR.resolve(session.id() + ".json"), GSON.toJson(sessionJson));
             updateIndex(session);
@@ -201,6 +229,30 @@ public final class SessionPersistence {
                 }
             }
 
+            ChoiceRequestEntry pendingChoice = null;
+            if (root.has("pendingChoice") && root.get("pendingChoice").isJsonObject()) {
+                JsonObject choiceObj = root.getAsJsonObject("pendingChoice");
+                List<ChoiceOptionEntry> options = new ArrayList<>();
+                if (choiceObj.has("options") && choiceObj.get("options").isJsonArray()) {
+                    for (JsonElement elem : choiceObj.getAsJsonArray("options")) {
+                        if (!elem.isJsonObject()) {
+                            continue;
+                        }
+                        JsonObject optionObj = elem.getAsJsonObject();
+                        options.add(new ChoiceOptionEntry(
+                                getStr(optionObj, "id"),
+                                getStr(optionObj, "label"),
+                                getStr(optionObj, "description")
+                        ));
+                    }
+                }
+                pendingChoice = new ChoiceRequestEntry(
+                        getStr(choiceObj, "requestId"),
+                        getStr(choiceObj, "prompt"),
+                        options
+                );
+            }
+
             return new SavedSession(
                     getStr(root, "id"),
                     getStr(root, "projectId"),
@@ -212,7 +264,8 @@ public final class SessionPersistence {
                     chatLog,
                     todoItems,
                     getStr(root, "todoTitle"),
-                    getStr(root, "selectedWorkspacePath")
+                    getStr(root, "selectedWorkspacePath"),
+                    pendingChoice
             );
         } catch (Exception e) {
             P2SMod.LOGGER.warn("Failed loading session {}: {}", id, e.getMessage());

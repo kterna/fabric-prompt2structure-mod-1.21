@@ -1,7 +1,5 @@
 package com.p2s;
 
-import com.p2s.network.C2SSetSelectionPayload;
-import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
@@ -59,6 +57,6 @@ public final class ClientSelectionManager {
     }
 
     private static void sendC2SSetSelection(int pointIndex, BlockPos pos) {
-        ClientPlayNetworking.send(new C2SSetSelectionPayload(pointIndex, pos));
+        ClientServerBridge.sendSelection(pointIndex, pos);
     }
 }

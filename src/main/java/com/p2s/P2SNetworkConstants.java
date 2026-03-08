@@ -4,7 +4,6 @@ import net.minecraft.resources.ResourceLocation;
 
 public final class P2SNetworkConstants {
     public static final ResourceLocation C2S_SET_SELECTION_ID = ResourceLocation.fromNamespaceAndPath(P2SMod.MOD_ID, "c2s_set_selection");
-    public static final ResourceLocation C2S_CHAT_MESSAGE_ID = ResourceLocation.fromNamespaceAndPath(P2SMod.MOD_ID, "c2s_chat_message");
     public static final ResourceLocation C2S_SESSION_ACTION_ID = ResourceLocation.fromNamespaceAndPath(P2SMod.MOD_ID, "c2s_session_action");
     public static final ResourceLocation C2S_TOOL_BRIDGE_ID = ResourceLocation.fromNamespaceAndPath(P2SMod.MOD_ID, "c2s_tool_bridge");
 

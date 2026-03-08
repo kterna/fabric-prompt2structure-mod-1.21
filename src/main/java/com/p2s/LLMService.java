@@ -37,42 +37,6 @@ public final class LLMService {
     private LLMService() {
     }
 
-    public static CompletableFuture<Result> requestStructure(String userPrompt) {
-        return CompletableFuture.supplyAsync(() -> {
-            String bodyJson = buildBodyForPrompt(userPrompt, ModConfig.MODEL, ModConfig.USE_TOOL_CALL, true);
-            P2SMod.LOGGER.info("LLM request -> url={}, model={}, timeout={}s", ModConfig.API_URL, ModConfig.MODEL, ModConfig.HTTP_TIMEOUT_SECONDS);
-            P2SMod.LOGGER.info("Active prompt preset: {}", ModConfig.activePromptName());
-            P2SMod.LOGGER.info("LLM prompt: {}", userPrompt);
-            if (P2SMod.DEBUG) {
-                P2SMod.LOGGER.info("[DEBUG] LLM full request body: {}", bodyJson);
-            }
-            Request request = new Request.Builder()
-                    .url(ModConfig.API_URL)
-                    .post(RequestBody.create(bodyJson, JSON))
-                    .header("Authorization", "Bearer " + ModConfig.API_KEY)
-                    .build();
-            if (P2SMod.DEBUG) {
-                P2SMod.LOGGER.info("[DEBUG] LLM request headers: method={}, url={}, headers={}", request.method(), request.url(), request.headers());
-            }
-
-            try (Response response = getClient(ModConfig.HTTP_TIMEOUT_SECONDS).newCall(request).execute()) {
-                if (!response.isSuccessful()) {
-                    String errBody = response.body() == null ? "" : response.body().string();
-                    P2SMod.LOGGER.error("LLM failed status={}, body={}", response.code(), truncate(errBody));
-                    throw new IOException("请求失败，状态码: " + response.code());
-                }
-                String respBody = response.body() == null ? "" : response.body().string();
-                P2SMod.LOGGER.info("LLM raw response (truncated): {}", truncate(respBody));
-                if (P2SMod.DEBUG) {
-                    P2SMod.LOGGER.info("[DEBUG] LLM full response body: {}", respBody);
-                }
-                return parseResponse(respBody);
-            } catch (Exception e) {
-                throw new RuntimeException("LLM 请求异常: " + e.getMessage(), e);
-            }
-        }, EXECUTOR);
-    }
-
     public static CompletableFuture<SessionResult> requestWithHistory(java.util.List<JsonObject> messages) {
         return requestWithHistoryInternal(messages, false, null, null);
     }
@@ -381,27 +345,6 @@ public final class LLMService {
                 throw new RuntimeException("LLM 请求异常: " + e.getMessage(), e);
             }
         }, EXECUTOR);
-    }
-
-    private static String buildBodyForPrompt(String userPrompt, String model, boolean useToolCall, boolean forceTool) {
-        JsonObject body = new JsonObject();
-        body.addProperty("model", model);
-
-        JsonArray messages = new JsonArray();
-        JsonObject systemMsg = new JsonObject();
-        systemMsg.addProperty("role", "system");
-        systemMsg.addProperty("content", ModConfig.currentSystemPrompt());
-        messages.add(systemMsg);
-
-        JsonObject userMsg = new JsonObject();
-        userMsg.addProperty("role", "user");
-        userMsg.addProperty("content", userPrompt);
-        messages.add(userMsg);
-
-        body.add("messages", messages);
-        body.addProperty("temperature", 0.4);
-        applyLegacyToolOrResponseFormat(body, useToolCall, forceTool);
-        return GSON.toJson(body);
     }
 
     private static String buildBodyForMessages(
@@ -1493,43 +1436,6 @@ public final class LLMService {
         return schema;
     }
 
-    private static Result parseResponse(String responseBody) throws IOException {
-        JsonObject root = JsonParser.parseString(responseBody).getAsJsonObject();
-
-        JsonArray choices = root.getAsJsonArray("choices");
-        if (choices == null || choices.isEmpty()) {
-            throw new IOException("LLM 未返回内容");
-        }
-
-        JsonObject firstChoice = choices.get(0).getAsJsonObject();
-        JsonObject message = firstChoice.getAsJsonObject("message");
-        if (message == null) {
-            throw new IOException("响应缺少 message 字段");
-        }
-
-        String textContent = message.has("content") && !message.get("content").isJsonNull()
-                ? message.get("content").getAsString() : "";
-        String fullMessage = message.toString();
-
-        ToolCallParseResult toolResult = parseToolCall(message);
-        if (toolResult != null && toolResult.script != null) {
-            return new Result(textContent, fullMessage, toolResult.script);
-        }
-
-        if (textContent == null || textContent.isBlank()) {
-            throw new IOException("响应缺少可解析内容");
-        }
-        String content = cleanContent(textContent);
-        P2SMod.LOGGER.info("LLM cleaned content (truncated): {}", truncate(content));
-        try {
-            StructureBuilder.VbsScriptV2 script = parseScriptFromContent(content);
-            return new Result(content, fullMessage, script);
-        } catch (Exception e) {
-            P2SMod.LOGGER.error("LLM content parse failed, content snippet: {}", truncate(content));
-            throw e;
-        }
-    }
-
     private static SessionResult parseSessionResponse(String responseBody) throws IOException {
         JsonObject root = JsonParser.parseString(responseBody).getAsJsonObject();
         JsonArray choices = root.getAsJsonArray("choices");
@@ -1788,9 +1694,6 @@ public final class LLMService {
                 .writeTimeout(Duration.ofSeconds(timeoutSeconds))
                 .callTimeout(Duration.ofSeconds(timeoutSeconds))
                 .build();
-    }
-
-    public record Result(String rawContent, String fullMessage, StructureBuilder.VbsScriptV2 script) {
     }
 
     private record ToolCallParseResult(StructureBuilder.VbsScriptV2 script, String toolCallId) {

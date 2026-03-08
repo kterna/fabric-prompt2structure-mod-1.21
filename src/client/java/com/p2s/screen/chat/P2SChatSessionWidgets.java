@@ -11,6 +11,13 @@ import java.util.List;
 import java.util.function.IntConsumer;
 
 public final class P2SChatSessionWidgets {
+    private static final int CHOICE_TOGGLE_WIDTH = 52;
+    private static final int CHOICE_POPUP_PADDING = 6;
+    private static final int CHOICE_POPUP_GAP = 4;
+    private static final int CHOICE_POPUP_PROMPT_LINES = 4;
+    private static final int CHOICE_POPUP_CLOSE_SIZE = 18;
+    private static final int CHOICE_POPUP_SUBMIT_WIDTH = 44;
+
     private P2SChatSessionWidgets() {
     }
 
@@ -33,9 +40,11 @@ public final class P2SChatSessionWidgets {
             int choiceButtonCount,
             int inputY,
             boolean contextEditorFocused,
+            boolean choicePopupVisible,
             String inputDraft,
             String discardReasonDraft,
             String checkpointNameDraft,
+            String choiceCustomDraft,
             String rollbackModeLabel,
             Runnable onSendMessage,
             Runnable onOpenProjects,
@@ -55,7 +64,10 @@ public final class P2SChatSessionWidgets {
             Runnable onRollbackCheckpoint,
             Runnable onRenameCheckpoint,
             Runnable onToggleRollbackMode,
+            Runnable onToggleChoicePopup,
             IntConsumer onSubmitChoice,
+            Runnable onSubmitCustomChoice,
+            Runnable onCloseChoicePopup,
             Runnable onConfirmDiscard,
             Runnable onExitDiscardMode
     ) {
@@ -79,6 +91,14 @@ public final class P2SChatSessionWidgets {
             EditBox checkpointNameInput,
             Button checkpointRenameButton,
             Button infoButton,
+            Button choiceToggleButton,
+            EditBox choiceCustomInput,
+            Button choiceCustomSubmitButton,
+            Button choicePopupCloseButton,
+            int choicePopupX,
+            int choicePopupY,
+            int choicePopupWidth,
+            int choicePopupHeight,
             EditBox discardReasonInput,
             Button discardOkButton,
             Button discardCancelButton,
@@ -87,10 +107,13 @@ public final class P2SChatSessionWidgets {
     }
 
     public static BuildResult build(Host host, Config config) {
-        int inputWidth = config.panelWidth() - config.padding() * 2 - config.buttonWidth() - 4;
+        int inputLeft = config.panelX() + config.padding();
+        int sendX = config.panelX() + config.panelWidth() - config.padding() - config.buttonWidth();
+        int choiceToggleX = sendX - CHOICE_TOGGLE_WIDTH - 4;
+        int inputWidth = Math.max(60, choiceToggleX - 4 - inputLeft);
 
         EditBox input = host.addEditBox(new EditBox(host.font(),
-                config.panelX() + config.padding(),
+                inputLeft,
                 config.inputY(),
                 inputWidth,
                 config.inputHeight(),
@@ -99,8 +122,14 @@ public final class P2SChatSessionWidgets {
         input.setValue(config.inputDraft() == null ? "" : config.inputDraft());
         input.setFocused(!config.contextEditorFocused());
 
+        Button choiceToggleButton = host.addButton(Button.builder(P2SI18n.tr("screen.p2s.chat.choice.ask"), btn -> config.onToggleChoicePopup().run())
+                .bounds(choiceToggleX, config.inputY(), CHOICE_TOGGLE_WIDTH, config.inputHeight())
+                .build());
+        choiceToggleButton.visible = false;
+        choiceToggleButton.active = false;
+
         Button sendButton = host.addButton(Button.builder(Component.literal(">"), btn -> config.onSendMessage().run())
-                .bounds(config.panelX() + config.padding() + inputWidth + 4, config.inputY(), config.buttonWidth(), config.inputHeight())
+                .bounds(sendX, config.inputY(), config.buttonWidth(), config.inputHeight())
                 .build());
 
         int topRowY = config.padding();
@@ -157,22 +186,60 @@ public final class P2SChatSessionWidgets {
                 .bounds(checkpointX + 42, checkpointY, 40, config.topButtonHeight())
                 .build());
 
-        List<Button> choiceButtons = new ArrayList<>();
-        int choiceY = checkpointY + config.topButtonHeight() + 2;
-        int choiceGap = 2;
-        int choiceWidth = (actionWidth - choiceGap * (config.choiceButtonCount() - 1)) / config.choiceButtonCount();
+        int promptLineStep = host.font().lineHeight + 1;
+        int promptHeight = CHOICE_POPUP_PROMPT_LINES * promptLineStep;
+        int choicePopupWidth = config.panelWidth() - config.padding() * 2;
+        int optionAreaHeight = config.choiceButtonCount() * config.topButtonHeight() + Math.max(0, config.choiceButtonCount() - 1) * CHOICE_POPUP_GAP;
+        int choicePopupHeight = CHOICE_POPUP_PADDING
+                + CHOICE_POPUP_CLOSE_SIZE
+                + 2
+                + promptHeight
+                + 8
+                + optionAreaHeight
+                + 8
+                + config.inputHeight()
+                + CHOICE_POPUP_PADDING;
+        int choicePopupX = config.panelX() + config.padding();
+        int choicePopupY = Math.max(checkpointY + config.topButtonHeight() + 6, config.inputY() - choicePopupHeight - 6);
+        int popupInnerX = choicePopupX + CHOICE_POPUP_PADDING;
+        int popupInnerWidth = choicePopupWidth - CHOICE_POPUP_PADDING * 2;
+        int closeButtonX = choicePopupX + choicePopupWidth - CHOICE_POPUP_PADDING - CHOICE_POPUP_CLOSE_SIZE;
+        int closeButtonY = choicePopupY + CHOICE_POPUP_PADDING;
 
+        Button choicePopupCloseButton = host.addButton(Button.builder(Component.literal("X"), btn -> config.onCloseChoicePopup().run())
+                .bounds(closeButtonX, closeButtonY, CHOICE_POPUP_CLOSE_SIZE, CHOICE_POPUP_CLOSE_SIZE)
+                .build());
+        choicePopupCloseButton.visible = config.choicePopupVisible();
+        choicePopupCloseButton.active = config.choicePopupVisible();
+
+        List<Button> choiceButtons = new ArrayList<>();
+        int optionY = closeButtonY + CHOICE_POPUP_CLOSE_SIZE + 2 + promptHeight + 8;
         for (int i = 0; i < config.choiceButtonCount(); i++) {
             final int index = i;
             Button choiceButton = host.addButton(Button.builder(Component.empty(), btn -> config.onSubmitChoice().accept(index))
-                    .bounds(rowStart + i * (choiceWidth + choiceGap), choiceY, choiceWidth, config.topButtonHeight())
+                    .bounds(popupInnerX, optionY + i * (config.topButtonHeight() + CHOICE_POPUP_GAP), popupInnerWidth, config.topButtonHeight())
                     .build());
             choiceButton.visible = false;
             choiceButton.active = false;
             choiceButtons.add(choiceButton);
         }
 
-        int discardRowY = choiceY + config.topButtonHeight() + 2;
+        int customY = optionY + optionAreaHeight + 8;
+        int customInputWidth = popupInnerWidth - CHOICE_POPUP_SUBMIT_WIDTH - CHOICE_POPUP_GAP;
+        EditBox choiceCustomInput = host.addEditBox(new EditBox(host.font(), popupInnerX, customY, customInputWidth,
+                config.inputHeight(), Component.empty()));
+        choiceCustomInput.setMaxLength(256);
+        choiceCustomInput.setHint(P2SI18n.tr("screen.p2s.chat.choice.custom_hint"));
+        choiceCustomInput.setValue(config.choiceCustomDraft() == null ? "" : config.choiceCustomDraft());
+        choiceCustomInput.visible = config.choicePopupVisible();
+
+        Button choiceCustomSubmitButton = host.addButton(Button.builder(P2SI18n.tr("screen.p2s.chat.choice.use"), btn -> config.onSubmitCustomChoice().run())
+                .bounds(popupInnerX + customInputWidth + CHOICE_POPUP_GAP, customY, CHOICE_POPUP_SUBMIT_WIDTH, config.inputHeight())
+                .build());
+        choiceCustomSubmitButton.visible = config.choicePopupVisible();
+        choiceCustomSubmitButton.active = config.choicePopupVisible();
+
+        int discardRowY = checkpointY + config.topButtonHeight() + 2;
         int discardInputWidth = actionWidth - config.buttonWidth() * 2 - 8;
         EditBox discardReasonInput = host.addEditBox(new EditBox(host.font(), rowStart, discardRowY, discardInputWidth,
                 config.inputHeight(), Component.empty()));
@@ -209,6 +276,14 @@ public final class P2SChatSessionWidgets {
                 null,
                 null,
                 infoButton,
+                choiceToggleButton,
+                choiceCustomInput,
+                choiceCustomSubmitButton,
+                choicePopupCloseButton,
+                choicePopupX,
+                choicePopupY,
+                choicePopupWidth,
+                choicePopupHeight,
                 discardReasonInput,
                 discardOkButton,
                 discardCancelButton,

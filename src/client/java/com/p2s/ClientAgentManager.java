@@ -5,10 +5,8 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import com.p2s.network.C2SSessionActionPayload;
 import com.p2s.store.SessionPersistence;
 import com.p2s.store.SkillStore;
-import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.Minecraft;
 
 import java.util.ArrayList;
@@ -165,13 +163,15 @@ public final class ClientAgentManager {
         }
         String summary = ClientSessionState.getPendingSummary();
         String pendingPath = ClientSessionState.getPendingPath();
-        ClientSessionState.clearPendingPatch();
 
         JsonObject payload = new JsonObject();
         if (pendingPath != null && !pendingPath.isBlank()) {
             payload.addProperty("path", pendingPath);
         }
-        ClientPlayNetworking.send(new C2SSessionActionPayload("apply", payload.toString()));
+        if (!ClientServerBridge.sendSessionAction("apply", payload.toString())) {
+            return;
+        }
+        ClientSessionState.clearPendingPatch();
 
         String historyContent = "User APPLIED the proposed patch. Summary: " + summary + " Continue with the next step.";
         String userMessageText = "Applied patch: " + summary;
@@ -209,7 +209,6 @@ public final class ClientAgentManager {
         }
         String summary = ClientSessionState.getPendingSummary();
         String pendingPath = ClientSessionState.getPendingPath();
-        ClientSessionState.clearPendingPatch();
 
         String safeReason = reason == null ? "" : reason.trim();
         JsonObject payload = new JsonObject();
@@ -219,7 +218,10 @@ public final class ClientAgentManager {
         if (!safeReason.isBlank()) {
             payload.addProperty("reason", safeReason);
         }
-        ClientPlayNetworking.send(new C2SSessionActionPayload("discard", payload.toString()));
+        if (!ClientServerBridge.sendSessionAction("discard", payload.toString())) {
+            return;
+        }
+        ClientSessionState.clearPendingPatch();
 
         String historyContent = "User DISCARDED the proposed patch. Summary: " + summary;
         if (!safeReason.isEmpty()) {
@@ -282,9 +284,43 @@ public final class ClientAgentManager {
             postToClient(() -> ClientSessionState.setStatus("error"));
             return;
         }
+
+        submitChoiceResponse(
+                choice,
+                "Choice selected [" + selected.id() + "]: " + selected.label(),
+                "User selected option " + selected.id() + " (" + selected.label() + ") for request: " + choice.prompt()
+        );
+    }
+
+    public static void submitCustomChoice(String customText) {
+        String custom = customText == null ? "" : customText.trim();
+        if (custom.isBlank()) {
+            return;
+        }
+
+        ClientSessionState.ChoiceRequest choice = ClientSessionState.getPendingChoice();
+        if (choice == null || choice.options() == null || choice.options().isEmpty()) {
+            postToClient(() -> ClientSessionState.setStatus("No pending choice"));
+            return;
+        }
+
+        submitChoiceResponse(
+                choice,
+                "Custom choice: " + custom,
+                "User provided a custom response for request: " + choice.prompt() + "\nCustom response: " + custom
+        );
+    }
+
+    private static void submitChoiceResponse(
+            ClientSessionState.ChoiceRequest choice,
+            String userMessageText,
+            String historyContent
+    ) {
+        if (choice == null) {
+            return;
+        }
         ClientSessionState.clearPendingChoice();
 
-        String userMessageText = "Choice selected [" + selected.id() + "]: " + selected.label();
         LocalSession session;
         synchronized (LOCK) {
             session = ensureSessionLocked();
@@ -299,8 +335,7 @@ public final class ClientAgentManager {
 
             JsonObject user = new JsonObject();
             user.addProperty("role", "user");
-            user.addProperty("content", "User selected option " + selected.id()
-                    + " (" + selected.label() + ") for request: " + choice.prompt());
+            user.addProperty("content", historyContent == null ? "" : historyContent);
             session.history.add(user);
             trimHistoryLocked(session);
         }
@@ -1330,6 +1365,23 @@ public final class ClientAgentManager {
                 todoEntries.add(new SessionPersistence.TodoItemEntry(item.id(), item.content(), item.status()));
             }
 
+            SessionPersistence.ChoiceRequestEntry pendingChoiceEntry = null;
+            ClientSessionState.ChoiceRequest pendingChoice = ClientSessionState.getPendingChoice();
+            if (pendingChoice != null && pendingChoice.options() != null && !pendingChoice.options().isEmpty()) {
+                List<SessionPersistence.ChoiceOptionEntry> optionEntries = new ArrayList<>();
+                for (ClientSessionState.ChoiceOption option : pendingChoice.options()) {
+                    if (option == null) {
+                        continue;
+                    }
+                    optionEntries.add(new SessionPersistence.ChoiceOptionEntry(option.id(), option.label(), option.description()));
+                }
+                pendingChoiceEntry = new SessionPersistence.ChoiceRequestEntry(
+                        pendingChoice.requestId(),
+                        pendingChoice.prompt(),
+                        optionEntries
+                );
+            }
+
             String title = "";
             for (ClientSessionState.ChatMessage message : chatMessages) {
                 if (!P2SI18n.isUserRole(message.role()) || message.text() == null || message.text().isBlank()) {
@@ -1366,7 +1418,8 @@ public final class ClientAgentManager {
                     chatLog,
                     todoEntries,
                     ClientSessionState.getTodoTitle(),
-                    session.selectedWorkspacePath
+                    session.selectedWorkspacePath,
+                    pendingChoiceEntry
             );
             CompletableFuture.runAsync(() -> SessionPersistence.saveSession(saved));
         } catch (Exception e) {
@@ -1377,6 +1430,13 @@ public final class ClientAgentManager {
     public static void onClientJoin() {
         synchronized (LOCK) {
             autoRestoreAttempted = false;
+        }
+        if (!ClientServerBridge.hasRequiredServer()) {
+            postToClient(() -> {
+                clearLocalSessionView();
+                ClientServerBridge.notifyMissingServer();
+            });
+            return;
         }
         postToClient(() -> {
             if (!autoRestoreAttempted) {
@@ -1402,6 +1462,9 @@ public final class ClientAgentManager {
     }
 
     public static void restoreLatestSession(String projectId, boolean notifyOnFailure) {
+        if (!ClientServerBridge.hasRequiredServer()) {
+            return;
+        }
         synchronized (LOCK) {
             autoRestoreAttempted = true;
             if (currentSession != null && currentSession.inFlight) {
@@ -1442,6 +1505,10 @@ public final class ClientAgentManager {
 
     public static void restoreSession(String sessionId) {
         if (sessionId == null || sessionId.isBlank()) {
+            return;
+        }
+        if (!ClientServerBridge.hasRequiredServer()) {
+            ClientServerBridge.notifyMissingServer();
             return;
         }
 
@@ -1495,12 +1562,29 @@ public final class ClientAgentManager {
                 }
                 ClientSessionState.setTodo(saved.todoTitle(), items);
             }
+            if (saved.pendingChoice() != null && saved.pendingChoice().options() != null && !saved.pendingChoice().options().isEmpty()) {
+                List<ClientSessionState.ChoiceOption> options = new ArrayList<>();
+                for (SessionPersistence.ChoiceOptionEntry entry : saved.pendingChoice().options()) {
+                    if (entry == null) {
+                        continue;
+                    }
+                    options.add(new ClientSessionState.ChoiceOption(entry.id(), entry.label(), entry.description()));
+                }
+                ClientSessionState.setPendingChoice(saved.pendingChoice().requestId(), saved.pendingChoice().prompt(), options);
+            }
             ClientSessionState.setStatus("restored");
         });
 
         String payload = buildStartPayload(session);
-        ClientPlayNetworking.send(new C2SSessionActionPayload("start", payload));
-        session.serverSessionStarted = true;
+        session.serverSessionStarted = ClientServerBridge.sendSessionAction("start", payload);
+        if (!session.serverSessionStarted) {
+            synchronized (LOCK) {
+                if (currentSession == session) {
+                    currentSession = null;
+                }
+            }
+            postToClient(ClientAgentManager::clearLocalSessionView);
+        }
     }
 
     public static void newSession() {
@@ -1558,7 +1642,7 @@ public final class ClientAgentManager {
         if (previous != null) {
             autoSaveSession(previous);
             if (previous.serverSessionStarted) {
-                ClientPlayNetworking.send(new C2SSessionActionPayload("end", ""));
+                ClientServerBridge.sendSessionAction("end", "");
             }
         }
         postToClient(() -> {
@@ -1600,6 +1684,10 @@ public final class ClientAgentManager {
     }
 
     private static LocalSession ensureSessionLocked() {
+        if (!ClientServerBridge.hasRequiredServer()) {
+            ClientServerBridge.notifyMissingServer();
+            return null;
+        }
         if (currentSession != null) {
             return currentSession;
         }
@@ -1629,8 +1717,11 @@ public final class ClientAgentManager {
 
         currentSession = session;
         String payload = buildStartPayload(session);
-        ClientPlayNetworking.send(new C2SSessionActionPayload("start", payload));
-        session.serverSessionStarted = true;
+        session.serverSessionStarted = ClientServerBridge.sendSessionAction("start", payload);
+        if (!session.serverSessionStarted) {
+            currentSession = null;
+            return null;
+        }
         return session;
     }
 

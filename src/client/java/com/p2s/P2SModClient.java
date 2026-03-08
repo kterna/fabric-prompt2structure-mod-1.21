@@ -10,8 +10,14 @@ public class P2SModClient implements ClientModInitializer {
         P2SClientConfig.reload();
         P2SNetworkPayloads.register();
         ClientNetworkHandler.register();
-        ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> client.execute(ClientAgentManager::onClientJoin));
-        ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> client.execute(ClientAgentManager::onClientDisconnect));
+        ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> client.execute(() -> {
+            ClientServerBridge.onJoin();
+            ClientAgentManager.onClientJoin();
+        }));
+        ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> client.execute(() -> {
+            ClientServerBridge.onDisconnect();
+            ClientAgentManager.onClientDisconnect();
+        }));
         ModKeyBindings.registerTickHandler();
         SelectionInputHandler.register();
         SelectionRenderer.register();

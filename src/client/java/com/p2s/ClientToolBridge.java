@@ -3,7 +3,6 @@ package com.p2s;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import com.p2s.network.C2SToolBridgePayload;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.Minecraft;
 
@@ -26,13 +25,19 @@ public final class ClientToolBridge {
         CompletableFuture<JsonObject> future = new CompletableFuture<>();
         PENDING.put(requestId, future);
 
+        if (!ClientServerBridge.canUseToolBridge()) {
+            future.completeExceptionally(ClientServerBridge.missingServerException());
+            PENDING.remove(requestId);
+            return future;
+        }
+
         String argumentsJson = args == null ? "{}" : GSON.toJson(args);
-        C2SToolBridgePayload payload = new C2SToolBridgePayload(requestId, toolName == null ? "" : toolName, argumentsJson);
         Minecraft mc = Minecraft.getInstance();
+        Runnable sendTask = () -> ClientPlayNetworking.send(new com.p2s.network.C2SToolBridgePayload(requestId, toolName == null ? "" : toolName, argumentsJson));
         if (mc != null) {
-            mc.execute(() -> ClientPlayNetworking.send(payload));
+            mc.execute(sendTask);
         } else {
-            ClientPlayNetworking.send(payload);
+            sendTask.run();
         }
 
         future.orTimeout(20, TimeUnit.SECONDS).whenComplete((ignored, ex) -> PENDING.remove(requestId));

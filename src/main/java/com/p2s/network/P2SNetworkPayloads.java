@@ -15,7 +15,6 @@ public final class P2SNetworkPayloads {
         REGISTERED = true;
 
         PayloadTypeRegistry.playC2S().register(C2SSetSelectionPayload.TYPE, C2SSetSelectionPayload.CODEC);
-        PayloadTypeRegistry.playC2S().register(C2SChatMessagePayload.TYPE, C2SChatMessagePayload.CODEC);
         PayloadTypeRegistry.playC2S().register(C2SSessionActionPayload.TYPE, C2SSessionActionPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(C2SToolBridgePayload.TYPE, C2SToolBridgePayload.CODEC);
 

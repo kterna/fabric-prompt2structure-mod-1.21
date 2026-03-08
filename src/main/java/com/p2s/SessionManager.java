@@ -42,16 +42,6 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
     private SessionManager() {
     }
 
-    public static void handleChatMessage(ServerPlayer player, String message) {
-        if (player == null) {
-            return;
-        }
-        sendChatResponseLocalized(player,
-                "message.p2s.session.server_chat_unavailable",
-                false,
-                "error");
-    }
-
     static boolean hasActiveSession(UUID playerId) {
         return playerId != null && sessions.containsKey(playerId);
     }

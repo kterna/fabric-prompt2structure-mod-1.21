@@ -252,12 +252,7 @@ public final class ModConfig {
     }
 
     public static String describeConfigSource() {
-        String envUrl = System.getenv("P2S_API_URL");
-        String envKey = System.getenv("P2S_API_KEY");
-        String envModel = System.getenv("P2S_MODEL");
-        return "config=" + CONFIG_PATH.toAbsolutePath()
-                + ", env(url/key/model)=" + (envUrl != null || envKey != null || envModel != null)
-                + ", activePrompt=" + ACTIVE_PROMPT_NAME;
+        return "config=" + CONFIG_PATH.toAbsolutePath();
     }
 
     public static synchronized void reload() {

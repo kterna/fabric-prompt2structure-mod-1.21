@@ -5,14 +5,12 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import com.p2s.network.C2SSessionActionPayload;
 import com.p2s.screen.P2SConfigScreen;
 import com.p2s.screen.P2SCheckpointListScreen;
 import com.p2s.screen.P2SProjectListScreen;
 import com.p2s.screen.P2SSessionListScreen;
 import com.p2s.screen.chat.P2SChatContextWidgets;
 import com.p2s.screen.chat.P2SChatSessionWidgets;
-import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.AbstractWidget;
@@ -81,7 +79,18 @@ public class P2SChatScreen extends Screen {
     private Button checkpointModeButton;
     private EditBox checkpointNameInput;
     private Button checkpointRenameButton;
+    private Button choiceToggleButton;
+    private EditBox choiceCustomInput;
+    private Button choiceCustomSubmitButton;
+    private Button choicePopupCloseButton;
     private final List<Button> choiceButtons = new ArrayList<>();
+    private boolean choicePopupVisible = false;
+    private String choiceCustomDraft = "";
+    private String activeChoiceRequestId = "";
+    private int choicePopupX = 0;
+    private int choicePopupY = 0;
+    private int choicePopupWidth = 0;
+    private int choicePopupHeight = 0;
     private double scrollOffset;
 
     private boolean infoOverlayVisible = false;
@@ -303,6 +312,9 @@ public class P2SChatScreen extends Screen {
         if (discardReasonInput != null) {
             discardReasonDraft = discardReasonInput.getValue();
         }
+        if (choiceCustomInput != null) {
+            choiceCustomDraft = choiceCustomInput.getValue();
+        }
         if (checkpointNameInput != null) {
             checkpointNameDraft = checkpointNameInput.getValue();
         }
@@ -347,7 +359,15 @@ public class P2SChatScreen extends Screen {
             checkpointNameInput = null;
             checkpointRenameButton = null;
             infoButton = null;
+            choiceToggleButton = null;
+            choiceCustomInput = null;
+            choiceCustomSubmitButton = null;
+            choicePopupCloseButton = null;
             choiceButtons.clear();
+            choicePopupX = 0;
+            choicePopupY = 0;
+            choicePopupWidth = 0;
+            choicePopupHeight = 0;
             discardReasonInput = null;
             discardOkButton = null;
             discardCancelButton = null;
@@ -384,9 +404,11 @@ public class P2SChatScreen extends Screen {
                         CHOICE_BUTTON_COUNT,
                         getInputY(),
                         contextEditorFocused,
+                        choicePopupVisible,
                         inputDraft,
                         discardReasonDraft,
                         checkpointNameDraft,
+                        choiceCustomDraft,
                         modeLabel(),
                         this::sendMessage,
                         () -> this.minecraft.setScreen(new P2SProjectListScreen(this)),
@@ -396,6 +418,9 @@ public class P2SChatScreen extends Screen {
                         () -> {
                             infoOverlayVisible = !infoOverlayVisible;
                             infoOverlayScroll = 0;
+                            if (infoOverlayVisible && choicePopupVisible) {
+                                closeChoicePopup();
+                            }
                         },
                         () -> this.minecraft.setScreen(new P2SConfigScreen(this)),
                         () -> this.minecraft.setScreen(new P2SCheckpointListScreen(this)),
@@ -409,7 +434,10 @@ public class P2SChatScreen extends Screen {
                         this::rollbackSelectedCheckpoint,
                         this::renameSelectedCheckpoint,
                         ClientSessionState::toggleRollbackMode,
+                        this::toggleChoicePopup,
                         this::submitChoice,
+                        this::submitCustomChoice,
+                        this::closeChoicePopup,
                         this::confirmDiscard,
                         this::exitDiscardReasonMode
                 )
@@ -432,11 +460,25 @@ public class P2SChatScreen extends Screen {
         checkpointNameInput = sessionWidgets.checkpointNameInput();
         checkpointRenameButton = sessionWidgets.checkpointRenameButton();
         infoButton = sessionWidgets.infoButton();
+        choiceToggleButton = sessionWidgets.choiceToggleButton();
+        choiceCustomInput = sessionWidgets.choiceCustomInput();
+        choiceCustomSubmitButton = sessionWidgets.choiceCustomSubmitButton();
+        choicePopupCloseButton = sessionWidgets.choicePopupCloseButton();
+        choicePopupX = sessionWidgets.choicePopupX();
+        choicePopupY = sessionWidgets.choicePopupY();
+        choicePopupWidth = sessionWidgets.choicePopupWidth();
+        choicePopupHeight = sessionWidgets.choicePopupHeight();
         discardReasonInput = sessionWidgets.discardReasonInput();
         discardOkButton = sessionWidgets.discardOkButton();
         discardCancelButton = sessionWidgets.discardCancelButton();
         choiceButtons.clear();
         choiceButtons.addAll(sessionWidgets.choiceButtons());
+        if (choicePopupVisible && choiceCustomInput != null) {
+            choiceCustomInput.setFocused(true);
+            if (input != null) {
+                input.setFocused(false);
+            }
+        }
     }
 
     private void initContextWidgets(int panelX) {
@@ -769,6 +811,10 @@ public class P2SChatScreen extends Screen {
 
     private void openWorkspaceDoc(String pathValue, boolean preservePendingJump) {
         if (pathValue == null || pathValue.isBlank()) {
+            return;
+        }
+        if (ClientSessionState.isActive() && !ClientServerBridge.canSendSessionAction()) {
+            ClientServerBridge.notifyMissingServer();
             return;
         }
         if (!preservePendingJump) {
@@ -2509,6 +2555,21 @@ public class P2SChatScreen extends Screen {
             return super.keyPressed(keyCode, scanCode, modifiers);
         }
 
+        if (choicePopupVisible) {
+            if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
+                closeChoicePopup();
+                return true;
+            }
+            if ((keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER)
+                    && choiceCustomInput != null && choiceCustomInput.isFocused()) {
+                submitCustomChoice();
+                return true;
+            }
+            if (choiceCustomInput != null && choiceCustomInput.keyPressed(keyCode, scanCode, modifiers)) {
+                return true;
+            }
+        }
+
         if (contextSelectionConfirmVisible) {
             if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
                 hideContextSelectionConfirm();
@@ -2564,6 +2625,9 @@ public class P2SChatScreen extends Screen {
                 return true;
             }
             return super.charTyped(codePoint, modifiers);
+        }
+        if (choicePopupVisible && choiceCustomInput != null && choiceCustomInput.charTyped(codePoint, modifiers)) {
+            return true;
         }
         if (handleContextEditorCharTyped(codePoint, modifiers)) {
             return true;
@@ -2626,6 +2690,17 @@ public class P2SChatScreen extends Screen {
                 return true;
             }
             hideContextSelectionConfirm();
+        }
+
+        if (button == 0 && choicePopupVisible) {
+            if (isInsideChoicePopup(mouseX, mouseY)) {
+                if (!isInsideChoicePopupWidget(mouseX, mouseY)) {
+                    return true;
+                }
+            } else if (!isInsideWidget(choiceToggleButton, mouseX, mouseY)) {
+                closeChoicePopup();
+                return true;
+            }
         }
 
         if (button == 0 && isInsideContextEditor(mouseX, mouseY)) {
@@ -2704,6 +2779,10 @@ public class P2SChatScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+        if (choicePopupVisible && isInsideChoicePopup(mouseX, mouseY)) {
+            return true;
+        }
+
         // Handle info overlay scrolling
         if (infoOverlayVisible) {
             int panelWidth = getPanelWidth();
@@ -2748,6 +2827,7 @@ public class P2SChatScreen extends Screen {
 
     @Override
     public void render(GuiGraphics gfx, int mouseX, int mouseY, float delta) {
+        syncChoicePopupRequestState();
         refreshChoiceButtons();
         syncCheckpointNameDraftFromSelection();
         if (checkpointModeButton != null) { checkpointModeButton.setMessage(Component.literal(modeLabel())); }
@@ -2761,6 +2841,9 @@ public class P2SChatScreen extends Screen {
         syncInlineDiffIfNeeded();
         if (discardReasonMode && !ClientSessionState.hasPendingPatch()) {
             exitDiscardReasonMode();
+        }
+        if (discardReasonMode && choicePopupVisible) {
+            closeChoicePopup();
         }
         boolean selectedPending = canActOnSelectedPendingPatch();
         if (contextApplyButton != null) {
@@ -2845,6 +2928,7 @@ public class P2SChatScreen extends Screen {
         }
 
         drawDockChrome(gfx, panelX);
+        drawChoicePopup(gfx);
 
         // Update info button label
         if (infoButton != null) {
@@ -3236,6 +3320,9 @@ public class P2SChatScreen extends Screen {
         if (checkpointNameInput != null) {
             boxes.add(checkpointNameInput);
         }
+        if (choiceCustomInput != null) {
+            boxes.add(choiceCustomInput);
+        }
         return boxes;
     }
 
@@ -3490,9 +3577,6 @@ public class P2SChatScreen extends Screen {
         maxBottom = Math.max(maxBottom, getVisibleWidgetBottom(discardReasonInput));
         maxBottom = Math.max(maxBottom, getVisibleWidgetBottom(discardOkButton));
         maxBottom = Math.max(maxBottom, getVisibleWidgetBottom(discardCancelButton));
-        for (Button choiceButton : choiceButtons) {
-            maxBottom = Math.max(maxBottom, getVisibleWidgetBottom(choiceButton));
-        }
         return Math.max(TOP_BUTTON_HEIGHT * 3 + 8, maxBottom - PADDING + 6) + CHAT_HEADER_META_HEIGHT;
     }
 
@@ -3507,8 +3591,20 @@ public class P2SChatScreen extends Screen {
         return this.height - INPUT_HEIGHT - PADDING;
     }
 
+    private int getChoicePopupTop() {
+        if (!choicePopupVisible || !ClientSessionState.hasPendingChoice() || choicePopupHeight <= 0) {
+            return Integer.MAX_VALUE;
+        }
+        return choicePopupY;
+    }
+
     private int getStatusY() {
-        return getInputY() - this.font.lineHeight - 4;
+        int base = getInputY() - this.font.lineHeight - 4;
+        int popupTop = getChoicePopupTop();
+        if (popupTop == Integer.MAX_VALUE) {
+            return base;
+        }
+        return Math.min(base, popupTop - this.font.lineHeight - 8);
     }
 
     private int getMessageTop(int panelWidth) {
@@ -3516,7 +3612,12 @@ public class P2SChatScreen extends Screen {
     }
 
     private int getMessageBottom() {
-        return getStatusY() - 4;
+        int base = getStatusY() - 4;
+        int popupTop = getChoicePopupTop();
+        if (popupTop == Integer.MAX_VALUE) {
+            return base;
+        }
+        return Math.min(base, popupTop - 8);
     }
 
     private List<FormattedCharSequence> getSummaryLines(int contentWidth) {
@@ -3700,11 +3801,13 @@ public class P2SChatScreen extends Screen {
         JsonObject payload = new JsonObject();
         payload.addProperty("path", selectedWorkspacePath);
         payload.addProperty("new_path", value.trim());
+        if (!sendSessionAction("workspace_file_rename", payload.toString())) {
+            return;
+        }
         rememberWorkspaceFoldersForPath(value.trim());
         selectedExplorerFolderPath = parentFolderOfWorkspacePath(value.trim());
         workspaceExpandedSelectionPath = "";
         exitWorkspaceRenameMode();
-        sendSessionAction("workspace_file_rename", payload.toString());
         setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.renaming_workspace"), 0xAAAAAA);
     }
 
@@ -3715,7 +3818,9 @@ public class P2SChatScreen extends Screen {
         }
         JsonObject payload = new JsonObject();
         payload.addProperty("path", selectedWorkspacePath);
-        sendSessionAction("workspace_file_delete", payload.toString());
+        if (!sendSessionAction("workspace_file_delete", payload.toString())) {
+            return;
+        }
         workspaceRenameMode = false;
         workspaceRenameDraft = "";
         contextLoadedDocId = "";
@@ -3735,37 +3840,202 @@ public class P2SChatScreen extends Screen {
         sendSessionAction("rollback_checkpoint", payload.toString());
     }
 
-    private void refreshChoiceButtons() {
-        if (choiceButtons.isEmpty()) {
-            return;
+    private void syncChoicePopupRequestState() {
+        ClientSessionState.ChoiceRequest choice = ClientSessionState.getPendingChoice();
+        String requestId = choice == null ? "" : choice.requestId();
+        if (!requestId.equals(activeChoiceRequestId)) {
+            activeChoiceRequestId = requestId;
+            choiceCustomDraft = "";
+            if (choiceCustomInput != null) {
+                choiceCustomInput.setValue("");
+                choiceCustomInput.setFocused(false);
+            }
+            choicePopupVisible = !requestId.isBlank();
+            if (choicePopupVisible) {
+                infoOverlayVisible = false;
+                if (input != null) {
+                    input.setFocused(false);
+                }
+                if (choiceCustomInput != null) {
+                    choiceCustomInput.setFocused(true);
+                }
+            }
         }
+        if (requestId.isBlank()) {
+            activeChoiceRequestId = "";
+            choicePopupVisible = false;
+        }
+    }
+
+    private void refreshChoiceButtons() {
         ClientSessionState.ChoiceRequest choice = ClientSessionState.getPendingChoice();
         List<ClientSessionState.ChoiceOption> options = choice == null ? List.of() : choice.options();
+        boolean hasChoice = !options.isEmpty();
+        if (!hasChoice) {
+            choicePopupVisible = false;
+        }
+
+        if (choiceToggleButton != null) {
+            choiceToggleButton.visible = hasChoice;
+            choiceToggleButton.active = hasChoice;
+            String askLabel = P2SI18n.tr("screen.p2s.chat.choice.ask").getString();
+            choiceToggleButton.setMessage(Component.literal(askLabel + (choicePopupVisible ? " ▲" : " ▼")));
+        }
+
+        boolean showPopup = hasChoice && choicePopupVisible;
         for (int i = 0; i < choiceButtons.size(); i++) {
             Button button = choiceButtons.get(i);
-            if (i < options.size()) {
+            if (showPopup && i < options.size()) {
                 ClientSessionState.ChoiceOption option = options.get(i);
                 button.visible = true;
                 button.active = true;
-                button.setMessage(Component.literal(shortChoiceLabel(option.label())));
+                button.setMessage(Component.literal(choiceButtonLabel(option)));
             } else {
                 button.visible = false;
                 button.active = false;
                 button.setMessage(Component.empty());
             }
         }
+
+        if (choiceCustomInput != null) {
+            choiceCustomInput.visible = showPopup;
+            if (!showPopup) {
+                choiceCustomInput.setFocused(false);
+            }
+        }
+        if (choiceCustomSubmitButton != null) {
+            choiceCustomSubmitButton.visible = showPopup;
+            choiceCustomSubmitButton.active = showPopup
+                    && choiceCustomInput != null
+                    && choiceCustomInput.getValue() != null
+                    && !choiceCustomInput.getValue().trim().isEmpty();
+        }
+        if (choicePopupCloseButton != null) {
+            choicePopupCloseButton.visible = showPopup;
+            choicePopupCloseButton.active = showPopup;
+        }
     }
 
-    private String shortChoiceLabel(String label) {
-        if (label == null) {
+    private String choiceButtonLabel(ClientSessionState.ChoiceOption option) {
+        if (option == null) {
             return "";
         }
-        String text = label.trim();
-        int max = 12;
-        if (text.length() <= max) {
-            return text;
+        String label = option.label() == null ? "" : option.label().trim();
+        String description = option.description() == null ? "" : option.description().trim();
+        if (description.isBlank()) {
+            return label;
         }
-        return text.substring(0, max - 3) + "...";
+        return label + " — " + description;
+    }
+
+    private List<FormattedCharSequence> getChoicePopupPromptLines(int contentWidth) {
+        ClientSessionState.ChoiceRequest choice = ClientSessionState.getPendingChoice();
+        if (choice == null || choice.prompt() == null || choice.prompt().isBlank()) {
+            return List.of();
+        }
+        List<FormattedCharSequence> lines = this.font.split(Component.literal(choice.prompt().trim()), Math.max(40, contentWidth));
+        int maxLines = 4;
+        if (lines.size() <= maxLines) {
+            return lines;
+        }
+        return new ArrayList<>(lines.subList(0, maxLines));
+    }
+
+    private void drawChoicePopup(GuiGraphics gfx) {
+        if (!choicePopupVisible || !ClientSessionState.hasPendingChoice() || choicePopupWidth <= 0 || choicePopupHeight <= 0) {
+            return;
+        }
+        int panelWidth = getPanelWidth();
+        int panelLeft = getPanelX(panelWidth);
+        int panelRight = this.width;
+        int left = choicePopupX;
+        int top = choicePopupY;
+        int right = left + choicePopupWidth;
+        int bottom = top + choicePopupHeight;
+        gfx.fill(panelLeft, Math.max(0, top - 6), panelRight, Math.min(this.height, bottom + 6), 0xFF0B1118);
+        gfx.fill(left - 1, top - 1, right + 1, bottom + 1, 0xFF5C7390);
+        gfx.fill(left, top, right, bottom, 0xFF111722);
+        gfx.fill(left + 1, top + 1, right - 1, bottom - 1, 0xFF161D2A);
+        gfx.fill(left, top, right, top + 22, 0xFF1C2635);
+        gfx.fill(left, top, right, top + 1, 0xFF8AA6C9);
+        gfx.fill(left, bottom - 1, right, bottom, 0xFF4C627F);
+        gfx.fill(left, top, left + 1, bottom, 0xFF4C627F);
+        gfx.fill(right - 1, top, right, bottom, 0xFF4C627F);
+
+        int titleX = left + 6;
+        int titleY = top + 6;
+        gfx.drawString(this.font, P2SI18n.tr("screen.p2s.chat.overlay.action_required"), titleX, titleY, 0xFFCC66, false);
+        int dividerY = titleY + this.font.lineHeight + 4;
+        gfx.fill(left + 6, dividerY, right - 6, dividerY + 1, 0x884C627F);
+
+        int promptY = dividerY + 6;
+        List<FormattedCharSequence> promptLines = getChoicePopupPromptLines(choicePopupWidth - 16);
+        int lineStep = this.font.lineHeight + 1;
+        for (int i = 0; i < promptLines.size(); i++) {
+            gfx.drawString(this.font, promptLines.get(i), left + 6, promptY + i * lineStep, 0xE6EEF9, false);
+        }
+    }
+
+    private boolean isInsideChoicePopup(double mouseX, double mouseY) {
+        return choicePopupVisible
+                && choicePopupWidth > 0
+                && choicePopupHeight > 0
+                && mouseX >= choicePopupX
+                && mouseX <= choicePopupX + choicePopupWidth
+                && mouseY >= choicePopupY
+                && mouseY <= choicePopupY + choicePopupHeight;
+    }
+
+    private boolean isInsideChoicePopupWidget(double mouseX, double mouseY) {
+        if (isInsideWidget(choiceCustomInput, mouseX, mouseY)
+                || isInsideWidget(choiceCustomSubmitButton, mouseX, mouseY)
+                || isInsideWidget(choicePopupCloseButton, mouseX, mouseY)) {
+            return true;
+        }
+        for (Button button : choiceButtons) {
+            if (isInsideWidget(button, mouseX, mouseY)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isInsideWidget(AbstractWidget widget, double mouseX, double mouseY) {
+        return widget != null
+                && widget.visible
+                && mouseX >= widget.getX()
+                && mouseX <= widget.getX() + widget.getWidth()
+                && mouseY >= widget.getY()
+                && mouseY <= widget.getY() + widget.getHeight();
+    }
+
+    private void toggleChoicePopup() {
+        if (!ClientSessionState.hasPendingChoice()) {
+            return;
+        }
+        if (choicePopupVisible) {
+            closeChoicePopup();
+            return;
+        }
+        choicePopupVisible = true;
+        infoOverlayVisible = false;
+        if (choiceCustomInput != null) {
+            choiceCustomInput.setFocused(true);
+        }
+        if (input != null) {
+            input.setFocused(false);
+        }
+    }
+
+    private void closeChoicePopup() {
+        if (choiceCustomInput != null) {
+            choiceCustomDraft = choiceCustomInput.getValue();
+            choiceCustomInput.setFocused(false);
+        }
+        choicePopupVisible = false;
+        if (!discardReasonMode && input != null) {
+            input.setFocused(true);
+        }
     }
 
     private static int roleColor(String role) {
@@ -3800,6 +4070,9 @@ public class P2SChatScreen extends Screen {
             return;
         }
         discardReasonMode = true;
+        if (choicePopupVisible) {
+            closeChoicePopup();
+        }
         if (discardReasonInput != null) {
             discardReasonInput.setValue("");
             discardReasonInput.setFocused(true);
@@ -3867,11 +4140,26 @@ public class P2SChatScreen extends Screen {
         if (option == null || option.id() == null || option.id().isBlank()) {
             return;
         }
+        closeChoicePopup();
+        choiceCustomDraft = "";
         ClientAgentManager.submitChoiceSelection(option.id());
     }
 
-    private void sendSessionAction(String action, String payload) {
-        ClientPlayNetworking.send(new C2SSessionActionPayload(action == null ? "" : action, payload == null ? "" : payload));
+    private void submitCustomChoice() {
+        String custom = choiceCustomInput != null ? choiceCustomInput.getValue() : choiceCustomDraft;
+        if (custom == null || custom.trim().isEmpty()) {
+            return;
+        }
+        closeChoicePopup();
+        if (choiceCustomInput != null) {
+            choiceCustomInput.setValue("");
+        }
+        choiceCustomDraft = "";
+        ClientAgentManager.submitCustomChoice(custom);
+    }
+
+    private boolean sendSessionAction(String action, String payload) {
+        return ClientServerBridge.sendSessionAction(action, payload);
     }
 
     @Override

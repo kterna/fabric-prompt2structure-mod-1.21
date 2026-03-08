@@ -23,6 +23,10 @@ public class P2SMod implements ModInitializer {
 		ModCommandRegistry.register();
 		ServerNetworkHandler.register();
 		LOGGER.info("Prompt-to-Structure module loaded. {}", ModConfig.describeConfigSource());
-		LOGGER.info("Using API URL: {}, model: {}, timeout: {}s, prompt: {}, toolCall: {}", ModConfig.API_URL, ModConfig.MODEL, ModConfig.HTTP_TIMEOUT_SECONDS, ModConfig.activePromptName(), ModConfig.USE_TOOL_CALL);
+		LOGGER.info("Server bridge mode enabled. maxPatchOps={}, maxBlocksPerCommit={}, confirmRequired={}, riskAutoApplyThreshold={}",
+				ModConfig.MAX_PATCH_OPS,
+				ModConfig.MAX_BLOCKS_PER_COMMIT,
+				ModConfig.CONFIRM_REQUIRED,
+				ModConfig.RISK_AUTO_APPLY_THRESHOLD);
 	}
 }

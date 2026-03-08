@@ -1,6 +1,5 @@
 package com.p2s;
 
-import com.p2s.network.C2SChatMessagePayload;
 import com.p2s.network.C2SSetSelectionPayload;
 import com.p2s.network.C2SSessionActionPayload;
 import com.p2s.network.C2SToolBridgePayload;
@@ -19,14 +18,6 @@ public final class ServerNetworkHandler {
                 P2SMod.LOGGER.info("[DEBUG] S->C2SSetSelection received -> player={}, pointIndex={}, pos={}", player.getGameProfile().getName(), payload.pointIndex(), payload.pos());
             }
             runOnPlayerServer(player, () -> SelectionManager.handleClientSelection(player, payload.pointIndex(), payload.pos()));
-        });
-
-        ServerPlayNetworking.registerGlobalReceiver(C2SChatMessagePayload.TYPE, (payload, context) -> {
-            ServerPlayer player = context.player();
-            if (P2SMod.DEBUG) {
-                P2SMod.LOGGER.info("[DEBUG] S->C2SChatMessage received -> player={}, messageLen={}", player.getGameProfile().getName(), payload.message() == null ? 0 : payload.message().length());
-            }
-            runOnPlayerServer(player, () -> SessionManager.handleChatMessage(player, payload.message()));
         });
 
         ServerPlayNetworking.registerGlobalReceiver(C2SSessionActionPayload.TYPE, (payload, context) -> {

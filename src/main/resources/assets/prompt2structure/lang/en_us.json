@@ -67,6 +67,7 @@
   "message.p2s.session.no_project_open": "No project open",
   "message.p2s.session.opened": "Session opened: %s",
   "message.p2s.session.server_chat_unavailable": "Server chat is unavailable in this build",
+  "message.p2s.multiplayer.requires_client_and_server": "Prompt2Structure requires the mod on both the client and the server.",
   "message.p2s.session.unknown_action": "Unknown session action: %s",
   "message.p2s.tool.unknown_tool": "Unknown tool",
   "message.p2s.workspace.create_from_selection_requires_selection": "Creating from selection requires a complete selection",
@@ -326,5 +327,8 @@
   "screen.p2s.checkpoints.status.renaming": "Renaming checkpoint: %s",
   "screen.p2s.checkpoints.status.rolling_back": "Rolling back to: %s",
   "screen.p2s.workspace.empty": "No files yet",
-  "screen.p2s.workspace.section": "WORKSPACE"
+  "screen.p2s.workspace.section": "WORKSPACE",
+  "screen.p2s.chat.choice.ask": "Ask",
+  "screen.p2s.chat.choice.custom_hint": "Type a custom option",
+  "screen.p2s.chat.choice.use": "Use"
 }
