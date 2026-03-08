@@ -33,7 +33,7 @@ public final class P2SClientConfig {
     private static final boolean DEFAULT_AUTO_APPLY_PATCH = false;
     private static final boolean DEFAULT_AUTO_COMPACT_ENABLED = true;
     private static final int DEFAULT_AUTO_COMPACT_TOKEN_LIMIT = 24_000;
-    private static final int DEFAULT_COMPACT_RETAIN_USER_TOKEN_BUDGET = 6_000;
+    private static final int DEFAULT_COMPACT_RETAIN_USER_TOKEN_BUDGET = 20_000;
     private static final String DEFAULT_SYSTEM_PROMPT = ModConfig.DEFAULT_SYSTEM_PROMPT;
     private static final String DEFAULT_COMPACT_PROMPT = """
             You are performing a CONTEXT CHECKPOINT COMPACTION for a Prompt2Structure client session.
@@ -222,6 +222,8 @@ public final class P2SClientConfig {
             String rawModel,
             Integer rawTimeoutSeconds,
             Boolean rawUseToolCall,
+            Integer rawAutoCompactTokenLimit,
+            Integer rawCompactRetainUserTokenBudget,
             String rawSystemPrompt,
             boolean persist
     ) {
@@ -230,9 +232,17 @@ public final class P2SClientConfig {
         String nextModel = normalizeNonBlank(rawModel);
         Integer nextTimeout = normalizePositiveInt(rawTimeoutSeconds);
         Boolean nextToolCall = rawUseToolCall;
+        Integer nextAutoCompactTokenLimit = normalizePositiveInt(rawAutoCompactTokenLimit);
+        Integer nextCompactRetainUserTokenBudget = normalizePositiveInt(rawCompactRetainUserTokenBudget);
         String nextSystemPrompt = rawSystemPrompt == null ? null : rawSystemPrompt.trim();
 
-        if (nextApiUrl == null || nextApiKey == null || nextModel == null || nextTimeout == null || nextToolCall == null) {
+        if (nextApiUrl == null
+                || nextApiKey == null
+                || nextModel == null
+                || nextTimeout == null
+                || nextToolCall == null
+                || nextAutoCompactTokenLimit == null
+                || nextCompactRetainUserTokenBudget == null) {
             return false;
         }
         if (nextSystemPrompt == null || nextSystemPrompt.isBlank()) {
@@ -244,6 +254,8 @@ public final class P2SClientConfig {
         model = nextModel;
         httpTimeoutSeconds = nextTimeout;
         useToolCall = nextToolCall;
+        autoCompactTokenLimit = nextAutoCompactTokenLimit;
+        compactRetainUserTokenBudget = nextCompactRetainUserTokenBudget;
         systemPrompt = nextSystemPrompt;
         if (persist) {
             save();

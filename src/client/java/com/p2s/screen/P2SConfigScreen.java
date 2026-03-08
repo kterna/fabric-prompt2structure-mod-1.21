@@ -33,6 +33,8 @@ public class P2SConfigScreen extends Screen {
     private EditBox apiKeyInput;
     private EditBox modelInput;
     private EditBox timeoutInput;
+    private EditBox autoCompactTokenLimitInput;
+    private EditBox compactRetainUserTokenBudgetInput;
     private P2SMultiLineTextEditor systemPromptEditor;
     private Button toolCallButton;
     private Button streamingButton;
@@ -203,6 +205,17 @@ public class P2SConfigScreen extends Screen {
         }).bounds(left + 480, y + 14, 180, 20).build());
         y += 50;
 
+        autoCompactTokenLimitInput = new EditBox(this.font, left + 10, y + 14, 170, 20, P2SI18n.tr("screen.p2s.config.llm.auto_compact_token_limit"));
+        autoCompactTokenLimitInput.setMaxLength(8);
+        autoCompactTokenLimitInput.setValue(Integer.toString(P2SClientConfig.getAutoCompactTokenLimit()));
+        addRenderableWidget(autoCompactTokenLimitInput);
+
+        compactRetainUserTokenBudgetInput = new EditBox(this.font, left + 200, y + 14, 220, 20, P2SI18n.tr("screen.p2s.config.llm.compact_retain_user_tokens"));
+        compactRetainUserTokenBudgetInput.setMaxLength(8);
+        compactRetainUserTokenBudgetInput.setValue(Integer.toString(P2SClientConfig.getCompactRetainUserTokenBudget()));
+        addRenderableWidget(compactRetainUserTokenBudgetInput);
+        y += 50 + compactHintHeight(panelWidth);
+
         int promptY = y + 14;
         systemPromptEditor = new P2SMultiLineTextEditor(this.font);
         systemPromptEditor.setMaxLength(2048);
@@ -241,20 +254,28 @@ public class P2SConfigScreen extends Screen {
         return Math.max(40, Math.min(180, available));
     }
 
+    private int compactHintHeight(int panelWidth) {
+        return Math.max(this.font.lineHeight, this.font.split(P2SI18n.tr("screen.p2s.config.llm.compact_threshold_hint"), panelWidth - 20).size() * (this.font.lineHeight + 1));
+    }
+
     private void saveLlmConfig() {
-        Integer timeout = parseTimeout(timeoutInput == null ? "" : timeoutInput.getValue());
+        Integer timeout = parsePositiveInt(timeoutInput == null ? "" : timeoutInput.getValue());
+        Integer autoCompactTokenLimit = parsePositiveInt(autoCompactTokenLimitInput == null ? "" : autoCompactTokenLimitInput.getValue());
+        Integer compactRetainUserTokenBudget = parsePositiveInt(compactRetainUserTokenBudgetInput == null ? "" : compactRetainUserTokenBudgetInput.getValue());
         boolean ok = P2SClientConfig.setLlmConfig(
                 apiUrlInput == null ? "" : apiUrlInput.getValue(),
                 apiKeyInput == null ? "" : apiKeyInput.getValue(),
                 modelInput == null ? "" : modelInput.getValue(),
                 timeout,
                 useToolCall,
+                autoCompactTokenLimit,
+                compactRetainUserTokenBudget,
                 systemPromptEditor == null ? "" : systemPromptEditor.getText(),
-                true
+                false
         );
-        P2SClientConfig.setUseStreaming(useStreaming, true);
-        P2SClientConfig.setAutoApplyPatch(autoApplyPatch, true);
         if (ok) {
+            P2SClientConfig.setUseStreaming(useStreaming, false);
+            P2SClientConfig.setAutoApplyPatch(autoApplyPatch, true);
             statusText = P2SI18n.tr("screen.p2s.status.saved");
             statusColor = 0x55FF55;
         } else {
@@ -269,6 +290,8 @@ public class P2SConfigScreen extends Screen {
         if (apiKeyInput != null) apiKeyInput.setValue(P2SClientConfig.getApiKey());
         if (modelInput != null) modelInput.setValue(P2SClientConfig.getModel());
         if (timeoutInput != null) timeoutInput.setValue(Integer.toString(P2SClientConfig.getHttpTimeoutSeconds()));
+        if (autoCompactTokenLimitInput != null) autoCompactTokenLimitInput.setValue(Integer.toString(P2SClientConfig.getAutoCompactTokenLimit()));
+        if (compactRetainUserTokenBudgetInput != null) compactRetainUserTokenBudgetInput.setValue(Integer.toString(P2SClientConfig.getCompactRetainUserTokenBudget()));
         if (systemPromptEditor != null) systemPromptEditor.setText(P2SClientConfig.getSystemPrompt());
         useToolCall = P2SClientConfig.isUseToolCall();
         if (toolCallButton != null) toolCallButton.setMessage(toolCallLabel());
@@ -280,7 +303,7 @@ public class P2SConfigScreen extends Screen {
         statusColor = 0x55FF55;
     }
 
-    private Integer parseTimeout(String raw) {
+    private Integer parsePositiveInt(String raw) {
         if (raw == null || raw.isBlank()) return null;
         try {
             return Integer.parseInt(raw.trim());
@@ -510,6 +533,8 @@ public class P2SConfigScreen extends Screen {
             if (apiKeyInput != null) apiKeyInput.setFocused(false);
             if (modelInput != null) modelInput.setFocused(false);
             if (timeoutInput != null) timeoutInput.setFocused(false);
+            if (autoCompactTokenLimitInput != null) autoCompactTokenLimitInput.setFocused(false);
+            if (compactRetainUserTokenBudgetInput != null) compactRetainUserTokenBudgetInput.setFocused(false);
             return true;
         }
         if (button == 0 && systemPromptEditor != null) {
@@ -545,7 +570,7 @@ public class P2SConfigScreen extends Screen {
     private List<EditBox> collectEditBoxes() {
         return switch (currentTab) {
             case GENERAL -> selectionItemInput == null ? List.of() : List.of(selectionItemInput);
-            case LLM -> List.of(apiUrlInput, apiKeyInput, modelInput, timeoutInput);
+            case LLM -> List.of(apiUrlInput, apiKeyInput, modelInput, timeoutInput, autoCompactTokenLimitInput, compactRetainUserTokenBudgetInput);
             case SKILLS -> List.of();
         };
     }
@@ -571,7 +596,7 @@ public class P2SConfigScreen extends Screen {
 
         switch (currentTab) {
             case GENERAL -> renderGeneralTab(gfx, left, contentTop);
-            case LLM -> renderLlmTab(gfx, left, contentTop);
+            case LLM -> renderLlmTab(gfx, left, contentTop, panelWidth);
             case SKILLS -> renderSkillsTab(gfx, left, contentTop, panelWidth);
         }
 
@@ -588,7 +613,7 @@ public class P2SConfigScreen extends Screen {
         gfx.drawString(this.font, P2SI18n.tr("screen.p2s.config.general.llm_path"), left + 10, top + 88, 0x888888, false);
     }
 
-    private void renderLlmTab(GuiGraphics gfx, int left, int top) {
+    private void renderLlmTab(GuiGraphics gfx, int left, int top, int panelWidth) {
         int y = top;
         gfx.drawString(this.font, P2SI18n.tr("screen.p2s.config.llm.api_url"), left + 10, y, 0xBBBBBB, false);
         y += 50;
@@ -598,6 +623,14 @@ public class P2SConfigScreen extends Screen {
         y += 50;
         gfx.drawString(this.font, P2SI18n.tr("screen.p2s.config.llm.timeout"), left + 10, y, 0xBBBBBB, false);
         y += 50;
+        gfx.drawString(this.font, P2SI18n.tr("screen.p2s.config.llm.auto_compact_token_limit"), left + 10, y, 0xBBBBBB, false);
+        gfx.drawString(this.font, P2SI18n.tr("screen.p2s.config.llm.compact_retain_user_tokens"), left + 200, y, 0xBBBBBB, false);
+        int hintY = y + 38;
+        for (var line : this.font.split(P2SI18n.tr("screen.p2s.config.llm.compact_threshold_hint"), panelWidth - 20)) {
+            gfx.drawString(this.font, line, left + 10, hintY, 0x888888, false);
+            hintY += this.font.lineHeight + 1;
+        }
+        y += 50 + compactHintHeight(panelWidth);
         gfx.drawString(this.font, P2SI18n.tr("screen.p2s.config.llm.system_prompt"), left + 10, y, 0xBBBBBB, false);
         if (systemPromptEditor != null) {
             systemPromptEditor.render(gfx);
