@@ -452,6 +452,11 @@ public final class ClientAgentManager {
 
         List<LLMService.ToolCall> toolCalls = result.toolCalls() == null ? List.of() : result.toolCalls();
         if (!toolCalls.isEmpty()) {
+            String text = result.textContent();
+            if (text != null && !text.isBlank()) {
+                postToClient(() -> ClientSessionState.onChatResponse(text, false, null));
+            }
+
             List<ToolCallResult> results = executeToolCallsBatch(session, toolCalls);
             postVisibleToolResults(results);
             for (ToolCallResult tcr : results) {
@@ -468,16 +473,7 @@ public final class ClientAgentManager {
                 }
             }
 
-            String text = result.textContent();
-            if (text != null && !text.isBlank()) {
-                postToClient(() -> ClientSessionState.onChatResponse(
-                        text,
-                        false,
-                        statusAfterToolCalls()
-                ));
-            } else {
-                postToClient(() -> ClientSessionState.setStatus(statusAfterToolCalls()));
-            }
+            postToClient(() -> ClientSessionState.setStatus(statusAfterToolCalls()));
 
             if (ClientSessionState.hasPendingChoice()) {
                 return false;

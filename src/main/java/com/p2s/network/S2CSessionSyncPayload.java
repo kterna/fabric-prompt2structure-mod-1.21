@@ -1,5 +1,12 @@
 package com.p2s.network;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
+import java.util.zip.GZIPInputStream;
+import java.util.zip.GZIPOutputStream;
+
 import com.p2s.P2SNetworkConstants;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
@@ -63,9 +70,9 @@ public record S2CSessionSyncPayload(
                 buf.writeUtf(fitDisplayText(payload.pendingSummary, 2048), 2048);
                 buf.writeUtf(payload.pendingRisk == null ? "" : payload.pendingRisk, 32);
                 buf.writeVarInt(payload.pendingChangedBlocks);
-                buf.writeUtf(payload.checkpointsJson == null ? "[]" : payload.checkpointsJson, 16384);
-                buf.writeUtf(payload.currentScriptJson == null ? "" : payload.currentScriptJson, 65536);
-                buf.writeUtf(payload.workspaceFilesJson == null ? "[]" : payload.workspaceFilesJson, 32767);
+                buf.writeUtf(encodeLargeJson(payload.checkpointsJson, 16384, "[]"), 16384);
+                buf.writeUtf(encodeLargeJson(payload.currentScriptJson, 65536, ""), 65536);
+                buf.writeUtf(encodeLargeJson(payload.workspaceFilesJson, 32767, "[]"), 32767);
             },
             buf -> new S2CSessionSyncPayload(
                     buf.readBoolean(),
@@ -93,12 +100,15 @@ public record S2CSessionSyncPayload(
                     buf.readUtf(2048),
                     buf.readUtf(32),
                     buf.readVarInt(),
-                    buf.readUtf(16384),
-                    buf.readUtf(65536),
-                    buf.readUtf(32767)
+                    decodeLargeJson(buf.readUtf(16384), "[]"),
+                    decodeLargeJson(buf.readUtf(65536), ""),
+                    decodeLargeJson(buf.readUtf(32767), "[]")
             )
     );
 
+
+
+    private static final String COMPRESSED_PREFIX = "@p2s-gzip@";
 
     private static String fitDisplayText(String value, int maxLength) {
         if (value == null || value.isEmpty()) {
@@ -111,6 +121,64 @@ public record S2CSessionSyncPayload(
             return value.substring(0, Math.max(0, maxLength));
         }
         return value.substring(0, maxLength - 3) + "...";
+    }
+
+    private static String encodeLargeJson(String value, int maxLength, String fallback) {
+        String normalized = value == null ? fallback : value;
+        if (normalized == null || normalized.isEmpty()) {
+            return fallback == null ? "" : fallback;
+        }
+        if (normalized.length() <= maxLength) {
+            return normalized;
+        }
+        String compressed = compressToTaggedBase64(normalized);
+        if (compressed != null && compressed.length() <= maxLength) {
+            return compressed;
+        }
+        return fallback == null ? "" : fallback;
+    }
+
+    private static String decodeLargeJson(String value, String fallback) {
+        if (value == null || value.isEmpty()) {
+            return fallback == null ? "" : fallback;
+        }
+        if (!value.startsWith(COMPRESSED_PREFIX)) {
+            return value;
+        }
+        String decoded = decompressTaggedBase64(value);
+        if (decoded == null) {
+            return fallback == null ? "" : fallback;
+        }
+        return decoded;
+    }
+
+    private static String compressToTaggedBase64(String value) {
+        if (value == null || value.isEmpty()) {
+            return null;
+        }
+        try {
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            try (GZIPOutputStream gzip = new GZIPOutputStream(bytes)) {
+                gzip.write(value.getBytes(StandardCharsets.UTF_8));
+            }
+            return COMPRESSED_PREFIX + Base64.getEncoder().encodeToString(bytes.toByteArray());
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private static String decompressTaggedBase64(String value) {
+        if (value == null || !value.startsWith(COMPRESSED_PREFIX)) {
+            return null;
+        }
+        try {
+            byte[] compressed = Base64.getDecoder().decode(value.substring(COMPRESSED_PREFIX.length()));
+            try (GZIPInputStream gzip = new GZIPInputStream(new ByteArrayInputStream(compressed))) {
+                return new String(gzip.readAllBytes(), StandardCharsets.UTF_8);
+            }
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     @Override

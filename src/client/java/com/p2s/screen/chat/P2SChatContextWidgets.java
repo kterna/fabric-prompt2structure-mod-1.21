@@ -2,11 +2,12 @@ package com.p2s.screen.chat;
 
 import com.p2s.ClientSessionState;
 import com.p2s.P2SI18n;
+import com.p2s.screen.widget.P2SFlatButton;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.network.chat.Component;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Consumer;
@@ -91,6 +92,13 @@ public final class P2SChatContextWidgets {
             Button workspaceRenameOkButton,
             Button workspaceRenameCancelButton,
             List<Button> workspaceDocButtons,
+            int explorerListX,
+            int explorerListY,
+            int explorerListWidth,
+            int explorerListHeight,
+            int explorerRowHeight,
+            int explorerRowGap,
+            List<P2SWorkspaceExplorerComponent.ExplorerRow> explorerRows,
             Button contextTabScriptButton,
             Button contextTabDiffButton,
             Button contextLoadButton,
@@ -111,14 +119,13 @@ public final class P2SChatContextWidgets {
         int currentExplorerSplitterX = leftX + config.explorerWidth();
         int editorXBase = leftX + config.explorerWidth() + config.splitGap();
         int editorWidth = Math.max(config.editorMinWidth(), leftWidth - config.explorerWidth() - config.splitGap());
-        int rowGap = 2;
+        int rowGap = 4;
         int row1Y = config.padding();
         int row2Y = row1Y + config.inputHeight() + rowGap;
         int explorerHeaderHeight = config.explorerPanelCollapsed() ? 0 : 28;
         int explorerRow1Y = row1Y + explorerHeaderHeight;
         int explorerRow2Y = explorerRow1Y + config.inputHeight() + rowGap;
 
-        List<Button> workspaceDocButtons = new ArrayList<>();
         Button workspaceDocCreateButton = null;
         Button workspaceFolderCreateButton = null;
         Button workspaceRenameButton = null;
@@ -129,6 +136,14 @@ public final class P2SChatContextWidgets {
         EditBox workspaceRenameInput = null;
         Button workspaceRenameOkButton = null;
         Button workspaceRenameCancelButton = null;
+        List<Button> workspaceDocButtons = List.of();
+        int explorerListX = leftX;
+        int explorerListY = explorerRow2Y;
+        int explorerListWidth = config.explorerWidth();
+        int explorerListHeight = 0;
+        int explorerRowHeight = 20;
+        int explorerRowGap = 2;
+        List<P2SWorkspaceExplorerComponent.ExplorerRow> explorerRows = List.of();
 
         if (!config.explorerPanelCollapsed()) {
             P2SWorkspaceExplorerComponent.BuildResult explorer = P2SWorkspaceExplorerComponent.build(
@@ -192,58 +207,128 @@ public final class P2SChatContextWidgets {
             workspaceRenameInput = explorer.renameInput();
             workspaceRenameOkButton = explorer.renameOkButton();
             workspaceRenameCancelButton = explorer.renameCancelButton();
-            workspaceDocButtons.addAll(explorer.fileButtons());
+            workspaceDocButtons = explorer.fileButtons();
+            explorerListX = explorer.listX();
+            explorerListY = explorer.listY();
+            explorerListWidth = explorer.listWidth();
+            explorerListHeight = explorer.listHeight();
+            explorerRowHeight = explorer.rowHeight();
+            explorerRowGap = explorer.rowGap();
+            explorerRows = explorer.rows();
         }
 
         int row1ButtonCount = 5;
         int row1ButtonWidth = Math.max(40, (editorWidth - rowGap * (row1ButtonCount - 1)) / row1ButtonCount);
         int row1X = editorXBase;
 
-        Button contextLoadButton = host.addButton(Button.builder(P2SI18n.tr(config.selectedWorkspacePending() || config.inlineDiffMode()
+        Button contextLoadButton = host.addButton(new P2SFlatButton(
+                row1X,
+                row1Y,
+                row1ButtonWidth,
+                config.inputHeight(),
+                P2SI18n.tr(config.selectedWorkspacePending() || config.inlineDiffMode()
                         ? "screen.p2s.common.refresh"
-                        : "screen.p2s.chat.context.fetch"), btn -> {
+                        : "screen.p2s.chat.context.fetch"),
+                btn -> {
                     if (config.selectedWorkspacePending() || config.inlineDiffMode()) {
                         config.onLoadWorkspaceDiff().run();
                     } else {
                         config.onFetchWorkspaceScript().run();
                     }
-                })
-                .bounds(row1X, row1Y, row1ButtonWidth, config.inputHeight()).build());
+                },
+                P2SFlatButton.Variant.MUTED
+        ));
         row1X += row1ButtonWidth + rowGap;
 
-        Button contextSaveButton = host.addButton(Button.builder(P2SI18n.tr("screen.p2s.common.save"), btn -> config.onSaveWorkspaceScript().run())
-                .bounds(row1X, row1Y, row1ButtonWidth, config.inputHeight()).build());
+        Button contextSaveButton = host.addButton(new P2SFlatButton(
+                row1X,
+                row1Y,
+                row1ButtonWidth,
+                config.inputHeight(),
+                P2SI18n.tr("screen.p2s.common.save"),
+                btn -> config.onSaveWorkspaceScript().run(),
+                P2SFlatButton.Variant.PRIMARY
+        ));
         row1X += row1ButtonWidth + rowGap;
 
-        Button contextFormatButton = host.addButton(Button.builder(P2SI18n.tr("screen.p2s.chat.context.format"), btn -> config.onFormatContextJson().run())
-                .bounds(row1X, row1Y, row1ButtonWidth, config.inputHeight()).build());
+        Button contextFormatButton = host.addButton(new P2SFlatButton(
+                row1X,
+                row1Y,
+                row1ButtonWidth,
+                config.inputHeight(),
+                P2SI18n.tr("screen.p2s.chat.context.format"),
+                btn -> config.onFormatContextJson().run(),
+                P2SFlatButton.Variant.NORMAL
+        ));
         row1X += row1ButtonWidth + rowGap;
 
-        Button contextClearJsonButton = host.addButton(Button.builder(P2SI18n.tr("screen.p2s.chat.context.clear"), btn -> config.onClearContextJson().run())
-                .bounds(row1X, row1Y, row1ButtonWidth, config.inputHeight()).build());
+        Button contextClearJsonButton = host.addButton(new P2SFlatButton(
+                row1X,
+                row1Y,
+                row1ButtonWidth,
+                config.inputHeight(),
+                P2SI18n.tr("screen.p2s.chat.context.clear"),
+                btn -> config.onClearContextJson().run(),
+                P2SFlatButton.Variant.NORMAL
+        ));
         row1X += row1ButtonWidth + rowGap;
 
-        Button contextClearQueueButton = host.addButton(Button.builder(P2SI18n.tr("screen.p2s.chat.context.clear_queue"), btn -> config.onClearContextQueue().run())
-                .bounds(row1X, row1Y, row1ButtonWidth, config.inputHeight()).build());
+        Button contextClearQueueButton = host.addButton(new P2SFlatButton(
+                row1X,
+                row1Y,
+                row1ButtonWidth,
+                config.inputHeight(),
+                P2SI18n.tr("screen.p2s.chat.context.clear_queue"),
+                btn -> config.onClearContextQueue().run(),
+                P2SFlatButton.Variant.NORMAL
+        ));
 
         int row2ButtonCount = 4;
         int row2ButtonWidth = Math.max(40, (editorWidth - rowGap * (row2ButtonCount - 1)) / row2ButtonCount);
         int row2X = editorXBase;
 
-        Button contextApplyButton = host.addButton(Button.builder(P2SI18n.tr("screen.p2s.chat.apply"), btn -> config.onApplyPatch().run())
-                .bounds(row2X, row2Y, row2ButtonWidth, config.inputHeight()).build());
+        Button contextApplyButton = host.addButton(new P2SFlatButton(
+                row2X,
+                row2Y,
+                row2ButtonWidth,
+                config.inputHeight(),
+                P2SI18n.tr("screen.p2s.chat.apply"),
+                btn -> config.onApplyPatch().run(),
+                P2SFlatButton.Variant.PRIMARY
+        ));
         row2X += row2ButtonWidth + rowGap;
 
-        Button contextDiscardButton = host.addButton(Button.builder(P2SI18n.tr("screen.p2s.chat.discard"), btn -> config.onEnterDiscardReasonMode().run())
-                .bounds(row2X, row2Y, row2ButtonWidth, config.inputHeight()).build());
+        Button contextDiscardButton = host.addButton(new P2SFlatButton(
+                row2X,
+                row2Y,
+                row2ButtonWidth,
+                config.inputHeight(),
+                P2SI18n.tr("screen.p2s.chat.discard"),
+                btn -> config.onEnterDiscardReasonMode().run(),
+                P2SFlatButton.Variant.DANGER
+        ));
         row2X += row2ButtonWidth + rowGap;
 
-        Button contextDiffPrevButton = host.addButton(Button.builder(net.minecraft.network.chat.Component.literal("<D"), btn -> config.onNavigateDiffPrev().run())
-                .bounds(row2X, row2Y, row2ButtonWidth, config.inputHeight()).build());
+        Button contextDiffPrevButton = host.addButton(new P2SFlatButton(
+                row2X,
+                row2Y,
+                row2ButtonWidth,
+                config.inputHeight(),
+                Component.literal("<D"),
+                btn -> config.onNavigateDiffPrev().run(),
+                P2SFlatButton.Variant.MUTED
+        ));
         row2X += row2ButtonWidth + rowGap;
 
-        Button contextDiffNextButton = host.addButton(Button.builder(net.minecraft.network.chat.Component.literal("D>"), btn -> config.onNavigateDiffNext().run())
-                .bounds(row2X, row2Y, row2ButtonWidth, config.inputHeight()).build());
+        Button contextDiffNextButton = host.addButton(new P2SFlatButton(
+                row2X,
+                row2Y,
+                row2ButtonWidth,
+                config.inputHeight(),
+                Component.literal("D>"),
+                btn -> config.onNavigateDiffNext().run(),
+                P2SFlatButton.Variant.MUTED
+        ));
 
         int editorTop = row2Y + config.inputHeight() + 4;
         int editorBottom = host.screenHeight() - config.contextFooterHeight();
@@ -276,6 +361,13 @@ public final class P2SChatContextWidgets {
                 workspaceRenameOkButton,
                 workspaceRenameCancelButton,
                 workspaceDocButtons,
+                explorerListX,
+                explorerListY,
+                explorerListWidth,
+                explorerListHeight,
+                explorerRowHeight,
+                explorerRowGap,
+                explorerRows,
                 null,
                 null,
                 contextLoadButton,

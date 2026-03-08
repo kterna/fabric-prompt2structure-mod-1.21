@@ -2,6 +2,7 @@ package com.p2s.screen.chat;
 
 import com.p2s.ClientSessionState;
 import com.p2s.P2SI18n;
+import com.p2s.screen.widget.P2SFlatButton;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
@@ -11,35 +12,66 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
 
-final class P2SWorkspaceExplorerComponent {
+public final class P2SWorkspaceExplorerComponent {
     private static final int PADDING = 8;
-    private static final int EXPLORER_ACTION_GAP = 2;
+    private static final int EXPLORER_ACTION_GAP = 4;
+    private static final int LIST_ROW_HEIGHT = 20;
+    private static final int LIST_ROW_GAP = 2;
 
     private P2SWorkspaceExplorerComponent() {
     }
 
     static BuildResult build(Host host, Config config) {
-        int actionButtonWidth = Math.max(28, (config.explorerWidth() - EXPLORER_ACTION_GAP * 3) / 4);
+        int actionButtonWidth = Math.max(32, (config.explorerWidth() - EXPLORER_ACTION_GAP * 3) / 4);
         int actionX = config.leftX();
 
-        Button createFileButton = host.addButton(Button.builder(P2SI18n.tr("screen.p2s.workspace.new_file_short"), btn -> config.onEnterCreateFileMode().run())
-                .bounds(actionX, config.row1Y(), actionButtonWidth, config.inputHeight()).build());
+        Button createFileButton = host.addButton(new P2SFlatButton(
+                actionX,
+                config.row1Y(),
+                actionButtonWidth,
+                config.inputHeight(),
+                P2SI18n.tr("screen.p2s.workspace.new_file_short"),
+                btn -> config.onEnterCreateFileMode().run(),
+                P2SFlatButton.Variant.PRIMARY
+        ));
         actionX += actionButtonWidth + EXPLORER_ACTION_GAP;
 
-        Button createFolderButton = host.addButton(Button.builder(P2SI18n.tr("screen.p2s.workspace.new_folder_short"), btn -> config.onEnterCreateFolderMode().run())
-                .bounds(actionX, config.row1Y(), actionButtonWidth, config.inputHeight()).build());
+        Button createFolderButton = host.addButton(new P2SFlatButton(
+                actionX,
+                config.row1Y(),
+                actionButtonWidth,
+                config.inputHeight(),
+                P2SI18n.tr("screen.p2s.workspace.new_folder_short"),
+                btn -> config.onEnterCreateFolderMode().run(),
+                P2SFlatButton.Variant.PRIMARY
+        ));
         actionX += actionButtonWidth + EXPLORER_ACTION_GAP;
 
-        Button renameButton = host.addButton(Button.builder(P2SI18n.tr("screen.p2s.workspace.rename_short"), btn -> config.onEnterRename().run())
-                .bounds(actionX, config.row1Y(), actionButtonWidth, config.inputHeight()).build());
+        Button renameButton = host.addButton(new P2SFlatButton(
+                actionX,
+                config.row1Y(),
+                actionButtonWidth,
+                config.inputHeight(),
+                P2SI18n.tr("screen.p2s.workspace.rename_short"),
+                btn -> config.onEnterRename().run(),
+                P2SFlatButton.Variant.NORMAL
+        ));
         actionX += actionButtonWidth + EXPLORER_ACTION_GAP;
 
-        Button deleteButton = host.addButton(Button.builder(P2SI18n.tr("screen.p2s.workspace.delete_short"), btn -> config.onDelete().run())
-                .bounds(actionX, config.row1Y(), actionButtonWidth, config.inputHeight()).build());
+        Button deleteButton = host.addButton(new P2SFlatButton(
+                actionX,
+                config.row1Y(),
+                actionButtonWidth,
+                config.inputHeight(),
+                P2SI18n.tr("screen.p2s.workspace.delete_short"),
+                btn -> config.onDelete().run(),
+                P2SFlatButton.Variant.DANGER
+        ));
 
         EditBox createInput = null;
         Button createOkButton = null;
@@ -47,46 +79,82 @@ final class P2SWorkspaceExplorerComponent {
         EditBox renameInput = null;
         Button renameOkButton = null;
         Button renameCancelButton = null;
-        int fileY = config.row2Y();
+        int listY = config.row2Y();
 
         if (config.createMode()) {
-            int inputWidth = config.explorerWidth() - 2 * 20 - EXPLORER_ACTION_GAP * 2;
-            int actionWidth = 20;
-            createInput = host.addEditBox(new EditBox(host.font(), config.leftX(), config.row2Y(), inputWidth,
-                    config.inputHeight(), config.createFolderMode()
-                    ? P2SI18n.tr("screen.p2s.workspace.folder_path")
-                    : P2SI18n.tr("screen.p2s.workspace.path")));
+            int inputWidth = config.explorerWidth() - 2 * 22 - EXPLORER_ACTION_GAP * 2;
+            int actionWidth = 22;
+            createInput = host.addEditBox(new EditBox(
+                    host.font(),
+                    config.leftX(),
+                    config.row2Y(),
+                    inputWidth,
+                    config.inputHeight(),
+                    config.createFolderMode()
+                            ? P2SI18n.tr("screen.p2s.workspace.folder_path")
+                            : P2SI18n.tr("screen.p2s.workspace.path")
+            ));
             createInput.setHint(config.createFolderMode()
                     ? P2SI18n.tr("screen.p2s.workspace.folder_hint")
                     : P2SI18n.tr("screen.p2s.workspace.path_hint"));
             createInput.setValue(config.createDraft() == null ? "" : config.createDraft());
 
-            createOkButton = host.addButton(Button.builder(P2SI18n.tr("screen.p2s.common.ok"), btn -> config.onConfirmCreate().run())
-                    .bounds(config.leftX() + inputWidth + EXPLORER_ACTION_GAP, config.row2Y(), actionWidth, config.inputHeight()).build());
-
-            createCancelButton = host.addButton(Button.builder(Component.literal("X"), btn -> config.onCancelCreate().run())
-                    .bounds(config.leftX() + inputWidth + EXPLORER_ACTION_GAP + actionWidth + EXPLORER_ACTION_GAP,
-                            config.row2Y(), actionWidth, config.inputHeight()).build());
-            fileY = config.row2Y() + config.inputHeight() + EXPLORER_ACTION_GAP;
+            createOkButton = host.addButton(new P2SFlatButton(
+                    config.leftX() + inputWidth + EXPLORER_ACTION_GAP,
+                    config.row2Y(),
+                    actionWidth,
+                    config.inputHeight(),
+                    P2SI18n.tr("screen.p2s.common.ok"),
+                    btn -> config.onConfirmCreate().run(),
+                    P2SFlatButton.Variant.PRIMARY
+            ));
+            createCancelButton = host.addButton(new P2SFlatButton(
+                    config.leftX() + inputWidth + EXPLORER_ACTION_GAP + actionWidth + EXPLORER_ACTION_GAP,
+                    config.row2Y(),
+                    actionWidth,
+                    config.inputHeight(),
+                    Component.literal("×"),
+                    btn -> config.onCancelCreate().run(),
+                    P2SFlatButton.Variant.MUTED
+            ));
+            listY = config.row2Y() + config.inputHeight() + EXPLORER_ACTION_GAP;
         } else if (config.renameMode()) {
-            int inputWidth = config.explorerWidth() - 2 * 20 - EXPLORER_ACTION_GAP * 2;
-            int actionWidth = 20;
-            renameInput = host.addEditBox(new EditBox(host.font(), config.leftX(), config.row2Y(), inputWidth,
-                    config.inputHeight(), P2SI18n.tr("screen.p2s.workspace.path")));
+            int inputWidth = config.explorerWidth() - 2 * 22 - EXPLORER_ACTION_GAP * 2;
+            int actionWidth = 22;
+            renameInput = host.addEditBox(new EditBox(
+                    host.font(),
+                    config.leftX(),
+                    config.row2Y(),
+                    inputWidth,
+                    config.inputHeight(),
+                    P2SI18n.tr("screen.p2s.workspace.path")
+            ));
             renameInput.setHint(P2SI18n.tr("screen.p2s.workspace.path_hint"));
             renameInput.setValue(config.renameDraft() == null ? "" : config.renameDraft());
 
-            renameOkButton = host.addButton(Button.builder(P2SI18n.tr("screen.p2s.common.ok"), btn -> config.onConfirmRename().run())
-                    .bounds(config.leftX() + inputWidth + EXPLORER_ACTION_GAP, config.row2Y(), actionWidth, config.inputHeight()).build());
-
-            renameCancelButton = host.addButton(Button.builder(Component.literal("X"), btn -> config.onCancelRename().run())
-                    .bounds(config.leftX() + inputWidth + EXPLORER_ACTION_GAP + actionWidth + EXPLORER_ACTION_GAP,
-                            config.row2Y(), actionWidth, config.inputHeight()).build());
-            fileY = config.row2Y() + config.inputHeight() + EXPLORER_ACTION_GAP;
+            renameOkButton = host.addButton(new P2SFlatButton(
+                    config.leftX() + inputWidth + EXPLORER_ACTION_GAP,
+                    config.row2Y(),
+                    actionWidth,
+                    config.inputHeight(),
+                    P2SI18n.tr("screen.p2s.common.ok"),
+                    btn -> config.onConfirmRename().run(),
+                    P2SFlatButton.Variant.PRIMARY
+            ));
+            renameCancelButton = host.addButton(new P2SFlatButton(
+                    config.leftX() + inputWidth + EXPLORER_ACTION_GAP + actionWidth + EXPLORER_ACTION_GAP,
+                    config.row2Y(),
+                    actionWidth,
+                    config.inputHeight(),
+                    Component.literal("×"),
+                    btn -> config.onCancelRename().run(),
+                    P2SFlatButton.Variant.MUTED
+            ));
+            listY = config.row2Y() + config.inputHeight() + EXPLORER_ACTION_GAP;
         }
 
-        List<Button> rowButtons = new ArrayList<>();
-        int fileBottom = host.screenHeight() - config.contextFooterHeight() - PADDING;
+        int listBottom = host.screenHeight() - config.contextFooterHeight() - PADDING;
+        int listHeight = Math.max(0, listBottom - listY);
         List<ExplorerRow> rows = buildExplorerRows(
                 config.files(),
                 config.folders(),
@@ -94,28 +162,6 @@ final class P2SWorkspaceExplorerComponent {
                 config.selectedFolderPath(),
                 config.selectedWorkspacePath()
         );
-        for (ExplorerRow row : rows) {
-            if (row == null) {
-                continue;
-            }
-            if (fileY + config.inputHeight() > fileBottom) {
-                break;
-            }
-
-            Button rowButton = host.addButton(Button.builder(Component.literal(row.label()), btn -> {
-                if (row.placeholder()) {
-                    return;
-                }
-                if (row.folder()) {
-                    config.onToggleFolder().accept(row.path());
-                } else {
-                    config.onSwitch().accept(row.path());
-                }
-            }).bounds(config.leftX(), fileY, config.explorerWidth(), config.inputHeight()).build());
-            rowButton.active = !row.placeholder();
-            rowButtons.add(rowButton);
-            fileY += config.inputHeight() + 1;
-        }
 
         return new BuildResult(
                 createFileButton,
@@ -128,39 +174,39 @@ final class P2SWorkspaceExplorerComponent {
                 renameInput,
                 renameOkButton,
                 renameCancelButton,
-                rowButtons
+                List.of(),
+                config.leftX(),
+                listY,
+                config.explorerWidth(),
+                listHeight,
+                LIST_ROW_HEIGHT,
+                LIST_ROW_GAP,
+                rows
         );
     }
 
-    private static List<ExplorerRow> buildExplorerRows(
+    static List<ExplorerRow> buildExplorerRows(
             List<ClientSessionState.WorkspaceFileInfo> files,
             List<String> folders,
             Set<String> collapsedFolders,
             String selectedFolderPath,
             String selectedWorkspacePath
     ) {
-        List<ExplorerRow> rows = new ArrayList<>();
         FolderNode root = new FolderNode("", "");
-
         if (folders != null) {
             for (String folder : folders) {
                 insertFolder(root, folder);
             }
         }
-
-        List<ClientSessionState.WorkspaceFileInfo> sortedFiles = new ArrayList<>();
         if (files != null) {
             for (ClientSessionState.WorkspaceFileInfo file : files) {
-                if (file != null && file.path() != null && !file.path().isBlank()) {
-                    sortedFiles.add(file);
+                if (file != null) {
+                    insertFile(root, file);
                 }
             }
         }
-        sortedFiles.sort(Comparator.comparing(file -> file.path().toLowerCase(java.util.Locale.ROOT)));
-        for (ClientSessionState.WorkspaceFileInfo file : sortedFiles) {
-            insertFile(root, file);
-        }
 
+        List<ExplorerRow> rows = new ArrayList<>();
         collectRows(
                 root,
                 0,
@@ -170,7 +216,7 @@ final class P2SWorkspaceExplorerComponent {
                 rows
         );
         if (rows.isEmpty()) {
-            rows.add(new ExplorerRow("", "  " + P2SI18n.tr("screen.p2s.workspace.empty").getString(), false, true));
+            rows.add(new ExplorerRow("", P2SI18n.tr("screen.p2s.workspace.empty").getString(), 0, false, false, false, false, 0, 0, true));
         }
         return rows;
     }
@@ -180,9 +226,10 @@ final class P2SWorkspaceExplorerComponent {
         if (normalized.isBlank()) {
             return;
         }
+        String[] parts = normalized.split("/");
         FolderNode current = root;
         StringBuilder currentPath = new StringBuilder();
-        for (String part : normalized.split("/")) {
+        for (String part : parts) {
             if (part == null || part.isBlank()) {
                 continue;
             }
@@ -203,8 +250,8 @@ final class P2SWorkspaceExplorerComponent {
         String[] parts = normalizedPath.split("/");
         FolderNode current = root;
         StringBuilder folderPath = new StringBuilder();
-        for (int i = 0; i < parts.length - 1; i++) {
-            String part = parts[i];
+        for (int index = 0; index < parts.length - 1; index++) {
+            String part = parts[index];
             if (part == null || part.isBlank()) {
                 continue;
             }
@@ -227,43 +274,56 @@ final class P2SWorkspaceExplorerComponent {
             List<ExplorerRow> rows
     ) {
         List<FolderNode> childFolders = new ArrayList<>(folder.folders.values());
-        childFolders.sort(Comparator.comparing(node -> node.name.toLowerCase(java.util.Locale.ROOT)));
+        childFolders.sort(Comparator.comparing(node -> node.name.toLowerCase(Locale.ROOT)));
         for (FolderNode child : childFolders) {
             boolean collapsed = collapsedFolders != null && collapsedFolders.contains(child.path);
             boolean selected = child.path.equals(selectedFolderPath);
-            rows.add(new ExplorerRow(child.path, folderLabel(child.name, depth, collapsed, selected), true, false));
+            rows.add(new ExplorerRow(
+                    child.path,
+                    child.name,
+                    depth,
+                    true,
+                    collapsed,
+                    selected,
+                    false,
+                    0,
+                    countEntries(child),
+                    false
+            ));
             if (!collapsed) {
                 collectRows(child, depth + 1, collapsedFolders, selectedFolderPath, selectedWorkspacePath, rows);
             }
         }
 
         List<ClientSessionState.WorkspaceFileInfo> childFiles = new ArrayList<>(folder.files);
-        childFiles.sort(Comparator.comparing(file -> file.path().toLowerCase(java.util.Locale.ROOT)));
+        childFiles.sort(Comparator.comparing(file -> normalizeFolderPath(file.path()).toLowerCase(Locale.ROOT)));
         for (ClientSessionState.WorkspaceFileInfo file : childFiles) {
             String normalizedPath = normalizeFolderPath(file.path());
-            String fileName = leafName(file.path());
             boolean selected = normalizedPath.equals(selectedWorkspacePath);
-            String label = fileLabel(fileName, depth, selected, file.hasPendingPatch(), file.pendingChangedBlocks());
-            rows.add(new ExplorerRow(file.path(), label, false, false));
+            rows.add(new ExplorerRow(
+                    file.path(),
+                    leafName(file.path()),
+                    depth,
+                    false,
+                    false,
+                    selected,
+                    file.hasPendingPatch(),
+                    file.pendingChangedBlocks(),
+                    0,
+                    false
+            ));
         }
     }
 
-    private static String folderLabel(String name, int depth, boolean collapsed, boolean selected) {
-        String marker = selected ? "› " : "  ";
-        return indent(depth) + marker + (collapsed ? "▸ " : "▾ ") + name;
-    }
-
-    private static String fileLabel(String name, int depth, boolean selected, boolean pending, int changedBlocks) {
-        String marker = selected ? "› " : "  ";
-        String badge = "";
-        if (pending) {
-            badge = changedBlocks > 0 ? "  [M" + changedBlocks + "]" : "  [M]";
+    private static int countEntries(FolderNode node) {
+        if (node == null) {
+            return 0;
         }
-        return indent(depth) + marker + "  " + name + badge;
-    }
-
-    private static String indent(int depth) {
-        return "  ".repeat(Math.max(0, depth));
+        int count = node.files.size();
+        for (FolderNode child : node.folders.values()) {
+            count += 1 + countEntries(child);
+        }
+        return count;
     }
 
     private static String leafName(String path) {
@@ -334,11 +394,29 @@ final class P2SWorkspaceExplorerComponent {
             EditBox renameInput,
             Button renameOkButton,
             Button renameCancelButton,
-            List<Button> fileButtons
+            List<Button> fileButtons,
+            int listX,
+            int listY,
+            int listWidth,
+            int listHeight,
+            int rowHeight,
+            int rowGap,
+            List<ExplorerRow> rows
     ) {
     }
 
-    private record ExplorerRow(String path, String label, boolean folder, boolean placeholder) {
+    public record ExplorerRow(
+            String path,
+            String name,
+            int depth,
+            boolean folder,
+            boolean collapsed,
+            boolean selected,
+            boolean pending,
+            int changedBlocks,
+            int itemCount,
+            boolean placeholder
+    ) {
     }
 
     private static final class FolderNode {

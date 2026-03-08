@@ -11,6 +11,8 @@ import com.p2s.screen.P2SProjectListScreen;
 import com.p2s.screen.P2SSessionListScreen;
 import com.p2s.screen.chat.P2SChatContextWidgets;
 import com.p2s.screen.chat.P2SChatSessionWidgets;
+import com.p2s.screen.chat.P2SWorkspaceExplorerComponent;
+import com.p2s.screen.widget.P2SFlatButton;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.AbstractWidget;
@@ -113,6 +115,7 @@ public class P2SChatScreen extends Screen {
     private boolean workspaceRenameMode = false;
     private String workspaceRenameDraft = "";
     private EditBox workspaceRenameInput;
+    private Button workspaceFolderCreateButton;
     private Button workspaceRenameButton;
     private Button workspaceDeleteButton;
     private Button workspaceRenameOkButton;
@@ -135,6 +138,15 @@ public class P2SChatScreen extends Screen {
     private Button contextDiffNextButton;
     private Button workspaceDocCreateButton;
     private final List<Button> workspaceDocButtons = new ArrayList<>();
+    private final List<P2SWorkspaceExplorerComponent.ExplorerRow> explorerRows = new ArrayList<>();
+    private final List<ExplorerHitArea> explorerHitAreas = new ArrayList<>();
+    private int explorerListX = 0;
+    private int explorerListY = 0;
+    private int explorerListWidth = 0;
+    private int explorerListHeight = 0;
+    private int explorerRowHeight = 20;
+    private int explorerRowGap = 2;
+    private double explorerScrollOffset = 0;
     private ContextTab activeContextTab = ContextTab.SCRIPT;
     private final List<String> stateJsonLines = new ArrayList<>();
     private int stateCursorLine = 0;
@@ -209,6 +221,7 @@ public class P2SChatScreen extends Screen {
     public void resize(Minecraft client, int width, int height) {
         super.resize(client, width, height);
         createWidgets();
+        clampExplorerScroll();
         clampScroll();
     }
 
@@ -332,19 +345,29 @@ public class P2SChatScreen extends Screen {
         currentSessionPanelX = panelX;
         initContextWidgets(panelX);
 
-        Button explorerToggle = Button.builder(Component.literal(explorerPanelCollapsed ? ">" : "<"), btn -> toggleExplorerPanel())
-                .bounds(explorerPanelCollapsed ? PADDING + 2 : Math.max(PADDING + 2, currentExplorerSplitterX - DOCK_TOGGLE_BUTTON_SIZE - DOCK_SPLITTER_WIDTH - 2),
-                        PADDING,
-                        DOCK_TOGGLE_BUTTON_SIZE,
-                        DOCK_TOGGLE_BUTTON_SIZE)
-                .build();
-        addRenderableWidget(explorerToggle);
+        int explorerToggleX = explorerPanelCollapsed
+                ? PADDING + 2
+                : Math.max(PADDING + 2, currentExplorerSplitterX - DOCK_TOGGLE_BUTTON_SIZE - DOCK_SPLITTER_WIDTH - 2);
+        Button explorerToggle = addRenderableWidget(new P2SFlatButton(
+                explorerToggleX,
+                PADDING,
+                DOCK_TOGGLE_BUTTON_SIZE,
+                DOCK_TOGGLE_BUTTON_SIZE,
+                Component.literal(explorerPanelCollapsed ? ">" : "<"),
+                btn -> toggleExplorerPanel(),
+                P2SFlatButton.Variant.MUTED
+        ));
 
         int sessionToggleX = sessionPanelCollapsed ? panelX + 2 : Math.max(panelX - DOCK_TOGGLE_BUTTON_SIZE - DOCK_SPLITTER_WIDTH - 2, PADDING + 2);
-        Button sessionToggle = Button.builder(Component.literal(sessionPanelCollapsed ? "<" : ">"), btn -> toggleSessionPanel())
-                .bounds(sessionToggleX, PADDING, DOCK_TOGGLE_BUTTON_SIZE, DOCK_TOGGLE_BUTTON_SIZE)
-                .build();
-        addRenderableWidget(sessionToggle);
+        Button sessionToggle = addRenderableWidget(new P2SFlatButton(
+                sessionToggleX,
+                PADDING,
+                DOCK_TOGGLE_BUTTON_SIZE,
+                DOCK_TOGGLE_BUTTON_SIZE,
+                Component.literal(sessionPanelCollapsed ? "<" : ">"),
+                btn -> toggleSessionPanel(),
+                P2SFlatButton.Variant.MUTED
+        ));
 
         if (sessionPanelCollapsed) {
             input = null;
@@ -595,6 +618,7 @@ public class P2SChatScreen extends Screen {
         contextEditorHeight = contextWidgets.contextEditorHeight();
         contextQueueTopY = contextWidgets.contextQueueTopY();
         workspaceDocCreateButton = contextWidgets.workspaceDocCreateButton();
+        workspaceFolderCreateButton = contextWidgets.workspaceFolderCreateButton();
         workspaceRenameButton = contextWidgets.workspaceRenameButton();
         workspaceDeleteButton = contextWidgets.workspaceDeleteButton();
         workspaceCreateInput = contextWidgets.workspaceCreateInput();
@@ -603,6 +627,15 @@ public class P2SChatScreen extends Screen {
         workspaceRenameCancelButton = contextWidgets.workspaceRenameCancelButton();
         workspaceDocButtons.clear();
         workspaceDocButtons.addAll(contextWidgets.workspaceDocButtons());
+        explorerListX = contextWidgets.explorerListX();
+        explorerListY = contextWidgets.explorerListY();
+        explorerListWidth = contextWidgets.explorerListWidth();
+        explorerListHeight = contextWidgets.explorerListHeight();
+        explorerRowHeight = contextWidgets.explorerRowHeight();
+        explorerRowGap = contextWidgets.explorerRowGap();
+        explorerRows.clear();
+        explorerRows.addAll(contextWidgets.explorerRows());
+        clampExplorerScroll();
         contextTabScriptButton = contextWidgets.contextTabScriptButton();
         contextTabDiffButton = contextWidgets.contextTabDiffButton();
         contextLoadButton = contextWidgets.contextLoadButton();
@@ -907,6 +940,16 @@ public class P2SChatScreen extends Screen {
         }
     }
 
+    private void selectWorkspaceFolder(String folderPath) {
+        String normalized = normalizeWorkspaceFolderPath(folderPath);
+        if (normalized.isBlank()) {
+            return;
+        }
+        selectedExplorerFolderPath = normalized;
+        workspaceExpandedSelectionPath = "";
+        createWidgets();
+    }
+
     private void toggleWorkspaceFolder(String folderPath) {
         String normalized = normalizeWorkspaceFolderPath(folderPath);
         if (normalized.isBlank()) {
@@ -918,6 +961,80 @@ public class P2SChatScreen extends Screen {
         }
         workspaceExpandedSelectionPath = "";
         createWidgets();
+    }
+
+    private int getExplorerRowStep() {
+        return Math.max(1, explorerRowHeight + explorerRowGap);
+    }
+
+    private int getExplorerMaxScroll() {
+        int contentHeight = Math.max(0, explorerRows.size() * getExplorerRowStep() - explorerRowGap);
+        return Math.max(0, contentHeight - explorerListHeight);
+    }
+
+    private void clampExplorerScroll() {
+        explorerScrollOffset = clamp(explorerScrollOffset, 0, getExplorerMaxScroll());
+    }
+
+    private boolean isInsideExplorerList(double mouseX, double mouseY) {
+        return !explorerPanelCollapsed
+                && explorerListWidth > 0
+                && explorerListHeight > 0
+                && mouseX >= explorerListX
+                && mouseX <= explorerListX + explorerListWidth
+                && mouseY >= explorerListY
+                && mouseY <= explorerListY + explorerListHeight;
+    }
+
+    private String trimEndToWidth(String text, int maxWidth) {
+        if (text == null || text.isBlank() || this.font == null || maxWidth <= 0) {
+            return text == null ? "" : text;
+        }
+        if (this.font.width(text) <= maxWidth) {
+            return text;
+        }
+        String ellipsis = "...";
+        int maxChars = text.length();
+        while (maxChars > 1) {
+            String candidate = text.substring(0, maxChars) + ellipsis;
+            if (this.font.width(candidate) <= maxWidth) {
+                return candidate;
+            }
+            maxChars--;
+        }
+        return ellipsis;
+    }
+
+    private String explorerFolderMeta(P2SWorkspaceExplorerComponent.ExplorerRow row) {
+        if (row == null || row.itemCount() <= 0) {
+            return "";
+        }
+        return Integer.toString(row.itemCount());
+    }
+
+    private String explorerFileBadge(P2SWorkspaceExplorerComponent.ExplorerRow row) {
+        if (row == null || !row.pending()) {
+            return "";
+        }
+        return row.changedBlocks() > 0 ? "M" + row.changedBlocks() : "M";
+    }
+
+    private boolean handleExplorerClick(double mouseX, double mouseY) {
+        for (int index = explorerHitAreas.size() - 1; index >= 0; index--) {
+            ExplorerHitArea area = explorerHitAreas.get(index);
+            if (!area.contains(mouseX, mouseY)) {
+                continue;
+            }
+            if (area.toggle()) {
+                toggleWorkspaceFolder(area.path());
+            } else if (area.folder()) {
+                selectWorkspaceFolder(area.path());
+            } else {
+                openWorkspaceDoc(area.path(), false);
+            }
+            return true;
+        }
+        return isInsideExplorerList(mouseX, mouseY);
     }
 
     private String defaultNewWorkspaceFilePath() {
@@ -2712,6 +2829,12 @@ public class P2SChatScreen extends Screen {
             return true;
         }
 
+        if (button == 0 && handleExplorerClick(mouseX, mouseY)) {
+            contextEditorFocused = false;
+            contextMouseSelecting = false;
+            return true;
+        }
+
         if (button == 0 && isInsideContextEditor(mouseX, mouseY)) {
             setContextEditorFocused(true);
             if (contextDiffMode) {
@@ -2809,6 +2932,12 @@ public class P2SChatScreen extends Screen {
 
         int panelWidth = getPanelWidth();
         int panelX = getPanelX(panelWidth);
+        if (isInsideExplorerList(mouseX, mouseY)) {
+            int step = getExplorerRowStep() * 3;
+            int delta = verticalAmount > 0 ? -step : verticalAmount < 0 ? step : 0;
+            explorerScrollOffset = clamp(explorerScrollOffset + delta, 0, getExplorerMaxScroll());
+            return true;
+        }
         if (mouseX < panelX) {
             int delta = verticalAmount > 0 ? -3 : 3;
             if (delta != 0) {
@@ -2901,9 +3030,19 @@ public class P2SChatScreen extends Screen {
             checkpointRenameButton.active = sessionActive && hasCheckpoint && checkpointName != null && !checkpointName.trim().isEmpty();
         }
         boolean contextReadOnly = contextDiffMode || contextDiffLoading || selectedWorkspaceHasPendingPatch();
+        String selectedWorkspacePath = ClientSessionState.getSelectedWorkspacePath();
+        boolean hasSelectedWorkspace = selectedWorkspacePath != null && !selectedWorkspacePath.isBlank();
+        if (workspaceRenameButton != null) {
+            workspaceRenameButton.active = hasSelectedWorkspace;
+        }
+        if (workspaceDeleteButton != null) {
+            workspaceDeleteButton.active = hasSelectedWorkspace;
+        }
+        if (contextLoadButton != null) {
+            contextLoadButton.active = hasSelectedWorkspace;
+        }
         if (contextSaveButton != null) {
-            String selectedWorkspacePath = ClientSessionState.getSelectedWorkspacePath();
-            contextSaveButton.active = !contextReadOnly && selectedWorkspacePath != null && !selectedWorkspacePath.isBlank();
+            contextSaveButton.active = !contextReadOnly && hasSelectedWorkspace;
         }
         if (contextFormatButton != null) {
             contextFormatButton.active = !contextReadOnly;
@@ -2918,7 +3057,7 @@ public class P2SChatScreen extends Screen {
 
         int panelWidth = getPanelWidth();
         int panelX = getPanelX(panelWidth);
-        drawContextPanel(gfx, panelX);
+        drawContextPanel(gfx, panelX, mouseX, mouseY);
 
         if (!sessionPanelCollapsed) {
             int panelLeft = panelX;
@@ -2960,16 +3099,18 @@ public class P2SChatScreen extends Screen {
         // No full-screen dimming. Panels draw their own backgrounds.
     }
 
-    private void drawContextPanel(GuiGraphics gfx, int panelX) {
+    private void drawContextPanel(GuiGraphics gfx, int panelX, int mouseX, int mouseY) {
         if (panelX <= 0) {
             return;
         }
         gfx.fill(0, 0, panelX, this.height, 0xC0141A26);
         gfx.fill(panelX - 1, 0, panelX, this.height, 0xFF2F3A4D);
+        explorerHitAreas.clear();
         if (explorerPanelCollapsed) {
             drawCollapsedExplorerRail(gfx);
         } else {
             drawExplorerHeader(gfx);
+            drawWorkspaceExplorer(gfx, mouseX, mouseY);
         }
 
         int x = PADDING;
@@ -3007,6 +3148,121 @@ public class P2SChatScreen extends Screen {
         }
 
         drawContextSelectionConfirm(gfx);
+    }
+
+    private void drawWorkspaceExplorer(GuiGraphics gfx, int mouseX, int mouseY) {
+        if (explorerListWidth <= 0 || explorerListHeight <= 0) {
+            return;
+        }
+        clampExplorerScroll();
+
+        int left = explorerListX;
+        int top = explorerListY;
+        int right = explorerListX + explorerListWidth;
+        int bottom = explorerListY + explorerListHeight;
+        int contentHeight = Math.max(0, explorerRows.size() * getExplorerRowStep() - explorerRowGap);
+        boolean showScrollbar = contentHeight > explorerListHeight;
+        int scrollbarReserved = showScrollbar ? 8 : 0;
+        int rowLeft = left + 2;
+        int rowRight = right - 2 - scrollbarReserved;
+
+        gfx.fill(left, top, right, bottom, 0x7A0A1018);
+        gfx.fill(left, top, right, top + 1, 0xAA324153);
+        gfx.fill(left, bottom - 1, right, bottom, 0xAA324153);
+        gfx.fill(left, top, left + 1, bottom, 0xAA324153);
+        gfx.fill(right - 1, top, right, bottom, 0xAA324153);
+
+        int rowStep = getExplorerRowStep();
+        gfx.enableScissor(left + 1, top + 1, right - 1, bottom - 1);
+        try {
+            for (int index = 0; index < explorerRows.size(); index++) {
+                P2SWorkspaceExplorerComponent.ExplorerRow row = explorerRows.get(index);
+                int rowTop = top + 2 + index * rowStep - (int) explorerScrollOffset;
+                int rowBottom = rowTop + explorerRowHeight;
+                if (rowBottom < top + 1) {
+                    continue;
+                }
+                if (rowTop > bottom - 1) {
+                    break;
+                }
+
+                boolean hovered = mouseX >= rowLeft && mouseX <= rowRight && mouseY >= rowTop && mouseY <= rowBottom;
+                if (row.placeholder()) {
+                    int textY = rowTop + Math.max(0, (explorerRowHeight - this.font.lineHeight) / 2);
+                    gfx.drawString(this.font, trimEndToWidth(row.name(), Math.max(20, rowRight - rowLeft - 8)), rowLeft + 6, textY, 0x8797B1, false);
+                    continue;
+                }
+
+                if (row.selected()) {
+                    gfx.fill(rowLeft, rowTop, rowRight, rowBottom, 0xAA263B57);
+                    gfx.fill(rowLeft, rowTop, rowLeft + 2, rowBottom, 0xFF7FA3D5);
+                } else if (hovered) {
+                    gfx.fill(rowLeft, rowTop, rowRight, rowBottom, 0x66324053);
+                }
+
+                for (int depth = 0; depth < row.depth(); depth++) {
+                    int guideX = rowLeft + 11 + depth * 12;
+                    gfx.fill(guideX, rowTop + 4, guideX + 1, rowBottom - 4, 0x223B4D66);
+                }
+
+                int textY = rowTop + Math.max(0, (explorerRowHeight - this.font.lineHeight) / 2);
+                int baseX = rowLeft + 8 + row.depth() * 12;
+
+                if (row.folder()) {
+                    explorerHitAreas.add(new ExplorerHitArea(row.path(), true, false, rowLeft, rowTop, rowRight, rowBottom));
+                    int arrowX = baseX;
+                    gfx.drawString(this.font, row.collapsed() ? Component.literal("▸") : Component.literal("▾"), arrowX, textY, hovered ? 0xEAF2FF : 0xB9CCE7, false);
+                    explorerHitAreas.add(new ExplorerHitArea(row.path(), true, true, arrowX - 2, rowTop, arrowX + 10, rowBottom));
+
+                    String meta = explorerFolderMeta(row);
+                    int metaWidth = meta.isBlank() ? 0 : this.font.width(meta);
+                    int labelX = arrowX + 12;
+                    int maxLabelWidth = Math.max(20, rowRight - labelX - (metaWidth > 0 ? metaWidth + 10 : 0));
+                    String label = trimEndToWidth(row.name(), maxLabelWidth);
+                    int labelColor = row.selected() ? 0xF2F7FF : hovered ? 0xDFE9F8 : 0xC7D5EA;
+                    gfx.drawString(this.font, label, labelX, textY, labelColor, false);
+                    if (!meta.isBlank()) {
+                        gfx.drawString(this.font, meta, rowRight - metaWidth - 4, textY, 0x7F94AF, false);
+                    }
+                    continue;
+                }
+
+                explorerHitAreas.add(new ExplorerHitArea(row.path(), false, false, rowLeft, rowTop, rowRight, rowBottom));
+                gfx.drawString(this.font, Component.literal("•"), baseX + 1, textY, row.pending() ? 0xFFD39C : 0x6E86A4, false);
+                String badge = explorerFileBadge(row);
+                int badgeWidth = badge.isBlank() ? 0 : this.font.width(badge) + 10;
+                int labelX = baseX + 12;
+                int maxLabelWidth = Math.max(20, rowRight - labelX - (badgeWidth > 0 ? badgeWidth + 8 : 0));
+                String label = trimEndToWidth(row.name(), maxLabelWidth);
+                int labelColor = row.selected() ? 0xF2F7FF : hovered ? 0xDCE8F8 : 0xBCCBDD;
+                gfx.drawString(this.font, label, labelX, textY, labelColor, false);
+                if (!badge.isBlank()) {
+                    int badgeLeft = rowRight - badgeWidth - 4;
+                    int badgeTop = rowTop + 3;
+                    int badgeBottom = rowBottom - 3;
+                    gfx.fill(badgeLeft, badgeTop, badgeLeft + badgeWidth, badgeBottom, 0xAA4B3520);
+                    gfx.fill(badgeLeft, badgeTop, badgeLeft + badgeWidth, badgeTop + 1, 0xFFCF9A69);
+                    gfx.fill(badgeLeft, badgeBottom - 1, badgeLeft + badgeWidth, badgeBottom, 0xFFCF9A69);
+                    gfx.drawString(this.font, badge, badgeLeft + 5, textY, 0xFFF1D6, false);
+                }
+            }
+        } finally {
+            gfx.disableScissor();
+        }
+
+        if (showScrollbar) {
+            boolean scrollbarHovered = mouseX >= right - 8 && mouseX <= right && mouseY >= top && mouseY <= bottom;
+            int trackLeft = right - 5;
+            int trackTop = top + 3;
+            int trackBottom = bottom - 3;
+            gfx.fill(trackLeft, trackTop, trackLeft + 3, trackBottom, scrollbarHovered ? 0x66486687 : 0x4435475C);
+            int trackHeight = Math.max(1, trackBottom - trackTop);
+            int thumbHeight = Math.max(18, (int) ((explorerListHeight / (double) contentHeight) * trackHeight));
+            int thumbTravel = Math.max(0, trackHeight - thumbHeight);
+            int maxScroll = Math.max(1, getExplorerMaxScroll());
+            int thumbTop = trackTop + (int) ((explorerScrollOffset / maxScroll) * thumbTravel);
+            gfx.fill(trackLeft, thumbTop, trackLeft + 3, thumbTop + thumbHeight, scrollbarHovered ? 0xFF9BB3D7 : 0xCC7E96B8);
+        }
     }
 
     private void drawExplorerHeader(GuiGraphics gfx) {
@@ -3470,6 +3726,12 @@ public class P2SChatScreen extends Screen {
     }
 
     private record OverlayLine(FormattedCharSequence formatted, int color, boolean isTitle, String title) {}
+
+    private record ExplorerHitArea(String path, boolean folder, boolean toggle, int left, int top, int right, int bottom) {
+        private boolean contains(double mouseX, double mouseY) {
+            return mouseX >= left && mouseX <= right && mouseY >= top && mouseY <= bottom;
+        }
+    }
 
     private record ChatRenderEntry(
             ClientSessionState.ChatMessage message,
