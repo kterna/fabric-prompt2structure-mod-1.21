@@ -220,6 +220,12 @@ public final class ClientSessionState {
         }
     }
 
+    public static synchronized void addSystemMessage(String text) {
+        if (text != null && !text.isBlank()) {
+            addMessage(P2SI18n.ROLE_SYSTEM, text.trim());
+        }
+    }
+
     public static synchronized void setTodo(String title, List<TodoItem> items) {
         todoTitle = title == null ? "" : title.trim();
         todoItems.clear();

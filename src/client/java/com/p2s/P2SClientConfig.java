@@ -31,7 +31,23 @@ public final class P2SClientConfig {
     private static final boolean DEFAULT_USE_TOOL_CALL = true;
     private static final boolean DEFAULT_USE_STREAMING = true;
     private static final boolean DEFAULT_AUTO_APPLY_PATCH = false;
+    private static final boolean DEFAULT_AUTO_COMPACT_ENABLED = true;
+    private static final int DEFAULT_AUTO_COMPACT_TOKEN_LIMIT = 24_000;
+    private static final int DEFAULT_COMPACT_RETAIN_USER_TOKEN_BUDGET = 6_000;
     private static final String DEFAULT_SYSTEM_PROMPT = ModConfig.DEFAULT_SYSTEM_PROMPT;
+    private static final String DEFAULT_COMPACT_PROMPT = """
+            You are performing a CONTEXT CHECKPOINT COMPACTION for a Prompt2Structure client session.
+            Create a concise handoff summary for another model that will continue the same task.
+
+            Include:
+            - Current progress and key decisions already made
+            - User preferences, constraints, and current project/workspace context if available
+            - Pending patch or pending choice details if they exist
+            - Important coordinates, paths, block IDs, tool results, or references needed to continue
+            - Clear next steps for the next model
+
+            Be concise, structured, and focused on helping the next model continue without redoing completed work.
+            """;
 
     private static String selectionItemId = DEFAULT_SELECTION_ITEM_ID;
     private static String apiUrl = DEFAULT_API_URL;
@@ -42,6 +58,10 @@ public final class P2SClientConfig {
     private static boolean useStreaming = DEFAULT_USE_STREAMING;
     private static boolean autoApplyPatch = DEFAULT_AUTO_APPLY_PATCH;
     private static String systemPrompt = DEFAULT_SYSTEM_PROMPT;
+    private static boolean autoCompactEnabled = DEFAULT_AUTO_COMPACT_ENABLED;
+    private static int autoCompactTokenLimit = DEFAULT_AUTO_COMPACT_TOKEN_LIMIT;
+    private static int compactRetainUserTokenBudget = DEFAULT_COMPACT_RETAIN_USER_TOKEN_BUDGET;
+    private static String compactPrompt = DEFAULT_COMPACT_PROMPT;
     private static final Map<String, List<String>> workspaceFoldersByProject = new LinkedHashMap<>();
 
     private P2SClientConfig() {
@@ -101,6 +121,22 @@ public final class P2SClientConfig {
 
     public static synchronized boolean getAutoApplyPatch() {
         return autoApplyPatch;
+    }
+
+    public static synchronized boolean isAutoCompactEnabled() {
+        return autoCompactEnabled;
+    }
+
+    public static synchronized int getAutoCompactTokenLimit() {
+        return autoCompactTokenLimit;
+    }
+
+    public static synchronized int getCompactRetainUserTokenBudget() {
+        return compactRetainUserTokenBudget;
+    }
+
+    public static synchronized String getCompactPrompt() {
+        return compactPrompt;
     }
 
     public static synchronized void setAutoApplyPatch(boolean value, boolean persist) {
@@ -224,6 +260,10 @@ public final class P2SClientConfig {
         useStreaming = DEFAULT_USE_STREAMING;
         autoApplyPatch = DEFAULT_AUTO_APPLY_PATCH;
         systemPrompt = DEFAULT_SYSTEM_PROMPT;
+        autoCompactEnabled = DEFAULT_AUTO_COMPACT_ENABLED;
+        autoCompactTokenLimit = DEFAULT_AUTO_COMPACT_TOKEN_LIMIT;
+        compactRetainUserTokenBudget = DEFAULT_COMPACT_RETAIN_USER_TOKEN_BUDGET;
+        compactPrompt = DEFAULT_COMPACT_PROMPT;
         if (persist) {
             save();
         }
@@ -264,7 +304,11 @@ public final class P2SClientConfig {
         Boolean loadedUseToolCall = null;
         Boolean loadedUseStreaming = null;
         Boolean loadedAutoApplyPatch = null;
+        Boolean loadedAutoCompactEnabled = null;
+        Integer loadedAutoCompactTokenLimit = null;
+        Integer loadedCompactRetainUserTokenBudget = null;
         String loadedSystemPrompt = null;
+        String loadedCompactPrompt = null;
         Map<String, List<String>> loadedFolders = new LinkedHashMap<>();
         try {
             if (Files.exists(CONFIG_PATH)) {
@@ -278,6 +322,10 @@ public final class P2SClientConfig {
                 loadedUseStreaming = root.has("useStreaming") ? root.get("useStreaming").getAsBoolean() : null;
                 loadedAutoApplyPatch = root.has("autoApplyPatch") ? root.get("autoApplyPatch").getAsBoolean() : null;
                 loadedSystemPrompt = root.has("systemPrompt") ? root.get("systemPrompt").getAsString() : null;
+                loadedAutoCompactEnabled = root.has("autoCompactEnabled") ? root.get("autoCompactEnabled").getAsBoolean() : null;
+                loadedAutoCompactTokenLimit = root.has("autoCompactTokenLimit") ? root.get("autoCompactTokenLimit").getAsInt() : null;
+                loadedCompactRetainUserTokenBudget = root.has("compactRetainUserTokenBudget") ? root.get("compactRetainUserTokenBudget").getAsInt() : null;
+                loadedCompactPrompt = root.has("compactPrompt") ? root.get("compactPrompt").getAsString() : null;
                 if (root.has("workspaceFoldersByProject") && root.get("workspaceFoldersByProject").isJsonObject()) {
                     JsonObject foldersRoot = root.getAsJsonObject("workspaceFoldersByProject");
                     for (Map.Entry<String, JsonElement> entry : foldersRoot.entrySet()) {
@@ -330,6 +378,13 @@ public final class P2SClientConfig {
         autoApplyPatch = loadedAutoApplyPatch == null ? DEFAULT_AUTO_APPLY_PATCH : loadedAutoApplyPatch;
         String prompt = loadedSystemPrompt == null ? "" : loadedSystemPrompt.trim();
         systemPrompt = prompt.isBlank() ? DEFAULT_SYSTEM_PROMPT : prompt;
+        autoCompactEnabled = loadedAutoCompactEnabled == null ? DEFAULT_AUTO_COMPACT_ENABLED : loadedAutoCompactEnabled;
+        Integer compactLimit = normalizePositiveInt(loadedAutoCompactTokenLimit);
+        autoCompactTokenLimit = compactLimit == null ? DEFAULT_AUTO_COMPACT_TOKEN_LIMIT : compactLimit;
+        Integer retainBudget = normalizePositiveInt(loadedCompactRetainUserTokenBudget);
+        compactRetainUserTokenBudget = retainBudget == null ? DEFAULT_COMPACT_RETAIN_USER_TOKEN_BUDGET : retainBudget;
+        String loadedCompact = loadedCompactPrompt == null ? "" : loadedCompactPrompt.trim();
+        compactPrompt = loadedCompact.isBlank() ? DEFAULT_COMPACT_PROMPT : loadedCompact;
         workspaceFoldersByProject.clear();
         workspaceFoldersByProject.putAll(loadedFolders);
         save();
@@ -351,6 +406,10 @@ public final class P2SClientConfig {
             root.addProperty("useStreaming", useStreaming);
             root.addProperty("autoApplyPatch", autoApplyPatch);
             root.addProperty("systemPrompt", systemPrompt);
+            root.addProperty("autoCompactEnabled", autoCompactEnabled);
+            root.addProperty("autoCompactTokenLimit", autoCompactTokenLimit);
+            root.addProperty("compactRetainUserTokenBudget", compactRetainUserTokenBudget);
+            root.addProperty("compactPrompt", compactPrompt);
 
             JsonObject foldersRoot = new JsonObject();
             for (Map.Entry<String, List<String>> entry : workspaceFoldersByProject.entrySet()) {

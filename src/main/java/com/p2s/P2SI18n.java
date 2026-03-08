@@ -15,6 +15,7 @@ import java.util.Locale;
 public final class P2SI18n {
     public static final String ROLE_USER = "user";
     public static final String ROLE_ASSISTANT = "assistant";
+    public static final String ROLE_SYSTEM = "system";
 
     private P2SI18n() {
     }
@@ -105,6 +106,9 @@ public final class P2SI18n {
         if (lower.contains("you") || lower.contains("user")) {
             return ROLE_USER;
         }
+        if (lower.contains("system")) {
+            return ROLE_SYSTEM;
+        }
         if (lower.contains("ai") || lower.contains("assistant")) {
             return ROLE_ASSISTANT;
         }
@@ -119,11 +123,16 @@ public final class P2SI18n {
         return ROLE_ASSISTANT.equals(normalizeRole(role));
     }
 
+    public static boolean isSystemRole(String role) {
+        return ROLE_SYSTEM.equals(normalizeRole(role));
+    }
+
     public static Component roleComponent(String role) {
         String normalized = normalizeRole(role);
         return switch (normalized) {
             case ROLE_USER -> tr("role.p2s.user");
             case ROLE_ASSISTANT -> tr("role.p2s.assistant");
+            case ROLE_SYSTEM -> tr("role.p2s.system");
             default -> literalOrEmpty(role);
         };
     }
@@ -146,6 +155,7 @@ public final class P2SI18n {
             case "in_progress" -> tr("status.p2s.in_progress");
             case "done" -> tr("status.p2s.done");
             case "blocked" -> tr("status.p2s.blocked");
+            case "compacting" -> tr("status.p2s.compacting");
             default -> literalOrEmpty(status);
         };
     }

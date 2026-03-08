@@ -41,6 +41,7 @@ public final class P2SChatSessionWidgets {
             Runnable onOpenProjects,
             Runnable onOpenSessions,
             Runnable onNewSession,
+            Runnable onCompactHistory,
             Runnable onToggleInfo,
             Runnable onOpenConfig,
             Runnable onOpenCheckpoints,
@@ -63,6 +64,7 @@ public final class P2SChatSessionWidgets {
     public record BuildResult(
             EditBox input,
             Button sendButton,
+            Button compactButton,
             Button configButton,
             Button applyButton,
             Button discardButton,
@@ -123,8 +125,14 @@ public final class P2SChatSessionWidgets {
                 .bounds(navX, topRowY, 32, config.inputHeight())
                 .build());
 
+        int configWidth = 56;
+        int compactWidth = 64;
         Button configButton = host.addButton(Button.builder(P2SI18n.tr("screen.p2s.chat.config"), btn -> config.onOpenConfig().run())
-                .bounds(config.panelX() + config.panelWidth() - config.padding() - 56, topRowY, 56, config.inputHeight())
+                .bounds(config.panelX() + config.panelWidth() - config.padding() - configWidth, topRowY, configWidth, config.inputHeight())
+                .build());
+
+        Button compactButton = host.addButton(Button.builder(P2SI18n.tr("screen.p2s.chat.compact"), btn -> config.onCompactHistory().run())
+                .bounds(config.panelX() + config.panelWidth() - config.padding() - configWidth - compactWidth - 4, topRowY, compactWidth, config.inputHeight())
                 .build());
 
         int rowY = config.padding() + config.topButtonHeight() + 4;
@@ -186,6 +194,7 @@ public final class P2SChatSessionWidgets {
         return new BuildResult(
                 input,
                 sendButton,
+                compactButton,
                 configButton,
                 null,
                 null,

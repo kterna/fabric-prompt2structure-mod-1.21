@@ -75,6 +75,38 @@ public final class ClientAgentManager {
     private ClientAgentManager() {
     }
 
+    public static boolean canManualCompact() {
+        synchronized (LOCK) {
+            return canManualCompactLocked();
+        }
+    }
+
+    public static void submitManualCompact() {
+        LocalSession session;
+        synchronized (LOCK) {
+            if (currentSession == null) {
+                postToClient(() -> ClientSessionState.addSystemMessage(P2SI18n.tr("screen.p2s.chat.no_active_session").getString()));
+                return;
+            }
+            if (currentSession.inFlight) {
+                postToClient(() -> ClientSessionState.setStatus("busy"));
+                return;
+            }
+            if (!ClientHistoryCompactor.hasCompactableHistory(currentSession.history)) {
+                postToClient(() -> {
+                    ClientSessionState.addSystemMessage(P2SI18n.tr("message.p2s.compact.nothing_to_compact").getString());
+                    ClientSessionState.setStatus("done");
+                });
+                return;
+            }
+            currentSession.inFlight = true;
+            session = currentSession;
+        }
+
+        postToClient(() -> ClientSessionState.setStatus("compacting"));
+        AGENT_EXECUTOR.execute(() -> runManualCompact(session));
+    }
+
     public static void submitUserMessage(String text) {
         submitUserMessage(text, text);
     }
@@ -116,11 +148,6 @@ public final class ClientAgentManager {
                 return;
             }
             session.inFlight = true;
-            JsonObject user = new JsonObject();
-            user.addProperty("role", "user");
-            user.addProperty("content", msg);
-            session.history.add(user);
-            trimHistoryLocked(session);
         }
 
         String finalVisible = visible;
@@ -129,7 +156,7 @@ public final class ClientAgentManager {
             ClientSessionState.setStatus("planning");
         });
 
-        AGENT_EXECUTOR.execute(() -> runAgentLoop(session));
+        AGENT_EXECUTOR.execute(() -> runUserTurn(session, msg));
     }
 
     public static void submitPatchApply() {
@@ -343,6 +370,7 @@ public final class ClientAgentManager {
                 if (!continueLoop) {
                     break;
                 }
+                maybeRunAutomaticCompaction(session, ClientHistoryCompactor.CompactTrigger.AUTO_MID_TURN);
                 iterations++;
             }
             if (iterations >= SAFETY_LOOP_LIMIT) {
@@ -440,6 +468,140 @@ public final class ClientAgentManager {
     }
 
     private record ToolCallResult(LLMService.ToolCall call, JsonObject payload) {
+    }
+
+    private static void runUserTurn(LocalSession session, String message) {
+        boolean delegated = false;
+        try {
+            maybeRunAutomaticCompaction(session, ClientHistoryCompactor.CompactTrigger.AUTO_PRE_TURN);
+            synchronized (LOCK) {
+                if (session != currentSession) {
+                    return;
+                }
+                appendUserMessageLocked(session, message);
+            }
+            delegated = true;
+            runAgentLoop(session);
+        } catch (Exception ex) {
+            String error = formatAgentError(ex);
+            postToClient(() -> ClientSessionState.onChatResponse("Request failed: " + error, false, "error"));
+        } finally {
+            if (!delegated) {
+                synchronized (LOCK) {
+                    if (session == currentSession) {
+                        session.inFlight = false;
+                    }
+                }
+                autoSaveSession(session);
+            }
+        }
+    }
+
+    private static void runManualCompact(LocalSession session) {
+        try {
+            List<JsonObject> snapshot;
+            synchronized (LOCK) {
+                if (session != currentSession) {
+                    return;
+                }
+                snapshot = deepCopyMessages(session.history);
+            }
+            if (!ClientHistoryCompactor.hasCompactableHistory(snapshot)) {
+                postToClient(() -> ClientSessionState.addSystemMessage(P2SI18n.tr("message.p2s.compact.nothing_to_compact").getString()));
+                return;
+            }
+            boolean compacted = performCompaction(session, snapshot, ClientHistoryCompactor.CompactTrigger.MANUAL, false);
+            if (!compacted) {
+                postToClient(() -> ClientSessionState.setStatus("done"));
+            }
+        } finally {
+            synchronized (LOCK) {
+                if (session == currentSession) {
+                    session.inFlight = false;
+                }
+            }
+            autoSaveSession(session);
+        }
+    }
+
+    private static boolean maybeRunAutomaticCompaction(
+            LocalSession session,
+            ClientHistoryCompactor.CompactTrigger trigger
+    ) {
+        if (!P2SClientConfig.isAutoCompactEnabled()) {
+            return false;
+        }
+
+        List<JsonObject> snapshot;
+        synchronized (LOCK) {
+            if (session != currentSession) {
+                return false;
+            }
+            snapshot = deepCopyMessages(session.history);
+        }
+
+        if (!ClientHistoryCompactor.hasCompactableHistory(snapshot)) {
+            return false;
+        }
+        if (!ClientHistoryCompactor.hasNonSummaryNonSystemMessages(snapshot)) {
+            return false;
+        }
+        if (ClientHistoryCompactor.estimateHistoryTokens(snapshot) < P2SClientConfig.getAutoCompactTokenLimit()) {
+            return false;
+        }
+        return performCompaction(session, snapshot, trigger, true);
+    }
+
+    private static boolean performCompaction(
+            LocalSession session,
+            List<JsonObject> snapshot,
+            ClientHistoryCompactor.CompactTrigger trigger,
+            boolean requireReduction
+    ) {
+        long timeoutSeconds = Math.max(1, Math.max(
+                ModConfig.SESSION_JOB_TIMEOUT_SECONDS,
+                P2SClientConfig.getHttpTimeoutSeconds() + 5L
+        ));
+        postToClient(() -> ClientSessionState.setStatus("compacting"));
+        try {
+            ClientHistoryCompactor.CompactionResult result = ClientHistoryCompactor.compactHistory(
+                    snapshot,
+                    trigger,
+                    P2SClientConfig.llmRequestConfig(),
+                    timeoutSeconds
+            );
+            if (requireReduction && result.estimatedTokensAfter() >= result.estimatedTokensBefore()) {
+                return false;
+            }
+
+            synchronized (LOCK) {
+                if (session != currentSession) {
+                    return false;
+                }
+                session.history = deepCopyMessages(result.replacementHistory());
+                trimHistoryLocked(session);
+            }
+
+            postToClient(() -> {
+                ClientSessionState.addSystemMessage(P2SI18n.tr("message.p2s.compact.done").getString() + "\n" + result.summaryBody());
+                if (trigger == ClientHistoryCompactor.CompactTrigger.MANUAL) {
+                    ClientSessionState.setStatus("done");
+                }
+            });
+            return true;
+        } catch (Exception ex) {
+            String error = formatAgentError(ex);
+            P2SMod.LOGGER.warn("History compaction failed ({}): {}", trigger, error);
+            synchronized (LOCK) {
+                if (session == currentSession) {
+                    trimHistoryLocked(session);
+                }
+            }
+            postToClient(() -> ClientSessionState.addSystemMessage(
+                    P2SI18n.tr("message.p2s.compact.failed_fallback").getString() + " " + error
+            ));
+            return false;
+        }
     }
 
     private static List<ToolCallResult> executeToolCallsBatch(LocalSession session, List<LLMService.ToolCall> toolCalls) {
@@ -1055,6 +1217,20 @@ public final class ClientAgentManager {
         }
         toolMsg.addProperty("content", payload == null ? "{}" : GSON.toJson(payload));
         return toolMsg;
+    }
+
+    private static boolean canManualCompactLocked() {
+        return currentSession != null
+                && !currentSession.inFlight
+                && ClientHistoryCompactor.hasCompactableHistory(currentSession.history);
+    }
+
+    private static void appendUserMessageLocked(LocalSession session, String content) {
+        JsonObject user = new JsonObject();
+        user.addProperty("role", "user");
+        user.addProperty("content", content == null ? "" : content);
+        session.history.add(user);
+        trimHistoryLocked(session);
     }
 
     private static String sessionId(LocalSession session) {

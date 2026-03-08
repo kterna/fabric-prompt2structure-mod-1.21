@@ -67,6 +67,7 @@ public class P2SChatScreen extends Screen {
 
     private EditBox input;
     private Button sendButton;
+    private Button compactButton;
     private Button configButton;
     private Button applyButton;
     private Button discardButton;
@@ -331,6 +332,7 @@ public class P2SChatScreen extends Screen {
         if (sessionPanelCollapsed) {
             input = null;
             sendButton = null;
+            compactButton = null;
             configButton = null;
             applyButton = null;
             discardButton = null;
@@ -390,6 +392,7 @@ public class P2SChatScreen extends Screen {
                         () -> this.minecraft.setScreen(new P2SProjectListScreen(this)),
                         () -> this.minecraft.setScreen(new P2SSessionListScreen(this)),
                         ClientAgentManager::newSession,
+                        ClientAgentManager::submitManualCompact,
                         () -> {
                             infoOverlayVisible = !infoOverlayVisible;
                             infoOverlayScroll = 0;
@@ -414,6 +417,7 @@ public class P2SChatScreen extends Screen {
 
         input = sessionWidgets.input();
         sendButton = sessionWidgets.sendButton();
+        compactButton = sessionWidgets.compactButton();
         configButton = sessionWidgets.configButton();
         applyButton = sessionWidgets.applyButton();
         discardButton = sessionWidgets.discardButton();
@@ -2777,6 +2781,9 @@ public class P2SChatScreen extends Screen {
             undoButton.active = active;
             redoButton.active = active;
         }
+        if (compactButton != null) {
+            compactButton.active = ClientAgentManager.canManualCompact();
+        }
         boolean sessionActive = ClientSessionState.isActive();
         boolean hasCheckpoint = ClientSessionState.getSelectedCheckpoint() != null;
         if (checkpointCreateButton != null) {
@@ -3466,6 +3473,7 @@ public class P2SChatScreen extends Screen {
     private int getHeaderHeight(int panelWidth) {
         int maxBottom = PADDING + TOP_BUTTON_HEIGHT;
         maxBottom = Math.max(maxBottom, getVisibleWidgetBottom(configButton));
+        maxBottom = Math.max(maxBottom, getVisibleWidgetBottom(compactButton));
         maxBottom = Math.max(maxBottom, getVisibleWidgetBottom(infoButton));
         maxBottom = Math.max(maxBottom, getVisibleWidgetBottom(applyButton));
         maxBottom = Math.max(maxBottom, getVisibleWidgetBottom(discardButton));

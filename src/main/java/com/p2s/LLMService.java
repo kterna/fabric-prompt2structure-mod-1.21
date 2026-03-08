@@ -96,6 +96,46 @@ public final class LLMService {
         return requestWithHistoryInternal(messages, true, config, allowedTools);
     }
 
+    public static CompletableFuture<SessionResult> requestPlainTextWithHistory(
+            java.util.List<JsonObject> messages,
+            RequestConfig overrideConfig
+    ) {
+        return CompletableFuture.supplyAsync(() -> {
+            RequestConfig cfg = resolveConfig(overrideConfig);
+            String bodyJson = buildPlainTextBodyForMessages(messages, cfg.model());
+            int messageCount = messages == null ? 0 : messages.size();
+            int payloadBytes = bodyJson == null ? 0 : bodyJson.length();
+            P2SMod.LOGGER.info("LLM plain-text request -> url={}, model={}, timeout={}s", cfg.apiUrl(), cfg.model(), cfg.httpTimeoutSeconds());
+            P2SMod.LOGGER.info("LLM plain-text payload -> messages={}, bytes={}", messageCount, payloadBytes);
+            if (P2SMod.DEBUG) {
+                P2SMod.LOGGER.info("[DEBUG] LLM plain-text full request body: {}", bodyJson);
+                P2SMod.LOGGER.info("[DEBUG] LLM plain-text messages array: {}", GSON.toJson(messages));
+            }
+
+            Request request = new Request.Builder()
+                    .url(cfg.apiUrl())
+                    .post(RequestBody.create(bodyJson, JSON))
+                    .header("Authorization", "Bearer " + cfg.apiKey())
+                    .build();
+
+            try (Response response = getClient(cfg.httpTimeoutSeconds()).newCall(request).execute()) {
+                if (!response.isSuccessful()) {
+                    String errBody = response.body() == null ? "" : response.body().string();
+                    P2SMod.LOGGER.error("LLM failed status={}, body={}", response.code(), truncate(errBody));
+                    throw new IOException("请求失败，状态码: " + response.code());
+                }
+                String respBody = response.body() == null ? "" : response.body().string();
+                P2SMod.LOGGER.info("LLM raw response (truncated): {}", truncate(respBody));
+                if (P2SMod.DEBUG) {
+                    P2SMod.LOGGER.info("[DEBUG] LLM plain-text full response body: {}", respBody);
+                }
+                return parseSessionResponse(respBody);
+            } catch (Exception e) {
+                throw new RuntimeException("LLM 请求异常: " + e.getMessage(), e);
+            }
+        }, EXECUTOR);
+    }
+
     public interface StreamCallback {
         void onToken(String token);
         default void onComplete(SessionResult result) {}
@@ -376,6 +416,17 @@ public final class LLMService {
         body.add("messages", GSON.toJsonTree(messages));
         body.addProperty("temperature", 0.4);
         applySessionToolOrResponseFormat(body, useToolCall, includeSkillTools, allowedTools);
+        return GSON.toJson(body);
+    }
+
+    private static String buildPlainTextBodyForMessages(
+            java.util.List<JsonObject> messages,
+            String model
+    ) {
+        JsonObject body = new JsonObject();
+        body.addProperty("model", model);
+        body.add("messages", GSON.toJsonTree(messages));
+        body.addProperty("temperature", 0.4);
         return GSON.toJson(body);
     }
 
