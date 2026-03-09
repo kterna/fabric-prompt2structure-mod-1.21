@@ -5,17 +5,37 @@ description: "梁柱、轮廓线与细节点位的基础模式。"
 
 # line 与 points
 
+以下示例均为可直接写入 `patch_toml` 的 `[[operation]]` 片段。
+
 ## 梁柱
-```json
-[
-  {"type":"line","block":"pillar","from":[0,0,0],"to":[0,5,0]},
-  {"type":"line","block":"beam","from":[0,5,0],"to":[8,5,0]}
-]
+```toml
+[[operation]]
+op = "insert_actions"
+part = "line_beam_pillar"
+
+[[operation.actions_add]]
+type = "line"
+block = "pillar"
+from = [0, 0, 0]
+to = [0, 5, 0]
+
+[[operation.actions_add]]
+type = "line"
+block = "beam"
+from = [0, 5, 0]
+to = [8, 5, 0]
 ```
 
 ## 点位细节
-```json
-[{"type":"points","block":"light","at":[[1,4,1],[7,4,1],[1,4,7],[7,4,7]]}]
+```toml
+[[operation]]
+op = "insert_actions"
+part = "points_lights"
+
+[[operation.actions_add]]
+type = "points"
+block = "light"
+at = [[1, 4, 1], [7, 4, 1], [1, 4, 7], [7, 4, 7]]
 ```
 
 ## 适用场景

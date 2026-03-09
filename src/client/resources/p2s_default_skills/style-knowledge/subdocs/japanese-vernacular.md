@@ -4,6 +4,8 @@ description: "日式民居 的体量、材料与动作偏好。"
 ---
 
 # 日式民居
+以下示例均为可直接写入 `patch_toml` 的 `[[operation]]` 片段。
+
 
 ## 体量特征
 - 朴素低矮、大坡度屋顶（茅草或灰瓦）
@@ -19,13 +21,48 @@ description: "日式民居 的体量、材料与动作偏好。"
 - line 木柱骨架 + plane 白墙填充 + box:solid 高架地板 + points 障子与灯笼
 
 ## 立面模板
-```json
-[
-  {"type":"box","block":"spruce_planks","mode":"solid","from":[0,0,0],"to":[10,0,8]},
-  {"type":"line","block":"stripped_spruce_log","from":[0,1,0],"to":[0,5,0]},
-  {"type":"line","block":"stripped_spruce_log","from":[10,1,0],"to":[10,5,0]},
-  {"type":"plane","block":"white_concrete","axis":"z","mode":"solid","from":[1,1,0],"to":[9,4,0]},
-  {"type":"points","block":"white_stained_glass_pane","at":[[3,2,0],[5,2,0],[7,2,0]]},
-  {"type":"plane","block":"gray_concrete","axis":"y","mode":"solid","from":[-1,6,0],"to":[11,6,8]}
-]
+```toml
+[[operation]]
+op = "insert_actions"
+part = "japanese_vernacular_1"
+
+[[operation.actions_add]]
+type = "box"
+block = "spruce_planks"
+mode = "solid"
+from = [0, 0, 0]
+to = [10, 0, 8]
+
+[[operation.actions_add]]
+type = "line"
+block = "stripped_spruce_log"
+from = [0, 1, 0]
+to = [0, 5, 0]
+
+[[operation.actions_add]]
+type = "line"
+block = "stripped_spruce_log"
+from = [10, 1, 0]
+to = [10, 5, 0]
+
+[[operation.actions_add]]
+type = "plane"
+block = "white_concrete"
+axis = "z"
+mode = "solid"
+from = [1, 1, 0]
+to = [9, 4, 0]
+
+[[operation.actions_add]]
+type = "points"
+block = "white_stained_glass_pane"
+at = [[3, 2, 0], [5, 2, 0], [7, 2, 0]]
+
+[[operation.actions_add]]
+type = "plane"
+block = "gray_concrete"
+axis = "y"
+mode = "solid"
+from = [-1, 6, 0]
+to = [11, 6, 8]
 ```

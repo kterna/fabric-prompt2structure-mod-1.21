@@ -50,14 +50,24 @@ public final class SkillStore {
                     new TemplateFile("subdocs/medieval-gothic.md", "/p2s_default_skills/style-knowledge/subdocs/medieval-gothic.md"),
                     new TemplateFile("subdocs/japanese-general.md", "/p2s_default_skills/style-knowledge/subdocs/japanese-general.md"),
                     new TemplateFile("subdocs/japanese-shrine.md", "/p2s_default_skills/style-knowledge/subdocs/japanese-shrine.md"),
+                    new TemplateFile("subdocs/japanese-castle.md", "/p2s_default_skills/style-knowledge/subdocs/japanese-castle.md"),
+                    new TemplateFile("subdocs/japanese-vernacular.md", "/p2s_default_skills/style-knowledge/subdocs/japanese-vernacular.md"),
                     new TemplateFile("subdocs/chinese-royal.md", "/p2s_default_skills/style-knowledge/subdocs/chinese-royal.md"),
                     new TemplateFile("subdocs/chinese-garden.md", "/p2s_default_skills/style-knowledge/subdocs/chinese-garden.md"),
+                    new TemplateFile("subdocs/classical-roman.md", "/p2s_default_skills/style-knowledge/subdocs/classical-roman.md"),
                     new TemplateFile("subdocs/nordic-viking.md", "/p2s_default_skills/style-knowledge/subdocs/nordic-viking.md"),
                     new TemplateFile("subdocs/cyberpunk.md", "/p2s_default_skills/style-knowledge/subdocs/cyberpunk.md"),
                     new TemplateFile("subdocs/steampunk-industrial.md", "/p2s_default_skills/style-knowledge/subdocs/steampunk-industrial.md"),
                     new TemplateFile("subdocs/desert-egyptian.md", "/p2s_default_skills/style-knowledge/subdocs/desert-egyptian.md"),
                     new TemplateFile("subdocs/rustic-farmhouse.md", "/p2s_default_skills/style-knowledge/subdocs/rustic-farmhouse.md"),
-                    new TemplateFile("subdocs/gothic-noir.md", "/p2s_default_skills/style-knowledge/subdocs/gothic-noir.md")
+                    new TemplateFile("subdocs/gothic-noir.md", "/p2s_default_skills/style-knowledge/subdocs/gothic-noir.md"),
+                    new TemplateFile("subdocs/fantasy-floating.md", "/p2s_default_skills/style-knowledge/subdocs/fantasy-floating.md"),
+                    new TemplateFile("subdocs/fantasy-magic.md", "/p2s_default_skills/style-knowledge/subdocs/fantasy-magic.md"),
+                    new TemplateFile("subdocs/fantasy-nature.md", "/p2s_default_skills/style-knowledge/subdocs/fantasy-nature.md"),
+                    new TemplateFile("subdocs/underwater-atlantis.md", "/p2s_default_skills/style-knowledge/subdocs/underwater-atlantis.md"),
+                    new TemplateFile("subdocs/type-landscape.md", "/p2s_default_skills/style-knowledge/subdocs/type-landscape.md"),
+                    new TemplateFile("subdocs/type-statue.md", "/p2s_default_skills/style-knowledge/subdocs/type-statue.md"),
+                    new TemplateFile("subdocs/type-vehicle.md", "/p2s_default_skills/style-knowledge/subdocs/type-vehicle.md")
             )),
             new DefaultSkillTemplate("interior-furniture", List.of(
                     new TemplateFile("SKILL.md", "/p2s_default_skills/interior-furniture/SKILL.md"),
@@ -89,7 +99,10 @@ public final class SkillStore {
                     new TemplateFile("subdocs/geometry-polygon.md", "/p2s_default_skills/component-library/subdocs/geometry-polygon.md"),
                     new TemplateFile("subdocs/geometry-torus.md", "/p2s_default_skills/component-library/subdocs/geometry-torus.md"),
                     new TemplateFile("subdocs/curve-bezier.md", "/p2s_default_skills/component-library/subdocs/curve-bezier.md"),
-                    new TemplateFile("subdocs/scatter-patterns.md", "/p2s_default_skills/component-library/subdocs/scatter-patterns.md")
+                    new TemplateFile("subdocs/scatter-patterns.md", "/p2s_default_skills/component-library/subdocs/scatter-patterns.md"),
+                    new TemplateFile("subdocs/geometry-ellipsoid.md", "/p2s_default_skills/component-library/subdocs/geometry-ellipsoid.md"),
+                    new TemplateFile("subdocs/hanging-decor.md", "/p2s_default_skills/component-library/subdocs/hanging-decor.md"),
+                    new TemplateFile("subdocs/roof-poly.md", "/p2s_default_skills/component-library/subdocs/roof-poly.md")
             )),
             new DefaultSkillTemplate("subagent-orchestrator", List.of(
                     new TemplateFile("SKILL.md", "/p2s_default_skills/subagent-orchestrator/SKILL.md")

@@ -8,7 +8,7 @@ description: "移植并改写的组件模板库。通过 read_subdoc 按需读�
 ## 使用方式
 1. 先用 `read_skill` 读取本技能，拿到 `subdocs` 路径列表。
 2. 按任务选择对应路径，再用 `read_subdoc` 读取细节模板。
-3. 将模板中的 `block` key 映射到当前 `palette` 后再提交 patch。
+3. 将模板中的 `block` key 映射到当前 `palette` 后，写入 `propose_patch.patch_toml` 的 `[[operation]]` / `[[operation.actions_add]]` 等 TOML 表结构。
 
 ## 子文档索引
 - `subdocs/box-modes.md`：实心、空壳、四面墙。
@@ -36,3 +36,4 @@ description: "移植并改写的组件模板库。通过 read_subdoc 按需读�
 - 仅使用 `box/plane/line/points`。
 - 禁止 `fill/frame/set`。
 - 示例坐标均为局部坐标，使用时请整体平移到目标位置。
+- 提交补丁时使用 `patch_toml` 的 TOML 格式，不使用旧 JSON `operations` 数组。

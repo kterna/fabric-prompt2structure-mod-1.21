@@ -64,14 +64,17 @@ public final class ModConfig {
             - 读取项目摘要、工作区文件列表、待处理文件路径以及工作区元数据。
 
             ## 工具：propose_patch
-            - path：必填，必须明确指定目标工作区文件路径。
-            - base_revision：可选；除非服务器给出 revision token，否则传空字符串。
-            - operations：按顺序提交 patch 操作。
-            - op 可选值：upsert_part | delete_part | patch_actions | set_palette。
-            - actions 支持 box / plane / line / points，并可选 facing。
+            - 工具参数必须是 JSON 对象，至少包含 `path` 和 `patch_toml`。
+            - `patch_toml` 必须是 TOML 文本，不要再输出旧的 JSON `operations` 数组。
+            - TOML 顶层键只使用 `base_revision`、`intent`、`message_to_user`。
+            - 每个补丁步骤使用 `[[operation]]`；`op` 可选值：insert_part | delete_part | replace_part | insert_actions | delete_actions | replace_actions | move_actions | update_palette。
+            - 动作内容使用 `[[operation.actions_add]]`、`[[operation.old_actions]]`、`[[operation.new_actions]]`。
+            - palette 变更使用 `[[operation.entry]]`；省略 `old_value` 表示新增，省略 `new_value` 表示删除。
+            - actions 只支持 box / plane / line / points，并可选 facing。
 
             ## 工具：read_workspace_file
-            - 在编辑前读取工作区尺寸和现有脚本内容。
+            - 在编辑前读取工作区尺寸和当前 `workspace_toml` 内容。
+            - 返回内容中的结构正文使用 `state.workspace_toml`，不是旧的 JSON 脚本字段。
 
             ## 工具：search_block_ids
             - 不确定方块 ID 时，先按关键词查询合法方块名。
@@ -81,8 +84,10 @@ public final class ModConfig {
             - palette 中使用合法的 Java 版方块 ID。
             - action.block 可以是 palette key 或完整 block id，但优先使用 palette key。
             - 修改尽量小、尽量增量。
-            - 小范围调整优先使用 patch_actions。
-            - 整块逻辑替换优先使用 upsert_part。
+            - 小范围调整优先使用 insert_actions / delete_actions / replace_actions。
+            - 整块逻辑替换优先使用 replace_part；整块新增/删除分别使用 insert_part / delete_part。
+            - 纯平移优先使用 move_actions + offset = [dx, dy, dz]。
+            - 材料映射调整优先使用 update_palette。
             - 在 message_to_user 中提供一句简短、面向玩家的变更说明。
             """;
 

@@ -1002,146 +1002,35 @@ public final class LLMService {
             JsonObject patchFn = new JsonObject();
             patchFn.addProperty("name", "propose_patch");
             patchFn.addProperty("description",
-                    "Propose an editable structure patch with strict verification. " +
-                    "For modify/delete operations, provide old_actions matching current state exactly. " +
-                    "If verification fails, you receive the actual state and should retry with corrected old_actions. " +
-                    "Operations: insert_part, delete_part, replace_part, insert_actions, delete_actions, " +
-                    "replace_actions, move_actions, update_palette.");
+                    "Propose an editable structure patch using TOML text in patch_toml. " +
+                    "The TOML body supports base_revision, intent, message_to_user, repeated [[operation]] tables, " +
+                    "nested [[operation.actions_add]] / [[operation.old_actions]] / [[operation.new_actions]] tables, " +
+                    "and [[operation.entry]] for palette updates.");
 
             JsonObject params = new JsonObject();
             params.addProperty("type", "object");
             JsonObject properties = new JsonObject();
-
-            JsonObject baseRevision = new JsonObject();
-            baseRevision.addProperty("type", "string");
-            baseRevision.addProperty("description", "Workspace revision this patch is based on.");
-            properties.add("base_revision", baseRevision);
 
             JsonObject patchPath = new JsonObject();
             patchPath.addProperty("type", "string");
             patchPath.addProperty("description", "Workspace file path this patch applies to.");
             properties.add("path", patchPath);
 
-            JsonObject intent = new JsonObject();
-            intent.addProperty("type", "string");
-            intent.addProperty("description", "Short user intent summary.");
-            properties.add("intent", intent);
-
-            JsonObject messageToUser = new JsonObject();
-            messageToUser.addProperty("type", "string");
-            messageToUser.addProperty("description", "One-line message shown to the user in preview.");
-            properties.add("message_to_user", messageToUser);
-
-            JsonObject operations = new JsonObject();
-            operations.addProperty("type", "array");
-            operations.addProperty("description", "Patch operations to apply to the structure model.");
-            JsonObject operationItem = new JsonObject();
-            operationItem.addProperty("type", "object");
-            JsonObject operationProps = new JsonObject();
-
-            JsonObject op = new JsonObject();
-            op.addProperty("type", "string");
-            JsonArray opEnum = new JsonArray();
-            opEnum.add("insert_part");
-            opEnum.add("delete_part");
-            opEnum.add("replace_part");
-            opEnum.add("insert_actions");
-            opEnum.add("delete_actions");
-            opEnum.add("replace_actions");
-            opEnum.add("move_actions");
-            opEnum.add("update_palette");
-            op.add("enum", opEnum);
-            op.addProperty("description",
-                    "insert_part: create new part (must not exist). " +
-                    "delete_part: remove part (old_actions must match all actions). " +
-                    "replace_part: replace entire part (old_actions must match all). " +
-                    "insert_actions: append actions to existing part. " +
-                    "delete_actions: remove specific actions (old_actions subset match). " +
-                    "replace_actions: replace specific actions 1:1 (old_actions subset match, same length as new_actions). " +
-                    "move_actions: translate action coordinates by offset (old_actions subset match). " +
-                    "update_palette: add/modify/delete palette entries with old_value verification.");
-            operationProps.add("op", op);
-
-            JsonObject part = new JsonObject();
-            part.addProperty("type", "string");
-            part.addProperty("description", "Part name (required for all ops except update_palette).");
-            operationProps.add("part", part);
-
-            JsonObject priority = new JsonObject();
-            priority.addProperty("type", "integer");
-            priority.addProperty("description", "Part priority (lower = built first).");
-            operationProps.add("priority", priority);
-
-            JsonObject actionsAdd = new JsonObject();
-            actionsAdd.addProperty("type", "array");
-            actionsAdd.addProperty("description", "Actions to add (for insert_part, insert_actions).");
-            actionsAdd.add("items", buildActionSchema());
-            operationProps.add("actions_add", actionsAdd);
-
-            JsonObject oldActions = new JsonObject();
-            oldActions.addProperty("type", "array");
-            oldActions.addProperty("description", "Current actions to verify against before modifying. Must match exactly.");
-            oldActions.add("items", buildActionSchema());
-            operationProps.add("old_actions", oldActions);
-
-            JsonObject newActions = new JsonObject();
-            newActions.addProperty("type", "array");
-            newActions.addProperty("description", "Replacement actions (for replace_part, replace_actions).");
-            newActions.add("items", buildActionSchema());
-            operationProps.add("new_actions", newActions);
-
-            JsonObject offset = new JsonObject();
-            offset.addProperty("type", "array");
-            offset.addProperty("description", "Coordinate offset [dx, dy, dz] for move_actions.");
-            JsonObject offsetItem = new JsonObject();
-            offsetItem.addProperty("type", "integer");
-            offset.add("items", offsetItem);
-            offset.addProperty("minItems", 3);
-            offset.addProperty("maxItems", 3);
-            operationProps.add("offset", offset);
-
-            JsonObject targetPart = new JsonObject();
-            targetPart.addProperty("type", "string");
-            targetPart.addProperty("description", "Target part name for cross-part move_actions. If omitted, actions stay in same part.");
-            operationProps.add("target_part", targetPart);
-
-            JsonObject entries = new JsonObject();
-            entries.addProperty("type", "array");
-            entries.addProperty("description", "Palette entries for update_palette. Each entry: old_value=null to add new, new_value=null to delete, both present to modify.");
-            JsonObject entryItem = new JsonObject();
-            entryItem.addProperty("type", "object");
-            JsonObject entryProps = new JsonObject();
-            JsonObject entryKey = new JsonObject();
-            entryKey.addProperty("type", "string");
-            entryKey.addProperty("description", "Palette key name.");
-            entryProps.add("key", entryKey);
-            JsonObject entryOldValue = new JsonObject();
-            entryOldValue.addProperty("type", "string");
-            entryOldValue.addProperty("description", "Current value (null for add-new). Must match exactly for modify/delete.");
-            entryProps.add("old_value", entryOldValue);
-            JsonObject entryNewValue = new JsonObject();
-            entryNewValue.addProperty("type", "string");
-            entryNewValue.addProperty("description", "New value (null for delete).");
-            entryProps.add("new_value", entryNewValue);
-            entryItem.add("properties", entryProps);
-            JsonArray entryRequired = new JsonArray();
-            entryRequired.add("key");
-            entryItem.add("required", entryRequired);
-            entries.add("items", entryItem);
-            operationProps.add("entries", entries);
-
-            operationItem.add("properties", operationProps);
-            JsonArray operationRequired = new JsonArray();
-            operationRequired.add("op");
-            operationItem.add("required", operationRequired);
-            operations.add("items", operationItem);
-            properties.add("operations", operations);
+            JsonObject patchToml = new JsonObject();
+            patchToml.addProperty("type", "string");
+            patchToml.addProperty("description",
+                    "Patch body in TOML. Top-level keys: base_revision, intent, message_to_user. " +
+                    "Use [[operation]] with op=insert_part|delete_part|replace_part|insert_actions|delete_actions|replace_actions|move_actions|update_palette. " +
+                    "For actions, use nested [[operation.actions_add]], [[operation.old_actions]], [[operation.new_actions]]. " +
+                    "For palette updates, use [[operation.entry]] where omitting old_value means add-new and omitting new_value means delete.");
+            properties.add("patch_toml", patchToml);
 
             params.add("properties", properties);
             JsonArray required = new JsonArray();
             required.add("path");
-            required.add("operations");
+            required.add("patch_toml");
             params.add("required", required);
+            params.addProperty("additionalProperties", false);
             patchFn.add("parameters", params);
             patchTool.add("function", patchFn);
             tools.add(patchTool);

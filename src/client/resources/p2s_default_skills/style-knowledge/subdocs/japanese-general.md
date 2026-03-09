@@ -4,6 +4,8 @@ description: "和风民居/庭院通用语汇与构造模板。"
 ---
 
 # 日式通用
+以下示例均为可直接写入 `patch_toml` 的 `[[operation]]` 片段。
+
 
 ## 核心特征
 - 关键词：低重心、木构节奏、檐口外挑。
@@ -27,14 +29,45 @@ description: "和风民居/庭院通用语汇与构造模板。"
 - `box:walls` 做主体围护，再开口门窗。
 
 ## 基础模板
-```json
-[
-  {"type":"box","block":"main","mode":"walls","from":[0,1,0],"to":[12,5,10]},
-  {"type":"line","block":"pillar","from":[0,1,0],"to":[0,5,0]},
-  {"type":"line","block":"pillar","from":[12,1,0],"to":[12,5,0]},
-  {"type":"plane","block":"eave","axis":"y","mode":"outline","from":[-1,6,-1],"to":[13,6,11]},
-  {"type":"plane","block":"floor","axis":"y","mode":"solid","from":[0,0,0],"to":[12,0,10]}
-]
+```toml
+[[operation]]
+op = "insert_actions"
+part = "japanese_general_1"
+
+[[operation.actions_add]]
+type = "box"
+block = "main"
+mode = "walls"
+from = [0, 1, 0]
+to = [12, 5, 10]
+
+[[operation.actions_add]]
+type = "line"
+block = "pillar"
+from = [0, 1, 0]
+to = [0, 5, 0]
+
+[[operation.actions_add]]
+type = "line"
+block = "pillar"
+from = [12, 1, 0]
+to = [12, 5, 0]
+
+[[operation.actions_add]]
+type = "plane"
+block = "eave"
+axis = "y"
+mode = "outline"
+from = [-1, 6, -1]
+to = [13, 6, 11]
+
+[[operation.actions_add]]
+type = "plane"
+block = "floor"
+axis = "y"
+mode = "solid"
+from = [0, 0, 0]
+to = [12, 0, 10]
 ```
 
 ## 不建议

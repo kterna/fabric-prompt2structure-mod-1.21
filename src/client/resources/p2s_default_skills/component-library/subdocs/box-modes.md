@@ -5,19 +5,48 @@ description: "solid/shell/walls 的典型用法。"
 
 # box 模式
 
+以下示例均为可直接写入 `patch_toml` 的 `[[operation]]` 片段。
+
 ## solid
-```json
-[{"type":"box","block":"main","mode":"solid","from":[0,0,0],"to":[6,4,6]}]
+```toml
+[[operation]]
+op = "insert_actions"
+part = "box_solid"
+
+[[operation.actions_add]]
+type = "box"
+block = "main"
+mode = "solid"
+from = [0, 0, 0]
+to = [6, 4, 6]
 ```
 
 ## shell
-```json
-[{"type":"box","block":"main","mode":"shell","from":[0,0,0],"to":[6,4,6]}]
+```toml
+[[operation]]
+op = "insert_actions"
+part = "box_shell"
+
+[[operation.actions_add]]
+type = "box"
+block = "main"
+mode = "shell"
+from = [0, 0, 0]
+to = [6, 4, 6]
 ```
 
 ## walls
-```json
-[{"type":"box","block":"wall","mode":"walls","from":[0,1,0],"to":[8,5,8]}]
+```toml
+[[operation]]
+op = "insert_actions"
+part = "box_walls"
+
+[[operation.actions_add]]
+type = "box"
+block = "wall"
+mode = "walls"
+from = [0, 1, 0]
+to = [8, 5, 8]
 ```
 
 ## 适用场景

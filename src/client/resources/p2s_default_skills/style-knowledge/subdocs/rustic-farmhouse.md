@@ -4,6 +4,8 @@ description: "乡村农舍 的体量、材料与动作偏好。"
 ---
 
 # 乡村农舍
+以下示例均为可直接写入 `patch_toml` 的 `[[operation]]` 片段。
+
 
 ## 体量特征
 - 低层宽体、附属仓储与门廊
@@ -15,10 +17,28 @@ description: "乡村农舍 的体量、材料与动作偏好。"
 - box:walls 主体 + plane 屋面
 
 ## 立面模板
-```json
-[
-  {"type":"box","block":"main","mode":"walls","from":[0,1,0],"to":[12,6,10]},
-  {"type":"plane","block":"facade","axis":"z","mode":"outline","from":[0,1,0],"to":[12,6,0]},
-  {"type":"points","block":"accent","at":[[2,4,0],[6,4,0],[10,4,0]]}
-]
+```toml
+[[operation]]
+op = "insert_actions"
+part = "rustic_farmhouse_1"
+
+[[operation.actions_add]]
+type = "box"
+block = "main"
+mode = "walls"
+from = [0, 1, 0]
+to = [12, 6, 10]
+
+[[operation.actions_add]]
+type = "plane"
+block = "facade"
+axis = "z"
+mode = "outline"
+from = [0, 1, 0]
+to = [12, 6, 0]
+
+[[operation.actions_add]]
+type = "points"
+block = "accent"
+at = [[2, 4, 0], [6, 4, 0], [10, 4, 0]]
 ```

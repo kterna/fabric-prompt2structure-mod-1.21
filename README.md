@@ -29,6 +29,8 @@ P2S 是一个用于 Minecraft 结构生成与迭代编辑的 Fabric 模组，支
   - 支持 subagent 管理工具：`list_subagents` / `create_subagent` / `get_subagent` / `delete_subagent` / `list_profiles` / `get_profile`。
 - 服务端工具桥接： [ClientToolBridge](src/client/java/com/p2s/ClientToolBridge.java)
   - 客户端通过 `c2s_tool_bridge` 请求服务端工具（`read_workspace_file` / `propose_patch` / `search_block_ids`）。
+  - `read_workspace_file` 当前返回 `state.workspace_toml` 作为工作区正文。
+  - `propose_patch` 当前使用 `{ path, patch_toml }`；其中 `patch_toml` 是 TOML 补丁正文。
   - 服务端返回 `s2c_tool_bridge`。
 - Skill 存储： [SkillStore](src/client/java/com/p2s/SkillStore.java)
   - 客户端全局目录：`config/p2s_skills/skills/<skill-id>/SKILL.md`
@@ -100,8 +102,8 @@ P2S 是一个用于 Minecraft 结构生成与迭代编辑的 Fabric 模组，支
 2. 客户端 agent 调用 LLM，并可先读 skill（`list/read/search_skill`）。
 3. 如需分派任务，主 agent 可先创建 subagent（异步）并轮询其状态/结果。
 4. 需要世界上下文时，通过 tool bridge 调用服务端工具：
-   - `read_workspace_file`
-   - `propose_patch`
+   - `read_workspace_file`（读取 `workspace_toml`）
+   - `propose_patch`（提交 `patch_toml`）
    - `search_block_ids`
 5. 服务端对 patch 进行试算、diff、校验并生成 preview。
 6. 用户在 UI 点击 Apply/Discard；Apply 后写入 commit，可 Undo/Redo。
@@ -177,6 +179,7 @@ P2S 是一个用于 Minecraft 结构生成与迭代编辑的 Fabric 模组，支
 - subagent profile：`config/p2s_skills/.agent/*.json`
 - 统一结构格式：V2（`palette + structures`）
 - workspace 可编辑格式：TOML（`workspace + palette + [[part]] + [[part.action]]`）
+- patch 提议格式：工具参数外层 JSON（`path + patch_toml`），补丁正文为 TOML（`base_revision + [[operation]] + [[operation.*]]`）
 
 ## 构建
 

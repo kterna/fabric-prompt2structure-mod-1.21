@@ -4,6 +4,8 @@ description: "城堡防御语汇、体量要素与动作模板。"
 ---
 
 # 中世纪城堡
+以下示例均为可直接写入 `patch_toml` 的 `[[operation]]` 片段。
+
 
 ## 核心特征
 - 关键词：防御、厚重、层层设防。
@@ -27,15 +29,51 @@ description: "城堡防御语汇、体量要素与动作模板。"
 - `line` 做垛口、梁架和防御细线。
 
 ## 城墙+塔楼模板
-```json
-[
-  {"type":"box","block":"wall","mode":"walls","from":[0,1,0],"to":[24,10,24]},
-  {"type":"box","block":"tower","mode":"solid","from":[0,1,0],"to":[4,14,4]},
-  {"type":"box","block":"tower","mode":"solid","from":[20,1,0],"to":[24,14,4]},
-  {"type":"box","block":"tower","mode":"solid","from":[0,1,20],"to":[4,14,24]},
-  {"type":"box","block":"tower","mode":"solid","from":[20,1,20],"to":[24,14,24]},
-  {"type":"line","block":"battlement","from":[0,11,0],"to":[24,11,0]}
-]
+```toml
+[[operation]]
+op = "insert_actions"
+part = "medieval_castle_1"
+
+[[operation.actions_add]]
+type = "box"
+block = "wall"
+mode = "walls"
+from = [0, 1, 0]
+to = [24, 10, 24]
+
+[[operation.actions_add]]
+type = "box"
+block = "tower"
+mode = "solid"
+from = [0, 1, 0]
+to = [4, 14, 4]
+
+[[operation.actions_add]]
+type = "box"
+block = "tower"
+mode = "solid"
+from = [20, 1, 0]
+to = [24, 14, 4]
+
+[[operation.actions_add]]
+type = "box"
+block = "tower"
+mode = "solid"
+from = [0, 1, 20]
+to = [4, 14, 24]
+
+[[operation.actions_add]]
+type = "box"
+block = "tower"
+mode = "solid"
+from = [20, 1, 20]
+to = [24, 14, 24]
+
+[[operation.actions_add]]
+type = "line"
+block = "battlement"
+from = [0, 11, 0]
+to = [24, 11, 0]
 ```
 
 ## 不建议

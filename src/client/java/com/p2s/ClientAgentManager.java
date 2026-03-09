@@ -44,6 +44,8 @@ public final class ClientAgentManager {
             - After request_user_choice, wait for user selection before continuing execution.
             - Tool calls operate on the current project implicitly; never send project_id.
             - File tools target workspace files by path only. Always pass path explicitly to read_workspace_file and propose_patch.
+            - `read_workspace_file` returns the editable workspace body in `state.workspace_toml`.
+            - `propose_patch` must send `{path, patch_toml}`; write actual patch operations as TOML inside `patch_toml`.
             - Use create_workspace_file / rename_workspace_file / delete_workspace_file for file management.
             - Propose edits with propose_patch and wait for user apply/discard decision.
             - Use search_block_ids when unsure about block id names.

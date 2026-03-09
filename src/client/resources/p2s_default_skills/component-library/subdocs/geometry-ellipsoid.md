@@ -5,6 +5,8 @@ description: "通过多层变半径环形轮廓近似椭球体（三轴半径不
 
 # 椭球体近似
 
+以下示例均为可直接写入 `patch_toml` 的 `[[operation]]` 片段。
+
 ## 与球体的区别
 - 球体三轴相等 `rx = ry = rz`
 - 椭球体三轴可不同：`ry < rx,rz` 扁平穹顶，`ry > rx,rz` 高蛋形
@@ -17,26 +19,72 @@ description: "通过多层变半径环形轮廓近似椭球体（三轴半径不
 - `y=±3`：顶点
 
 ## 示例（扁平穹顶，节选）
-```json
-[
-  {"type":"points","block":"shell","at":[[5,0,0],[0,0,5],[-5,0,0],[0,0,-5],[4,0,3],[3,0,4],[-4,0,3],[-3,0,4],[4,0,-3],[3,0,-4],[-4,0,-3],[-3,0,-4]]},
-  {"type":"points","block":"shell","at":[[5,1,0],[0,1,5],[-5,1,0],[0,1,-5],[4,1,3],[3,1,4],[-4,1,3],[-3,1,4]]},
-  {"type":"points","block":"shell","at":[[3,2,0],[0,2,3],[-3,2,0],[0,2,-3],[2,2,2],[-2,2,2],[2,2,-2],[-2,2,-2]]},
-  {"type":"points","block":"shell","at":[[0,3,0]]}
-]
+```toml
+[[operation]]
+op = "insert_actions"
+part = "ellipsoid_flat_dome"
+
+[[operation.actions_add]]
+type = "points"
+block = "shell"
+at = [[5, 0, 0], [0, 0, 5], [-5, 0, 0], [0, 0, -5], [4, 0, 3], [3, 0, 4], [-4, 0, 3], [-3, 0, 4], [4, 0, -3], [3, 0, -4], [-4, 0, -3], [-3, 0, -4]]
+
+[[operation.actions_add]]
+type = "points"
+block = "shell"
+at = [[5, 1, 0], [0, 1, 5], [-5, 1, 0], [0, 1, -5], [4, 1, 3], [3, 1, 4], [-4, 1, 3], [-3, 1, 4]]
+
+[[operation.actions_add]]
+type = "points"
+block = "shell"
+at = [[3, 2, 0], [0, 2, 3], [-3, 2, 0], [0, 2, -3], [2, 2, 2], [-2, 2, 2], [2, 2, -2], [-2, 2, -2]]
+
+[[operation.actions_add]]
+type = "points"
+block = "shell"
+at = [[0, 3, 0]]
 ```
 
 ## 高蛋形（rx=3, ry=6, rz=3）示例（节选）
-```json
-[
-  {"type":"points","block":"shell","at":[[3,0,0],[0,0,3],[-3,0,0],[0,0,-3],[2,0,2],[-2,0,2],[2,0,-2],[-2,0,-2]]},
-  {"type":"points","block":"shell","at":[[3,1,0],[0,1,3],[-3,1,0],[0,1,-3]]},
-  {"type":"points","block":"shell","at":[[3,2,0],[0,2,3],[-3,2,0],[0,2,-3]]},
-  {"type":"points","block":"shell","at":[[2,3,0],[0,3,2],[-2,3,0],[0,3,-2]]},
-  {"type":"points","block":"shell","at":[[2,4,0],[0,4,2],[-2,4,0],[0,4,-2]]},
-  {"type":"points","block":"shell","at":[[1,5,0],[0,5,1],[-1,5,0],[0,5,-1]]},
-  {"type":"points","block":"shell","at":[[0,6,0]]}
-]
+```toml
+[[operation]]
+op = "insert_actions"
+part = "ellipsoid_tall_egg"
+
+[[operation.actions_add]]
+type = "points"
+block = "shell"
+at = [[3, 0, 0], [0, 0, 3], [-3, 0, 0], [0, 0, -3], [2, 0, 2], [-2, 0, 2], [2, 0, -2], [-2, 0, -2]]
+
+[[operation.actions_add]]
+type = "points"
+block = "shell"
+at = [[3, 1, 0], [0, 1, 3], [-3, 1, 0], [0, 1, -3]]
+
+[[operation.actions_add]]
+type = "points"
+block = "shell"
+at = [[3, 2, 0], [0, 2, 3], [-3, 2, 0], [0, 2, -3]]
+
+[[operation.actions_add]]
+type = "points"
+block = "shell"
+at = [[2, 3, 0], [0, 3, 2], [-2, 3, 0], [0, 3, -2]]
+
+[[operation.actions_add]]
+type = "points"
+block = "shell"
+at = [[2, 4, 0], [0, 4, 2], [-2, 4, 0], [0, 4, -2]]
+
+[[operation.actions_add]]
+type = "points"
+block = "shell"
+at = [[1, 5, 0], [0, 5, 1], [-1, 5, 0], [0, 5, -1]]
+
+[[operation.actions_add]]
+type = "points"
+block = "shell"
+at = [[0, 6, 0]]
 ```
 
 ## 迁移说明

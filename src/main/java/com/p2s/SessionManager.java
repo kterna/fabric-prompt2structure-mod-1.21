@@ -1345,13 +1345,30 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
             return null;
         }
         try {
-            JsonElement parsed = argsElem;
             if (argsElem.isJsonPrimitive() && argsElem.getAsJsonPrimitive().isString()) {
                 String raw = argsElem.getAsString();
                 if (raw == null || raw.isBlank()) {
                     return null;
                 }
-                parsed = JsonParser.parseString(raw);
+                try {
+                    PatchModels.StructurePatch patch = PatchTomlCodec.parse(raw);
+                    normalizePatch(patch);
+                    return patch;
+                } catch (Exception ignored) {
+                }
+            }
+
+            JsonObject obj = normalizeArgsObject(argsElem);
+            String patchToml = getString(obj, "patch_toml");
+            if (!patchToml.isBlank()) {
+                PatchModels.StructurePatch patch = PatchTomlCodec.parse(patchToml);
+                normalizePatch(patch);
+                return patch;
+            }
+
+            JsonElement parsed = argsElem;
+            if (argsElem.isJsonPrimitive() && argsElem.getAsJsonPrimitive().isString()) {
+                parsed = JsonParser.parseString(argsElem.getAsString());
             }
             PatchModels.StructurePatch patch = GSON.fromJson(parsed, PatchModels.StructurePatch.class);
             normalizePatch(patch);

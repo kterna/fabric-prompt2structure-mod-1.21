@@ -39,7 +39,19 @@ description: "建筑总控规则：定义动作协议、补丁策略，并在细
 - 外壳和大面：优先 `box` / `plane`。
 - 轮廓和边框：优先 `plane:outline` 或 `line`。
 - 稀疏细节点：优先 `points`。
-- 按“主体 -> 细节”拆分 part，便于 `patch_actions` 小步修改。
+- 按“主体 -> 细节”拆分 part，便于在 `patch_toml` 中做小步增量修改。
+
+## Patch 输出约束
+- 调用 `propose_patch` 时，工具参数使用 JSON 外壳：`path` + `patch_toml`。
+- `patch_toml` 必须是 TOML，不要再输出旧的 JSON `operations` 数组。
+- 顶层键使用 `base_revision`、`intent`、`message_to_user`。
+- 每个补丁步骤使用 `[[operation]]`。
+- 几何新增动作写入 `[[operation.actions_add]]`。
+- 对现有动作做精确匹配时，使用 `[[operation.old_actions]]` / `[[operation.new_actions]]`。
+- 小范围调整优先 `insert_actions` / `delete_actions` / `replace_actions`。
+- 整块新增/替换/删除优先 `insert_part` / `replace_part` / `delete_part`。
+- 纯平移使用 `move_actions` + `offset = [dx, dy, dz]`。
+- palette 调整使用 `update_palette` + `[[operation.entry]]`。
 
 ## Patch 策略
 - 优先最小改动，尽量保留现有有效结构。

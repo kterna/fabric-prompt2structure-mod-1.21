@@ -4,6 +4,8 @@ description: "水下/亚特兰蒂斯 的体量、材料与动作偏好。"
 ---
 
 # 水下/亚特兰蒂斯
+以下示例均为可直接写入 `patch_toml` 的 `[[operation]]` 片段。
+
 
 ## 体量特征
 - 穹顶抗压结构、有机贝壳/海螺形态
@@ -18,12 +20,38 @@ description: "水下/亚特兰蒂斯 的体量、材料与动作偏好。"
 - box:walls 海晶石主体 + points 珊瑚与海草散布 + line 玻璃连接通道
 
 ## 立面模板
-```json
-[
-  {"type":"box","block":"prismarine_bricks","mode":"walls","from":[0,0,0],"to":[12,8,12]},
-  {"type":"plane","block":"dark_prismarine","axis":"y","mode":"solid","from":[0,0,0],"to":[12,0,12]},
-  {"type":"points","block":"sea_lantern","at":[[3,4,0],[6,4,0],[9,4,0],[3,4,12],[6,4,12],[9,4,12]]},
-  {"type":"points","block":"cyan_stained_glass","at":[[4,3,0],[8,3,0],[4,5,0],[8,5,0]]},
-  {"type":"points","block":"coral_block","at":[[0,1,6],[12,1,6],[6,1,0],[6,1,12]]}
-]
+```toml
+[[operation]]
+op = "insert_actions"
+part = "underwater_atlantis_1"
+
+[[operation.actions_add]]
+type = "box"
+block = "prismarine_bricks"
+mode = "walls"
+from = [0, 0, 0]
+to = [12, 8, 12]
+
+[[operation.actions_add]]
+type = "plane"
+block = "dark_prismarine"
+axis = "y"
+mode = "solid"
+from = [0, 0, 0]
+to = [12, 0, 12]
+
+[[operation.actions_add]]
+type = "points"
+block = "sea_lantern"
+at = [[3, 4, 0], [6, 4, 0], [9, 4, 0], [3, 4, 12], [6, 4, 12], [9, 4, 12]]
+
+[[operation.actions_add]]
+type = "points"
+block = "cyan_stained_glass"
+at = [[4, 3, 0], [8, 3, 0], [4, 5, 0], [8, 5, 0]]
+
+[[operation.actions_add]]
+type = "points"
+block = "coral_block"
+at = [[0, 1, 6], [12, 1, 6], [6, 1, 0], [6, 1, 12]]
 ```

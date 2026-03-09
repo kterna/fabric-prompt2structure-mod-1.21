@@ -4,6 +4,8 @@ description: "浮空岛/天空建筑 的体量、材料与动作偏好。"
 ---
 
 # 浮空岛/天空建筑
+以下示例均为可直接写入 `patch_toml` 的 `[[operation]]` 片段。
+
 
 ## 体量特征
 - 反重力悬浮、倒锥形岛屿基座、轻盈镂空结构
@@ -18,14 +20,49 @@ description: "浮空岛/天空建筑 的体量、材料与动作偏好。"
 - box:walls 轻盈主体 + line 细长柱列 + points 发光节点与水晶装饰
 
 ## 立面模板
-```json
-[
-  {"type":"box","block":"smooth_quartz","mode":"walls","from":[2,0,2],"to":[12,8,12]},
-  {"type":"line","block":"quartz_pillar","from":[2,0,2],"to":[2,10,2]},
-  {"type":"line","block":"quartz_pillar","from":[12,0,2],"to":[12,10,2]},
-  {"type":"line","block":"quartz_pillar","from":[2,0,12],"to":[2,10,12]},
-  {"type":"line","block":"quartz_pillar","from":[12,0,12],"to":[12,10,12]},
-  {"type":"points","block":"sea_lantern","at":[[7,10,7]]},
-  {"type":"points","block":"end_rod","at":[[4,9,2],[10,9,2],[4,9,12],[10,9,12]]}
-]
+```toml
+[[operation]]
+op = "insert_actions"
+part = "fantasy_floating_1"
+
+[[operation.actions_add]]
+type = "box"
+block = "smooth_quartz"
+mode = "walls"
+from = [2, 0, 2]
+to = [12, 8, 12]
+
+[[operation.actions_add]]
+type = "line"
+block = "quartz_pillar"
+from = [2, 0, 2]
+to = [2, 10, 2]
+
+[[operation.actions_add]]
+type = "line"
+block = "quartz_pillar"
+from = [12, 0, 2]
+to = [12, 10, 2]
+
+[[operation.actions_add]]
+type = "line"
+block = "quartz_pillar"
+from = [2, 0, 12]
+to = [2, 10, 12]
+
+[[operation.actions_add]]
+type = "line"
+block = "quartz_pillar"
+from = [12, 0, 12]
+to = [12, 10, 12]
+
+[[operation.actions_add]]
+type = "points"
+block = "sea_lantern"
+at = [[7, 10, 7]]
+
+[[operation.actions_add]]
+type = "points"
+block = "end_rod"
+at = [[4, 9, 2], [10, 9, 2], [4, 9, 12], [10, 9, 12]]
 ```
