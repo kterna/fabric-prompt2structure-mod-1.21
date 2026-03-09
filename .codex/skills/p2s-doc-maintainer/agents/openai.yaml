@@ -1,0 +1,4 @@
+interface:
+  display_name: "P2S Doc Maintainer"
+  short_description: "Keep P2S docs aligned with current codebase."
+  default_prompt: "Use $p2s-doc-maintainer to update P2S Workspace docs based on the current repo state."

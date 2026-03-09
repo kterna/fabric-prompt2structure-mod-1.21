@@ -51,5 +51,33 @@
 - **网络协议扩展**：`S2CSessionSyncPayload` / `C2SSessionActionPayload` 增加 `currentScriptJson` 字段，payload 最大长度由 8 KB 提升至 64 KB，支持完整脚本传输。
 - **会话持久化增强**：`SessionPersistence` 的 `SavedSession` record 新增 `currentScriptJson`，脚本随会话存盘/读盘自动保存与恢复。
 - **Info 浮层 (Overlay)**：消息区上方新增 `[i]` 按钮，点击弹出可滚动半透明浮层，集中显示 Action Required / Pending Patch / Structure Summary / Todo / Checkpoints 等信息段，取代之前占据固定空间的内联渲染方式，大幅释放消息区可用高度。
-- **长按选区快速附加上下文**：编辑器内鼠标拖选超过 400 ms 自动进入"长按上下文模式"，松手后直接将选区文本作为上下文添加到队列，选中高亮色由蓝色变为绿色以提供视觉反馈。
+- **长按选区快速附加上下文**：编辑器内鼠标拖选超过 400 ms 自动进入“长按上下文模式”，松手后直接将选区文本作为上下文添加到队列，选中高亮色由蓝色变为绿色以提供视觉反馈。
 - **Diff Tab 控件精简**：Diff 相关操作（Refresh / <D / D>）仅在 Diff Tab 内显示，其他 Tab 不再展示无关按钮；移除 `contextFileInput` 文本框与 `normalizeContextFileName` 方法。
+
+## 2026-03-06 项目 / 工作区 API 与多文档模型
+- 引入 M1 项目工作区 API：新增 `list_projects`、`create_project`、`open_project`、`rename_project`、`get_project_state` 等接口。
+- 会话模型从单文档改为 **multi-document workspace model**，每个项目可维护多份工作区文件与待处理补丁。
+- `read_workspace_state` 精简返回体，并默认读取 committed 版本，降低网络与上下文体积。
+
+## 2026-03-07 项目状态解耦、界面重构与 i18n 补齐
+- 将项目状态与会话状态彻底解耦，项目切换与会话恢复逻辑更清晰。
+- 新增 `zh_cn` / `en_us` 语言文件，UI、提示、反馈文本全面转向 i18n。
+- 聊天界面重构并恢复工作区状态，拆出 `screen` / `screen.chat` / `screen.widget` / `store` 等客户端结构。
+- 新增项目列表、工作区浏览器、检查点列表等界面，并继续打磨检查点 / 工作区交互。
+- 技能与系统提示改为多行编辑器，提升长文本编辑体验。
+- 上下文编辑器的选区与注入体验继续优化。
+
+## 2026-03-08 客户端桥接、上下文压缩与工具日志打磨
+- Agent 流程迁移到客户端桥接层，恢复 choice UI，并补齐客户端/服务端双端安装检测。
+- 引入本地上下文压缩（local client context compaction），并把相关阈值与提示词暴露到配置界面。
+- 聊天 UI、工作区浏览器、检查点界面继续打磨，提升恢复、浏览与选择体验。
+- 工具日志支持折叠显示，并限制 session sync 文本长度，降低面板噪声。
+- 聊天 explorer 与工具日志表现进一步整理，为后续 TOML 工作流收口铺路。
+
+## 2026-03-09 TOML 工作流收口与面板交互定型
+- 工作区正文存储正式切换到 TOML，新增 `WorkspaceTomlCodec` / `PatchTomlCodec` 路径并统一 `workspace_toml` / `patch_toml` 协议。
+- 默认 prompts、skills 与 patch 指南同步迁移到 TOML 语义，相关默认 skill 示例也随之更新。
+- 清理 TOML 工作区编辑链路，减少旧 JSON 管线遗留逻辑。
+- 聊天编辑区支持在游戏内折叠停靠，减轻大面板对视野的遮挡。
+- 计划跟踪逻辑统一收束到 `update_plan`，替换早期 todo 口径。
+
