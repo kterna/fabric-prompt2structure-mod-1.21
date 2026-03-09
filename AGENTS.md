@@ -39,6 +39,16 @@ Gradle 当前没有强制格式化器。较新的 Java 文件大多使用 4 空�
 
 如果一次编译或构建尝试失败，应立即停止继续重复尝试，并直接告知用户失败原因；不要在未获得用户明确要求的情况下自行连续重试。
 
+## 常用提权命令集合
+在 Codex CLI / 受限沙箱环境里，以下命令经常因为写入 Gradle 缓存、`.git/` 索引锁或只读目录而需要提权。优先申请**窄前缀**，不要申请过宽的规则。
+
+- 编译 / 构建：`./gradlew build`、`./gradlew :1.21:compileClientJava`、`./gradlew :1.21.1:compileClientJava`
+- 运行调试：`./gradlew :1.21:runServer`、`./gradlew :1.21.1:runServer`
+- Git 写操作：`git add -A`、`git commit -m "..."`；只有用户明确要求发布时再执行 `git push`
+- 常见窄前缀：`["./gradlew","build"]`、`["./gradlew",":1.21:runServer"]`、`["./gradlew",":1.21.1:runServer"]`、`["git","commit"]`、`["git","push"]`
+- 注意事项：`.git/` 与仓库内 `.codex/` 往往默认受保护；需要修改 skill / agent 元数据时，预期会再次触发提权
+- 禁止事项：不要为破坏性命令申请宽前缀；不要把 heredoc / 整段脚本本身当成 `prefix_rule`
+
 ## 架构与文档参考
 仓库结构、源码定位、文档归属和核对流程，优先查看仓库内 skill：`./.codex/skills/p2s-doc-maintainer/SKILL.md`。
 
