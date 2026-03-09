@@ -10,9 +10,7 @@ P2S Workspace 是一个把 Minecraft 结构编辑做成“聊天式工作流”�
 
 ## 快速上手
 
-1. 先配置：
-   - 服务端：`config/p2s.json`
-   - 客户端：`config/p2s_client.json`
+1. 先在客户端配置 LLM：可直接编辑 `config/p2s_client.json`，也可进入游戏后在配置界面调整。
 2. 进入世界后，按 `O` 打开聊天面板。
 3. 使用选区物品框定一个区域：
    - 默认物品是 `minecraft:spectral_arrow`
@@ -50,35 +48,21 @@ P2S Workspace 是一个把 Minecraft 结构编辑做成“聊天式工作流”�
 
 ## 配置说明
 
-### 服务端配置：`config/p2s.json`
-
-主要用于：
-
-- 配置服务端 LLM 接口
-- 控制 patch 风险与确认策略
-- 设置 prompt、超时和 patch 大小限制
-
-改完服务端配置后，可使用：
-
-- `/p2sreload`
-
-来重新加载服务端配置。
-
 ### 客户端配置：`config/p2s_client.json`
 
 主要用于：
 
 - 配置客户端 LLM 接口
 - 修改选区物品
+- 调整 patch 预览限制、确认阈值、会话超时等运行参数
 - 控制流式输出、自动应用、上下文压缩等客户端行为
 
-如果你主要通过聊天面板使用模组，通常客户端配置会更常改动。
+当前已经没有单独的服务端配置文件；用户可编辑的配置项都归到客户端配置中。
 
 ## 数据与备份
 
-如果你想迁移环境、做备份或排查问题，优先关注这些目录：
+如果你想迁移环境、做备份或排查问题，优先关注这些路径。除 `config/p2s_client.json` 外，其余都是项目/会话数据目录，不是服务端配置项：
 
-- `config/p2s.json`
 - `config/p2s_client.json`
 - `config/p2s_projects_v2/`
 - `config/p2s_sessions_v2/`
@@ -99,9 +83,6 @@ P2S Workspace 是一个把 Minecraft 结构编辑做成“聊天式工作流”�
 
 当前流程是“先提 patch，再由玩家确认”。看到预览后，需要手动点击 `Apply` 才会真正应用到世界。
 
-### 以前 README 里那些 `/p2s ...` 命令怎么没了？
-
-当前实现已经不再以旧版 `/p2s` 命令流作为主要入口。现在主要通过聊天面板、项目界面和工作区界面完成操作；源码里当前保留的服务端命令只有 `/p2sreload`。
 
 ## License
 

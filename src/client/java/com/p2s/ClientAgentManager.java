@@ -372,7 +372,7 @@ public final class ClientAgentManager {
                 }
 
                 long timeoutSeconds = Math.max(1, Math.max(
-                        ModConfig.SESSION_JOB_TIMEOUT_SECONDS,
+                        P2SClientConfig.getSessionJobTimeoutSeconds(),
                         P2SClientConfig.getHttpTimeoutSeconds() + 5
                 ));
 
@@ -598,7 +598,7 @@ public final class ClientAgentManager {
             boolean requireReduction
     ) {
         long timeoutSeconds = Math.max(1, Math.max(
-                ModConfig.SESSION_JOB_TIMEOUT_SECONDS,
+                P2SClientConfig.getSessionJobTimeoutSeconds(),
                 P2SClientConfig.getHttpTimeoutSeconds() + 5L
         ));
         postToClient(() -> ClientSessionState.setStatus("compacting"));

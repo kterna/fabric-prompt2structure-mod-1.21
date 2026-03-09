@@ -24,17 +24,22 @@ public final class P2SClientConfig {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final Path CONFIG_PATH = FabricLoader.getInstance().getConfigDir().resolve("p2s_client.json");
     private static final String DEFAULT_SELECTION_ITEM_ID = "minecraft:spectral_arrow";
-    private static final String DEFAULT_API_URL = "http://localhost:8000/v1/chat/completions";
-    private static final String DEFAULT_API_KEY = "replace-with-api-key";
-    private static final String DEFAULT_MODEL = "gpt-4o-mini";
-    private static final int DEFAULT_TIMEOUT_SECONDS = 30;
-    private static final boolean DEFAULT_USE_TOOL_CALL = true;
+    private static final String DEFAULT_API_URL = P2SDefaults.DEFAULT_API_URL;
+    private static final String DEFAULT_API_KEY = P2SDefaults.DEFAULT_API_KEY;
+    private static final String DEFAULT_MODEL = P2SDefaults.DEFAULT_MODEL;
+    private static final int DEFAULT_TIMEOUT_SECONDS = P2SDefaults.DEFAULT_TIMEOUT_SECONDS;
+    private static final boolean DEFAULT_USE_TOOL_CALL = P2SDefaults.DEFAULT_USE_TOOL_CALL;
     private static final boolean DEFAULT_USE_STREAMING = true;
     private static final boolean DEFAULT_AUTO_APPLY_PATCH = false;
     private static final boolean DEFAULT_AUTO_COMPACT_ENABLED = true;
     private static final int DEFAULT_AUTO_COMPACT_TOKEN_LIMIT = 24_000;
     private static final int DEFAULT_COMPACT_RETAIN_USER_TOKEN_BUDGET = 20_000;
-    private static final String DEFAULT_SYSTEM_PROMPT = ModConfig.DEFAULT_SYSTEM_PROMPT;
+    private static final int DEFAULT_SESSION_JOB_TIMEOUT_SECONDS = P2SDefaults.DEFAULT_SESSION_JOB_TIMEOUT_SECONDS;
+    private static final int DEFAULT_MAX_PATCH_OPS = P2SDefaults.DEFAULT_MAX_PATCH_OPS;
+    private static final int DEFAULT_MAX_BLOCKS_PER_COMMIT = P2SDefaults.DEFAULT_MAX_BLOCKS_PER_COMMIT;
+    private static final boolean DEFAULT_CONFIRM_REQUIRED = P2SDefaults.DEFAULT_CONFIRM_REQUIRED;
+    private static final int DEFAULT_RISK_AUTO_APPLY_THRESHOLD = P2SDefaults.DEFAULT_RISK_AUTO_APPLY_THRESHOLD;
+    private static final String DEFAULT_SYSTEM_PROMPT = P2SDefaults.DEFAULT_SYSTEM_PROMPT;
     private static final String DEFAULT_COMPACT_PROMPT = """
             You are performing a CONTEXT CHECKPOINT COMPACTION for a Prompt2Structure client session.
             Create a concise handoff summary for another model that will continue the same task.
@@ -62,6 +67,11 @@ public final class P2SClientConfig {
     private static int autoCompactTokenLimit = DEFAULT_AUTO_COMPACT_TOKEN_LIMIT;
     private static int compactRetainUserTokenBudget = DEFAULT_COMPACT_RETAIN_USER_TOKEN_BUDGET;
     private static String compactPrompt = DEFAULT_COMPACT_PROMPT;
+    private static int sessionJobTimeoutSeconds = DEFAULT_SESSION_JOB_TIMEOUT_SECONDS;
+    private static int maxPatchOps = DEFAULT_MAX_PATCH_OPS;
+    private static int maxBlocksPerCommit = DEFAULT_MAX_BLOCKS_PER_COMMIT;
+    private static boolean confirmRequired = DEFAULT_CONFIRM_REQUIRED;
+    private static int riskAutoApplyThreshold = DEFAULT_RISK_AUTO_APPLY_THRESHOLD;
     private static final Map<String, List<String>> workspaceFoldersByProject = new LinkedHashMap<>();
 
     private P2SClientConfig() {
@@ -137,6 +147,35 @@ public final class P2SClientConfig {
 
     public static synchronized String getCompactPrompt() {
         return compactPrompt;
+    }
+
+    public static synchronized int getSessionJobTimeoutSeconds() {
+        return sessionJobTimeoutSeconds;
+    }
+
+    public static synchronized int getMaxPatchOps() {
+        return maxPatchOps;
+    }
+
+    public static synchronized int getMaxBlocksPerCommit() {
+        return maxBlocksPerCommit;
+    }
+
+    public static synchronized boolean getConfirmRequired() {
+        return confirmRequired;
+    }
+
+    public static synchronized int getRiskAutoApplyThreshold() {
+        return riskAutoApplyThreshold;
+    }
+
+    public static synchronized JsonObject patchRuntimeSettingsPayload() {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("maxPatchOps", maxPatchOps);
+        payload.addProperty("maxBlocksPerCommit", maxBlocksPerCommit);
+        payload.addProperty("confirmRequired", confirmRequired);
+        payload.addProperty("riskAutoApplyThreshold", riskAutoApplyThreshold);
+        return payload;
     }
 
     public static synchronized void setAutoApplyPatch(boolean value, boolean persist) {
@@ -222,6 +261,11 @@ public final class P2SClientConfig {
             String rawModel,
             Integer rawTimeoutSeconds,
             Boolean rawUseToolCall,
+            Integer rawSessionJobTimeoutSeconds,
+            Integer rawMaxPatchOps,
+            Integer rawMaxBlocksPerCommit,
+            Boolean rawConfirmRequired,
+            Integer rawRiskAutoApplyThreshold,
             Integer rawAutoCompactTokenLimit,
             Integer rawCompactRetainUserTokenBudget,
             String rawSystemPrompt,
@@ -232,6 +276,11 @@ public final class P2SClientConfig {
         String nextModel = normalizeNonBlank(rawModel);
         Integer nextTimeout = normalizePositiveInt(rawTimeoutSeconds);
         Boolean nextToolCall = rawUseToolCall;
+        Integer nextSessionJobTimeoutSeconds = normalizePositiveInt(rawSessionJobTimeoutSeconds);
+        Integer nextMaxPatchOps = normalizePositiveInt(rawMaxPatchOps);
+        Integer nextMaxBlocksPerCommit = normalizePositiveInt(rawMaxBlocksPerCommit);
+        Boolean nextConfirmRequired = rawConfirmRequired;
+        Integer nextRiskAutoApplyThreshold = normalizeThreshold(rawRiskAutoApplyThreshold);
         Integer nextAutoCompactTokenLimit = normalizePositiveInt(rawAutoCompactTokenLimit);
         Integer nextCompactRetainUserTokenBudget = normalizePositiveInt(rawCompactRetainUserTokenBudget);
         String nextSystemPrompt = rawSystemPrompt == null ? null : rawSystemPrompt.trim();
@@ -241,6 +290,11 @@ public final class P2SClientConfig {
                 || nextModel == null
                 || nextTimeout == null
                 || nextToolCall == null
+                || nextSessionJobTimeoutSeconds == null
+                || nextMaxPatchOps == null
+                || nextMaxBlocksPerCommit == null
+                || nextConfirmRequired == null
+                || nextRiskAutoApplyThreshold == null
                 || nextAutoCompactTokenLimit == null
                 || nextCompactRetainUserTokenBudget == null) {
             return false;
@@ -254,6 +308,11 @@ public final class P2SClientConfig {
         model = nextModel;
         httpTimeoutSeconds = nextTimeout;
         useToolCall = nextToolCall;
+        sessionJobTimeoutSeconds = nextSessionJobTimeoutSeconds;
+        maxPatchOps = nextMaxPatchOps;
+        maxBlocksPerCommit = nextMaxBlocksPerCommit;
+        confirmRequired = nextConfirmRequired;
+        riskAutoApplyThreshold = nextRiskAutoApplyThreshold;
         autoCompactTokenLimit = nextAutoCompactTokenLimit;
         compactRetainUserTokenBudget = nextCompactRetainUserTokenBudget;
         systemPrompt = nextSystemPrompt;
@@ -276,6 +335,11 @@ public final class P2SClientConfig {
         autoCompactTokenLimit = DEFAULT_AUTO_COMPACT_TOKEN_LIMIT;
         compactRetainUserTokenBudget = DEFAULT_COMPACT_RETAIN_USER_TOKEN_BUDGET;
         compactPrompt = DEFAULT_COMPACT_PROMPT;
+        sessionJobTimeoutSeconds = DEFAULT_SESSION_JOB_TIMEOUT_SECONDS;
+        maxPatchOps = DEFAULT_MAX_PATCH_OPS;
+        maxBlocksPerCommit = DEFAULT_MAX_BLOCKS_PER_COMMIT;
+        confirmRequired = DEFAULT_CONFIRM_REQUIRED;
+        riskAutoApplyThreshold = DEFAULT_RISK_AUTO_APPLY_THRESHOLD;
         if (persist) {
             save();
         }
@@ -319,6 +383,11 @@ public final class P2SClientConfig {
         Boolean loadedAutoCompactEnabled = null;
         Integer loadedAutoCompactTokenLimit = null;
         Integer loadedCompactRetainUserTokenBudget = null;
+        Integer loadedSessionJobTimeoutSeconds = null;
+        Integer loadedMaxPatchOps = null;
+        Integer loadedMaxBlocksPerCommit = null;
+        Boolean loadedConfirmRequired = null;
+        Integer loadedRiskAutoApplyThreshold = null;
         String loadedSystemPrompt = null;
         String loadedCompactPrompt = null;
         Map<String, List<String>> loadedFolders = new LinkedHashMap<>();
@@ -337,6 +406,11 @@ public final class P2SClientConfig {
                 loadedAutoCompactEnabled = root.has("autoCompactEnabled") ? root.get("autoCompactEnabled").getAsBoolean() : null;
                 loadedAutoCompactTokenLimit = root.has("autoCompactTokenLimit") ? root.get("autoCompactTokenLimit").getAsInt() : null;
                 loadedCompactRetainUserTokenBudget = root.has("compactRetainUserTokenBudget") ? root.get("compactRetainUserTokenBudget").getAsInt() : null;
+                loadedSessionJobTimeoutSeconds = root.has("sessionJobTimeoutSeconds") ? root.get("sessionJobTimeoutSeconds").getAsInt() : null;
+                loadedMaxPatchOps = root.has("maxPatchOps") ? root.get("maxPatchOps").getAsInt() : null;
+                loadedMaxBlocksPerCommit = root.has("maxBlocksPerCommit") ? root.get("maxBlocksPerCommit").getAsInt() : null;
+                loadedConfirmRequired = root.has("confirmRequired") ? root.get("confirmRequired").getAsBoolean() : null;
+                loadedRiskAutoApplyThreshold = root.has("riskAutoApplyThreshold") ? root.get("riskAutoApplyThreshold").getAsInt() : null;
                 loadedCompactPrompt = root.has("compactPrompt") ? root.get("compactPrompt").getAsString() : null;
                 if (root.has("workspaceFoldersByProject") && root.get("workspaceFoldersByProject").isJsonObject()) {
                     JsonObject foldersRoot = root.getAsJsonObject("workspaceFoldersByProject");
@@ -395,6 +469,15 @@ public final class P2SClientConfig {
         autoCompactTokenLimit = compactLimit == null ? DEFAULT_AUTO_COMPACT_TOKEN_LIMIT : compactLimit;
         Integer retainBudget = normalizePositiveInt(loadedCompactRetainUserTokenBudget);
         compactRetainUserTokenBudget = retainBudget == null ? DEFAULT_COMPACT_RETAIN_USER_TOKEN_BUDGET : retainBudget;
+        Integer sessionTimeout = normalizePositiveInt(loadedSessionJobTimeoutSeconds);
+        sessionJobTimeoutSeconds = sessionTimeout == null ? DEFAULT_SESSION_JOB_TIMEOUT_SECONDS : sessionTimeout;
+        Integer patchOps = normalizePositiveInt(loadedMaxPatchOps);
+        maxPatchOps = patchOps == null ? DEFAULT_MAX_PATCH_OPS : patchOps;
+        Integer blocksPerCommit = normalizePositiveInt(loadedMaxBlocksPerCommit);
+        maxBlocksPerCommit = blocksPerCommit == null ? DEFAULT_MAX_BLOCKS_PER_COMMIT : blocksPerCommit;
+        confirmRequired = loadedConfirmRequired == null ? DEFAULT_CONFIRM_REQUIRED : loadedConfirmRequired;
+        Integer riskThreshold = normalizeThreshold(loadedRiskAutoApplyThreshold);
+        riskAutoApplyThreshold = riskThreshold == null ? DEFAULT_RISK_AUTO_APPLY_THRESHOLD : riskThreshold;
         String loadedCompact = loadedCompactPrompt == null ? "" : loadedCompactPrompt.trim();
         compactPrompt = loadedCompact.isBlank() ? DEFAULT_COMPACT_PROMPT : loadedCompact;
         workspaceFoldersByProject.clear();
@@ -422,6 +505,11 @@ public final class P2SClientConfig {
             root.addProperty("autoCompactTokenLimit", autoCompactTokenLimit);
             root.addProperty("compactRetainUserTokenBudget", compactRetainUserTokenBudget);
             root.addProperty("compactPrompt", compactPrompt);
+            root.addProperty("sessionJobTimeoutSeconds", sessionJobTimeoutSeconds);
+            root.addProperty("maxPatchOps", maxPatchOps);
+            root.addProperty("maxBlocksPerCommit", maxBlocksPerCommit);
+            root.addProperty("confirmRequired", confirmRequired);
+            root.addProperty("riskAutoApplyThreshold", riskAutoApplyThreshold);
 
             JsonObject foldersRoot = new JsonObject();
             for (Map.Entry<String, List<String>> entry : workspaceFoldersByProject.entrySet()) {
@@ -472,6 +560,13 @@ public final class P2SClientConfig {
 
     private static Integer normalizePositiveInt(Integer value) {
         if (value == null || value <= 0) {
+            return null;
+        }
+        return value;
+    }
+
+    private static Integer normalizeThreshold(Integer value) {
+        if (value == null || value < -1) {
             return null;
         }
         return value;

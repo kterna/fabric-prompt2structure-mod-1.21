@@ -13,7 +13,7 @@
 - `.github/workflows/`：CI 与 tag 发布工作流。
 - `build/` 和 `versions/*/build/`：构建产物，不要手动修改。
 
-当前主要用户入口是：**`O` 键聊天面板 + 选区物品 + 项目/工作区 UI**。源码里当前唯一保留的服务端命令是 `/p2sreload`；不要再把旧 README 里的 `/p2s ...` 指令集当作现状。
+当前主要用户入口是：**`O` 键聊天面板 + 选区物品 + 项目/工作区 UI**。
 
 ## 构建、测试与开发命令
 - `./gradlew build`：构建所有已配置的 Minecraft 版本，并将发布产物收集到 `build/libs`。
@@ -81,6 +81,6 @@ Pull Request 应包含：
 - 相关 issue 链接，或后续待处理说明（如果有）。
 
 ## 配置与密钥
-运行时配置位于 `config/p2s.json` 和 `config/p2s_client.json`。项目 / 工作区 / 会话 / skills / profiles 还会写入 `config/p2s_projects_v2/`、`config/p2s_sessions_v2/`、`config/p2s_skills/` 等目录。
+运行时配置位于 `config/p2s_client.json`。项目 / 工作区 / 会话 / skills / profiles 还会写入 `config/p2s_projects_v2/`、`config/p2s_sessions_v2/`、`config/p2s_skills/` 等目录。
 
 不要提交 API Key、本地配置，或自动生成的世界/项目数据。

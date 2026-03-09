@@ -4,7 +4,7 @@
 
 - Main UI entry: press `O` to open or close the chat panel.
 - Selection workflow: hold the configured selection item; left click sets `pos1`, right click sets `pos2`.
-- Remaining command: `/p2sreload` reloads server config.
+- No standalone reload command remains; editable runtime settings live in the client config/UI.
 - Multiplayer requirement: client and server both need the mod for the bridge features to work.
 
 ## Runtime split
@@ -18,7 +18,7 @@
 - `src/main/java/com/p2s/WorkspaceTomlCodec.java`: workspace TOML serialization
 - `src/main/java/com/p2s/PatchTomlCodec.java`: patch TOML serialization
 - `src/main/java/com/p2s/LLMService.java`: tool schema and LLM payload generation
-- `src/main/java/com/p2s/ModConfig.java`: server config keys and default system prompt
+- `src/main/java/com/p2s/P2SDefaults.java`: shared default values and built-in system prompt seed
 
 ### Client-side core
 
@@ -86,7 +86,6 @@ Commonly relevant tools:
 
 ### Config
 
-- Server config: `config/p2s.json`
 - Client config: `config/p2s_client.json`
 - Skill data: `config/p2s_skills/`
 

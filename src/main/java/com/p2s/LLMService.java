@@ -31,8 +31,8 @@ public final class LLMService {
     private static final Gson GSON = new Gson();
     private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
     private static final ExecutorService EXECUTOR = Executors.newCachedThreadPool();
-    private static volatile OkHttpClient CLIENT = buildClient(ModConfig.HTTP_TIMEOUT_SECONDS);
-    private static volatile int CLIENT_TIMEOUT_SECONDS = ModConfig.HTTP_TIMEOUT_SECONDS;
+    private static volatile OkHttpClient CLIENT = buildClient(P2SDefaults.DEFAULT_TIMEOUT_SECONDS);
+    private static volatile int CLIENT_TIMEOUT_SECONDS = P2SDefaults.DEFAULT_TIMEOUT_SECONDS;
 
     private LLMService() {
     }
@@ -93,7 +93,7 @@ public final class LLMService {
                 if (P2SMod.DEBUG) {
                     P2SMod.LOGGER.info("[DEBUG] LLM plain-text full response body: {}", respBody);
                 }
-                return parseSessionResponse(respBody);
+                return parseSessionResponse(respBody, cfg.useToolCall());
             } catch (Exception e) {
                 throw new RuntimeException("LLM 请求异常: " + e.getMessage(), e);
             }
@@ -146,7 +146,7 @@ public final class LLMService {
                     if (!contentType.contains("text/event-stream") && !contentType.contains("text/plain")) {
                         P2SMod.LOGGER.info("LLM streaming fallback to non-stream (Content-Type: {})", contentType);
                         String respBody = response.body() == null ? "" : response.body().string();
-                        SessionResult result = parseSessionResponse(respBody);
+                        SessionResult result = parseSessionResponse(respBody, cfg.useToolCall());
                         if (callback != null) {
                             callback.onComplete(result);
                         }
@@ -340,7 +340,7 @@ public final class LLMService {
                 if (P2SMod.DEBUG) {
                     P2SMod.LOGGER.info("[DEBUG] LLM session full response body: {}", respBody);
                 }
-                return parseSessionResponse(respBody);
+                return parseSessionResponse(respBody, cfg.useToolCall());
             } catch (Exception e) {
                 throw new RuntimeException("LLM 请求异常: " + e.getMessage(), e);
             }
@@ -1006,7 +1006,7 @@ public final class LLMService {
         return allowedTools == null || allowedTools.contains(toolName);
     }
 
-    private static SessionResult parseSessionResponse(String responseBody) throws IOException {
+    private static SessionResult parseSessionResponse(String responseBody, boolean useToolCall) throws IOException {
         JsonObject root = JsonParser.parseString(responseBody).getAsJsonObject();
         JsonArray choices = root.getAsJsonArray("choices");
         if (choices == null || choices.isEmpty()) {
@@ -1027,7 +1027,7 @@ public final class LLMService {
             P2SMod.LOGGER.info("LLM session parse -> toolCalls={}, textLen={}, hasScript=false", toolCalls.size(), textLen);
             return new SessionResult(textContent, null, message, toolCalls);
         }
-        if (!ModConfig.USE_TOOL_CALL && textContent != null && !textContent.isBlank()) {
+        if (!useToolCall && textContent != null && !textContent.isBlank()) {
             try {
                 String content = cleanContent(textContent);
                 StructureBuilder.VbsScriptV2 script = parseScriptFromContent(content);
@@ -1137,23 +1137,23 @@ public final class LLMService {
     private static RequestConfig resolveConfig(RequestConfig override) {
         if (override == null) {
             return new RequestConfig(
-                    ModConfig.API_URL,
-                    ModConfig.API_KEY,
-                    ModConfig.MODEL,
-                    ModConfig.HTTP_TIMEOUT_SECONDS,
-                    ModConfig.USE_TOOL_CALL
+                    P2SDefaults.DEFAULT_API_URL,
+                    P2SDefaults.DEFAULT_API_KEY,
+                    P2SDefaults.DEFAULT_MODEL,
+                    P2SDefaults.DEFAULT_TIMEOUT_SECONDS,
+                    P2SDefaults.DEFAULT_USE_TOOL_CALL
             );
         }
-        String apiUrl = override.apiUrl() == null || override.apiUrl().isBlank() ? ModConfig.API_URL : override.apiUrl().trim();
-        String apiKey = override.apiKey() == null || override.apiKey().isBlank() ? ModConfig.API_KEY : override.apiKey().trim();
-        String model = override.model() == null || override.model().isBlank() ? ModConfig.MODEL : override.model().trim();
-        int timeout = override.httpTimeoutSeconds() <= 0 ? ModConfig.HTTP_TIMEOUT_SECONDS : override.httpTimeoutSeconds();
+        String apiUrl = override.apiUrl() == null || override.apiUrl().isBlank() ? P2SDefaults.DEFAULT_API_URL : override.apiUrl().trim();
+        String apiKey = override.apiKey() == null || override.apiKey().isBlank() ? P2SDefaults.DEFAULT_API_KEY : override.apiKey().trim();
+        String model = override.model() == null || override.model().isBlank() ? P2SDefaults.DEFAULT_MODEL : override.model().trim();
+        int timeout = override.httpTimeoutSeconds() <= 0 ? P2SDefaults.DEFAULT_TIMEOUT_SECONDS : override.httpTimeoutSeconds();
         boolean toolCall = override.useToolCall();
         return new RequestConfig(apiUrl, apiKey, model, timeout, toolCall);
     }
 
     private static OkHttpClient getClient() {
-        int cfgTimeout = ModConfig.HTTP_TIMEOUT_SECONDS;
+        int cfgTimeout = P2SDefaults.DEFAULT_TIMEOUT_SECONDS;
         if (cfgTimeout != CLIENT_TIMEOUT_SECONDS) {
             CLIENT_TIMEOUT_SECONDS = cfgTimeout;
             CLIENT = buildClient(cfgTimeout);
@@ -1163,7 +1163,7 @@ public final class LLMService {
     }
 
     private static OkHttpClient getClient(int timeoutSeconds) {
-        if (timeoutSeconds <= 0 || timeoutSeconds == ModConfig.HTTP_TIMEOUT_SECONDS) {
+        if (timeoutSeconds <= 0 || timeoutSeconds == P2SDefaults.DEFAULT_TIMEOUT_SECONDS) {
             return getClient();
         }
         return buildClient(timeoutSeconds);

@@ -31,7 +31,11 @@ public final class ClientToolBridge {
             return future;
         }
 
-        String argumentsJson = args == null ? "{}" : GSON.toJson(args);
+        JsonObject payload = args == null ? new JsonObject() : args.deepCopy();
+        if ("propose_patch".equals(toolName)) {
+            payload.add("runtime_settings", P2SClientConfig.patchRuntimeSettingsPayload());
+        }
+        String argumentsJson = GSON.toJson(payload);
         Minecraft mc = Minecraft.getInstance();
         Runnable sendTask = () -> ClientPlayNetworking.send(new com.p2s.network.C2SToolBridgePayload(requestId, toolName == null ? "" : toolName, argumentsJson));
         if (mc != null) {

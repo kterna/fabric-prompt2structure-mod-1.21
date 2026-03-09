@@ -65,7 +65,7 @@ Before changing documentation, verify against the relevant source files.
 
 - Open chat key: `src/client/java/com/p2s/ModKeyBindings.java`
 - Default selection item: `src/client/java/com/p2s/P2SClientConfig.java`
-- Remaining server command(s): `src/main/java/com/p2s/ModCommandRegistry.java`
+- Legacy command docs are obsolete; current user entry is the client chat UI in `src/client/java/com/p2s/P2SChatScreen.java`
 - Multiplayer bridge requirement: `src/client/java/com/p2s/ClientServerBridge.java`
 
 ### Session/project/workspace workflow
@@ -77,8 +77,8 @@ Before changing documentation, verify against the relevant source files.
 
 ### Config and persistence
 
-- Server config keys: `src/main/java/com/p2s/ModConfig.java`
-- Client config keys: `src/client/java/com/p2s/P2SClientConfig.java`
+- Shared defaults used by client/server bridge code: `src/main/java/com/p2s/P2SDefaults.java`
+- Client-owned config keys: `src/client/java/com/p2s/P2SClientConfig.java`
 - Saved client sessions: `src/client/java/com/p2s/store/SessionPersistence.java`
 
 ### Build/release metadata

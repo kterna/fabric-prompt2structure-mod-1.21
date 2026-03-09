@@ -567,14 +567,15 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
                 patch,
                 committedRevision
         );
+        PatchRuntimeSettings settings = runtimeSettings(args);
         PatchModels.ValidationResult validation = PatchValidator.validate(
                 mergedPatch,
                 committedRevision,
                 workspaceSize(project, workspace),
                 next,
                 diff,
-                ModConfig.MAX_PATCH_OPS,
-                ModConfig.MAX_BLOCKS_PER_COMMIT
+                settings.maxPatchOps(),
+                settings.maxBlocksPerCommit()
         );
         if (!validation.ok) {
             JsonObject payload = buildToolError("propose_patch", String.join("; ", validation.errors));
@@ -595,7 +596,7 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         pending.preview = buildPatchPreview(mergedPatch, validation, diff, committedRevision);
         pending.revisionBefore = committedRevision;
         pending.revisionAfter = nextRevision();
-        validation.requiresConfirm = requiresConfirm(pending.preview.changedBlocks);
+        validation.requiresConfirm = requiresConfirm(pending.preview.changedBlocks, settings);
         workspace.pendingPatch = pending;
         session.runtimeState = RuntimeState.AWAITING_CONFIRM;
         session.selectedWorkspacePath = path;
@@ -1331,6 +1332,45 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         }
     }
 
+
+    private static Integer getInt(JsonObject obj, String key) {
+        if (obj == null || key == null || !obj.has(key) || !obj.get(key).isJsonPrimitive()) {
+            return null;
+        }
+        try {
+            return obj.get(key).getAsInt();
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private static Boolean getBoolean(JsonObject obj, String key) {
+        if (obj == null || key == null || !obj.has(key) || !obj.get(key).isJsonPrimitive()) {
+            return null;
+        }
+        try {
+            return obj.get(key).getAsBoolean();
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private static PatchRuntimeSettings runtimeSettings(JsonObject args) {
+        JsonObject settings = args != null && args.has("runtime_settings") && args.get("runtime_settings").isJsonObject()
+                ? args.getAsJsonObject("runtime_settings")
+                : null;
+        Integer maxPatchOps = getInt(settings, "maxPatchOps");
+        Integer maxBlocksPerCommit = getInt(settings, "maxBlocksPerCommit");
+        Boolean confirmRequired = getBoolean(settings, "confirmRequired");
+        Integer riskAutoApplyThreshold = getInt(settings, "riskAutoApplyThreshold");
+        return new PatchRuntimeSettings(
+                maxPatchOps == null || maxPatchOps <= 0 ? P2SDefaults.DEFAULT_MAX_PATCH_OPS : maxPatchOps,
+                maxBlocksPerCommit == null || maxBlocksPerCommit <= 0 ? P2SDefaults.DEFAULT_MAX_BLOCKS_PER_COMMIT : maxBlocksPerCommit,
+                confirmRequired == null ? P2SDefaults.DEFAULT_CONFIRM_REQUIRED : confirmRequired,
+                riskAutoApplyThreshold == null || riskAutoApplyThreshold < -1 ? P2SDefaults.DEFAULT_RISK_AUTO_APPLY_THRESHOLD : riskAutoApplyThreshold
+        );
+    }
+
     private static PatchModels.StructurePatch parsePatchArguments(JsonElement argsElem) {
         if (argsElem == null || argsElem.isJsonNull()) {
             return null;
@@ -1422,11 +1462,11 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         return merged;
     }
 
-    private static boolean requiresConfirm(int changedBlocks) {
-        if (!ModConfig.CONFIRM_REQUIRED) {
+    private static boolean requiresConfirm(int changedBlocks, PatchRuntimeSettings settings) {
+        if (settings == null || !settings.confirmRequired()) {
             return false;
         }
-        int threshold = Math.max(0, ModConfig.RISK_AUTO_APPLY_THRESHOLD);
+        int threshold = Math.max(0, settings.riskAutoApplyThreshold());
         return changedBlocks > threshold;
     }
 
@@ -1958,6 +1998,14 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
             this.committed = committed;
             this.path = path == null ? "" : path.trim();
         }
+    }
+
+    private record PatchRuntimeSettings(
+            int maxPatchOps,
+            int maxBlocksPerCommit,
+            boolean confirmRequired,
+            int riskAutoApplyThreshold
+    ) {
     }
 
     public static class Session {

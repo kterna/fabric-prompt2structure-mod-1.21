@@ -20,13 +20,7 @@ public class P2SMod implements ModInitializer {
 	@Override
 	public void onInitialize() {
 		P2SNetworkPayloads.register();
-		ModCommandRegistry.register();
 		ServerNetworkHandler.register();
-		LOGGER.info("Prompt-to-Structure module loaded. {}", ModConfig.describeConfigSource());
-		LOGGER.info("Server bridge mode enabled. maxPatchOps={}, maxBlocksPerCommit={}, confirmRequired={}, riskAutoApplyThreshold={}",
-				ModConfig.MAX_PATCH_OPS,
-				ModConfig.MAX_BLOCKS_PER_COMMIT,
-				ModConfig.CONFIRM_REQUIRED,
-				ModConfig.RISK_AUTO_APPLY_THRESHOLD);
+		LOGGER.info("Prompt-to-Structure module loaded.");
 	}
 }

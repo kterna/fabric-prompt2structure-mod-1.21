@@ -33,15 +33,21 @@ public class P2SConfigScreen extends Screen {
     private EditBox apiKeyInput;
     private EditBox modelInput;
     private EditBox timeoutInput;
+    private EditBox sessionTimeoutInput;
+    private EditBox maxPatchOpsInput;
+    private EditBox maxBlocksPerCommitInput;
+    private EditBox riskAutoApplyThresholdInput;
     private EditBox autoCompactTokenLimitInput;
     private EditBox compactRetainUserTokenBudgetInput;
     private P2SMultiLineTextEditor systemPromptEditor;
     private Button toolCallButton;
     private Button streamingButton;
     private Button autoApplyButton;
+    private Button confirmRequiredButton;
     private boolean useToolCall;
     private boolean useStreaming;
     private boolean autoApplyPatch;
+    private boolean confirmRequired;
 
     // Skills tab
     private final List<Button> skillRowButtons = new ArrayList<>();
@@ -205,12 +211,39 @@ public class P2SConfigScreen extends Screen {
         }).bounds(left + 480, y + 14, 180, 20).build());
         y += 50;
 
-        autoCompactTokenLimitInput = new EditBox(this.font, left + 10, y + 14, 170, 20, P2SI18n.tr("screen.p2s.config.llm.auto_compact_token_limit"));
+        sessionTimeoutInput = new EditBox(this.font, left + 10, y + 14, 120, 20, P2SI18n.tr("screen.p2s.config.llm.session_timeout"));
+        sessionTimeoutInput.setMaxLength(8);
+        sessionTimeoutInput.setValue(Integer.toString(P2SClientConfig.getSessionJobTimeoutSeconds()));
+        addRenderableWidget(sessionTimeoutInput);
+
+        maxPatchOpsInput = new EditBox(this.font, left + 140, y + 14, 120, 20, P2SI18n.tr("screen.p2s.config.llm.max_patch_ops"));
+        maxPatchOpsInput.setMaxLength(8);
+        maxPatchOpsInput.setValue(Integer.toString(P2SClientConfig.getMaxPatchOps()));
+        addRenderableWidget(maxPatchOpsInput);
+
+        maxBlocksPerCommitInput = new EditBox(this.font, left + 270, y + 14, 150, 20, P2SI18n.tr("screen.p2s.config.llm.max_blocks_per_commit"));
+        maxBlocksPerCommitInput.setMaxLength(8);
+        maxBlocksPerCommitInput.setValue(Integer.toString(P2SClientConfig.getMaxBlocksPerCommit()));
+        addRenderableWidget(maxBlocksPerCommitInput);
+
+        confirmRequired = P2SClientConfig.getConfirmRequired();
+        confirmRequiredButton = addRenderableWidget(Button.builder(confirmRequiredLabel(), btn -> {
+            confirmRequired = !confirmRequired;
+            btn.setMessage(confirmRequiredLabel());
+        }).bounds(left + 430, y + 14, 190, 20).build());
+        y += 50;
+
+        riskAutoApplyThresholdInput = new EditBox(this.font, left + 10, y + 14, 170, 20, P2SI18n.tr("screen.p2s.config.llm.risk_auto_apply_threshold"));
+        riskAutoApplyThresholdInput.setMaxLength(8);
+        riskAutoApplyThresholdInput.setValue(Integer.toString(P2SClientConfig.getRiskAutoApplyThreshold()));
+        addRenderableWidget(riskAutoApplyThresholdInput);
+
+        autoCompactTokenLimitInput = new EditBox(this.font, left + 200, y + 14, 170, 20, P2SI18n.tr("screen.p2s.config.llm.auto_compact_token_limit"));
         autoCompactTokenLimitInput.setMaxLength(8);
         autoCompactTokenLimitInput.setValue(Integer.toString(P2SClientConfig.getAutoCompactTokenLimit()));
         addRenderableWidget(autoCompactTokenLimitInput);
 
-        compactRetainUserTokenBudgetInput = new EditBox(this.font, left + 200, y + 14, 220, 20, P2SI18n.tr("screen.p2s.config.llm.compact_retain_user_tokens"));
+        compactRetainUserTokenBudgetInput = new EditBox(this.font, left + 390, y + 14, 220, 20, P2SI18n.tr("screen.p2s.config.llm.compact_retain_user_tokens"));
         compactRetainUserTokenBudgetInput.setMaxLength(8);
         compactRetainUserTokenBudgetInput.setValue(Integer.toString(P2SClientConfig.getCompactRetainUserTokenBudget()));
         addRenderableWidget(compactRetainUserTokenBudgetInput);
@@ -246,6 +279,11 @@ public class P2SConfigScreen extends Screen {
                 P2SI18n.tr(autoApplyPatch ? "screen.p2s.common.on" : "screen.p2s.common.off"));
     }
 
+    private Component confirmRequiredLabel() {
+        return P2SI18n.tr("screen.p2s.config.toggle.confirm_required",
+                P2SI18n.tr(confirmRequired ? "screen.p2s.common.on" : "screen.p2s.common.off"));
+    }
+
     private int llmPromptHeight(int promptY) {
         int available = this.height - promptY - 60;
         if (available <= 0) {
@@ -260,6 +298,10 @@ public class P2SConfigScreen extends Screen {
 
     private void saveLlmConfig() {
         Integer timeout = parsePositiveInt(timeoutInput == null ? "" : timeoutInput.getValue());
+        Integer sessionTimeout = parsePositiveInt(sessionTimeoutInput == null ? "" : sessionTimeoutInput.getValue());
+        Integer maxPatchOps = parsePositiveInt(maxPatchOpsInput == null ? "" : maxPatchOpsInput.getValue());
+        Integer maxBlocksPerCommit = parsePositiveInt(maxBlocksPerCommitInput == null ? "" : maxBlocksPerCommitInput.getValue());
+        Integer riskAutoApplyThreshold = parseInteger(riskAutoApplyThresholdInput == null ? "" : riskAutoApplyThresholdInput.getValue());
         Integer autoCompactTokenLimit = parsePositiveInt(autoCompactTokenLimitInput == null ? "" : autoCompactTokenLimitInput.getValue());
         Integer compactRetainUserTokenBudget = parsePositiveInt(compactRetainUserTokenBudgetInput == null ? "" : compactRetainUserTokenBudgetInput.getValue());
         boolean ok = P2SClientConfig.setLlmConfig(
@@ -268,6 +310,11 @@ public class P2SConfigScreen extends Screen {
                 modelInput == null ? "" : modelInput.getValue(),
                 timeout,
                 useToolCall,
+                sessionTimeout,
+                maxPatchOps,
+                maxBlocksPerCommit,
+                confirmRequired,
+                riskAutoApplyThreshold,
                 autoCompactTokenLimit,
                 compactRetainUserTokenBudget,
                 systemPromptEditor == null ? "" : systemPromptEditor.getText(),
@@ -290,6 +337,10 @@ public class P2SConfigScreen extends Screen {
         if (apiKeyInput != null) apiKeyInput.setValue(P2SClientConfig.getApiKey());
         if (modelInput != null) modelInput.setValue(P2SClientConfig.getModel());
         if (timeoutInput != null) timeoutInput.setValue(Integer.toString(P2SClientConfig.getHttpTimeoutSeconds()));
+        if (sessionTimeoutInput != null) sessionTimeoutInput.setValue(Integer.toString(P2SClientConfig.getSessionJobTimeoutSeconds()));
+        if (maxPatchOpsInput != null) maxPatchOpsInput.setValue(Integer.toString(P2SClientConfig.getMaxPatchOps()));
+        if (maxBlocksPerCommitInput != null) maxBlocksPerCommitInput.setValue(Integer.toString(P2SClientConfig.getMaxBlocksPerCommit()));
+        if (riskAutoApplyThresholdInput != null) riskAutoApplyThresholdInput.setValue(Integer.toString(P2SClientConfig.getRiskAutoApplyThreshold()));
         if (autoCompactTokenLimitInput != null) autoCompactTokenLimitInput.setValue(Integer.toString(P2SClientConfig.getAutoCompactTokenLimit()));
         if (compactRetainUserTokenBudgetInput != null) compactRetainUserTokenBudgetInput.setValue(Integer.toString(P2SClientConfig.getCompactRetainUserTokenBudget()));
         if (systemPromptEditor != null) systemPromptEditor.setText(P2SClientConfig.getSystemPrompt());
@@ -299,11 +350,18 @@ public class P2SConfigScreen extends Screen {
         if (streamingButton != null) streamingButton.setMessage(streamingLabel());
         autoApplyPatch = P2SClientConfig.getAutoApplyPatch();
         if (autoApplyButton != null) autoApplyButton.setMessage(autoApplyLabel());
+        confirmRequired = P2SClientConfig.getConfirmRequired();
+        if (confirmRequiredButton != null) confirmRequiredButton.setMessage(confirmRequiredLabel());
         statusText = P2SI18n.tr("screen.p2s.status.reset_to_defaults");
         statusColor = 0x55FF55;
     }
 
     private Integer parsePositiveInt(String raw) {
+        Integer value = parseInteger(raw);
+        return value == null || value <= 0 ? null : value;
+    }
+
+    private Integer parseInteger(String raw) {
         if (raw == null || raw.isBlank()) return null;
         try {
             return Integer.parseInt(raw.trim());
@@ -533,6 +591,10 @@ public class P2SConfigScreen extends Screen {
             if (apiKeyInput != null) apiKeyInput.setFocused(false);
             if (modelInput != null) modelInput.setFocused(false);
             if (timeoutInput != null) timeoutInput.setFocused(false);
+            if (sessionTimeoutInput != null) sessionTimeoutInput.setFocused(false);
+            if (maxPatchOpsInput != null) maxPatchOpsInput.setFocused(false);
+            if (maxBlocksPerCommitInput != null) maxBlocksPerCommitInput.setFocused(false);
+            if (riskAutoApplyThresholdInput != null) riskAutoApplyThresholdInput.setFocused(false);
             if (autoCompactTokenLimitInput != null) autoCompactTokenLimitInput.setFocused(false);
             if (compactRetainUserTokenBudgetInput != null) compactRetainUserTokenBudgetInput.setFocused(false);
             return true;
@@ -570,7 +632,7 @@ public class P2SConfigScreen extends Screen {
     private List<EditBox> collectEditBoxes() {
         return switch (currentTab) {
             case GENERAL -> selectionItemInput == null ? List.of() : List.of(selectionItemInput);
-            case LLM -> List.of(apiUrlInput, apiKeyInput, modelInput, timeoutInput, autoCompactTokenLimitInput, compactRetainUserTokenBudgetInput);
+            case LLM -> List.of(apiUrlInput, apiKeyInput, modelInput, timeoutInput, sessionTimeoutInput, maxPatchOpsInput, maxBlocksPerCommitInput, riskAutoApplyThresholdInput, autoCompactTokenLimitInput, compactRetainUserTokenBudgetInput);
             case SKILLS -> List.of();
         };
     }
@@ -623,8 +685,13 @@ public class P2SConfigScreen extends Screen {
         y += 50;
         gfx.drawString(this.font, P2SI18n.tr("screen.p2s.config.llm.timeout"), left + 10, y, 0xBBBBBB, false);
         y += 50;
-        gfx.drawString(this.font, P2SI18n.tr("screen.p2s.config.llm.auto_compact_token_limit"), left + 10, y, 0xBBBBBB, false);
-        gfx.drawString(this.font, P2SI18n.tr("screen.p2s.config.llm.compact_retain_user_tokens"), left + 200, y, 0xBBBBBB, false);
+        gfx.drawString(this.font, P2SI18n.tr("screen.p2s.config.llm.session_timeout"), left + 10, y, 0xBBBBBB, false);
+        gfx.drawString(this.font, P2SI18n.tr("screen.p2s.config.llm.max_patch_ops"), left + 140, y, 0xBBBBBB, false);
+        gfx.drawString(this.font, P2SI18n.tr("screen.p2s.config.llm.max_blocks_per_commit"), left + 270, y, 0xBBBBBB, false);
+        y += 50;
+        gfx.drawString(this.font, P2SI18n.tr("screen.p2s.config.llm.risk_auto_apply_threshold"), left + 10, y, 0xBBBBBB, false);
+        gfx.drawString(this.font, P2SI18n.tr("screen.p2s.config.llm.auto_compact_token_limit"), left + 200, y, 0xBBBBBB, false);
+        gfx.drawString(this.font, P2SI18n.tr("screen.p2s.config.llm.compact_retain_user_tokens"), left + 390, y, 0xBBBBBB, false);
         int hintY = y + 38;
         for (var line : this.font.split(P2SI18n.tr("screen.p2s.config.llm.compact_threshold_hint"), panelWidth - 20)) {
             gfx.drawString(this.font, line, left + 10, hintY, 0x888888, false);
