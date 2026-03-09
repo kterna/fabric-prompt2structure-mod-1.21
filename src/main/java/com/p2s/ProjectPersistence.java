@@ -10,6 +10,7 @@ import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -25,6 +26,7 @@ public final class ProjectPersistence {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final Path BASE_DIR = FabricLoader.getInstance().getConfigDir().resolve("p2s_projects_v2");
     private static final Path PROJECTS_DIR = BASE_DIR.resolve("projects");
+    private static final Path WORKSPACES_DIR = BASE_DIR.resolve("workspaces");
     private static final Path INDEX_PATH = BASE_DIR.resolve("index.json");
     private static final Path LEGACY_SESSIONS_DIR = FabricLoader.getInstance().getConfigDir().resolve("p2s_sessions");
     private static boolean legacyWarned = false;
@@ -91,6 +93,7 @@ public final class ProjectPersistence {
             }
             ProjectRecord project = GSON.fromJson(Files.readString(file), ProjectRecord.class);
             normalizeProject(project);
+            loadWorkspaceFiles(project);
             return project;
         } catch (Exception e) {
             P2SMod.LOGGER.warn("Failed loading project {}: {}", id, e.getMessage());
@@ -127,6 +130,7 @@ public final class ProjectPersistence {
         normalizeProject(project);
         project.updatedAt = System.currentTimeMillis();
         try {
+            saveWorkspaceFiles(project);
             Files.writeString(PROJECTS_DIR.resolve(project.id + ".json"), GSON.toJson(project));
         } catch (Exception e) {
             P2SMod.LOGGER.warn("Failed saving project {}: {}", project.id, e.getMessage());
@@ -142,6 +146,7 @@ public final class ProjectPersistence {
         }
         try {
             Files.deleteIfExists(PROJECTS_DIR.resolve(id.trim() + ".json"));
+            deleteDirectoryRecursively(workspaceRoot(id.trim()));
             List<ProjectIndexEntry> entries = listProjects();
             entries.removeIf(entry -> id.trim().equals(entry.id()));
             writeIndex(entries);
@@ -180,8 +185,96 @@ public final class ProjectPersistence {
     private static void ensureDirectories() {
         try {
             Files.createDirectories(PROJECTS_DIR);
+            Files.createDirectories(WORKSPACES_DIR);
         } catch (Exception e) {
             P2SMod.LOGGER.warn("Failed creating project directories: {}", e.getMessage());
+        }
+    }
+
+    private static void loadWorkspaceFiles(ProjectRecord project) {
+        if (project == null || project.id == null || project.id.isBlank() || project.workspaceFiles == null) {
+            return;
+        }
+        for (WorkspaceFileRecord workspace : project.workspaceFiles.values()) {
+            if (workspace == null) {
+                continue;
+            }
+            workspace.current = new StructureBuilder.VbsScriptV2();
+            Path path = workspaceFilePath(project.id, workspace.path);
+            if (!Files.exists(path)) {
+                continue;
+            }
+            try {
+                WorkspaceTomlCodec.WorkspaceTomlDocument document = WorkspaceTomlCodec.parse(Files.readString(path));
+                workspace.current = WorkspaceTomlCodec.toScript(document);
+                WorkspaceTomlCodec.applyToWorkspace(document, workspace);
+            } catch (Exception e) {
+                P2SMod.LOGGER.warn("Failed loading workspace TOML {} for project {}: {}", workspace.path, project.id, e.getMessage());
+                workspace.current = new StructureBuilder.VbsScriptV2();
+            }
+        }
+    }
+
+    private static void saveWorkspaceFiles(ProjectRecord project) {
+        if (project == null || project.id == null || project.id.isBlank()) {
+            return;
+        }
+        Path root = workspaceRoot(project.id);
+        try {
+            deleteDirectoryRecursively(root);
+            Files.createDirectories(root);
+            if (project.workspaceFiles == null) {
+                return;
+            }
+            for (WorkspaceFileRecord workspace : project.workspaceFiles.values()) {
+                if (workspace == null || workspace.path == null || workspace.path.isBlank()) {
+                    continue;
+                }
+                if (workspace.current == null) {
+                    workspace.current = new StructureBuilder.VbsScriptV2();
+                }
+                Path file = workspaceFilePath(project.id, workspace.path);
+                if (file.getParent() != null) {
+                    Files.createDirectories(file.getParent());
+                }
+                Files.writeString(file, WorkspaceTomlCodec.write(WorkspaceTomlCodec.fromWorkspace(workspace, workspace.current)));
+            }
+        } catch (Exception e) {
+            P2SMod.LOGGER.warn("Failed saving workspace TOML files for {}: {}", project.id, e.getMessage());
+        }
+    }
+
+    private static Path workspaceRoot(String projectId) {
+        return WORKSPACES_DIR.resolve(projectId == null ? "" : projectId.trim());
+    }
+
+    private static Path workspaceFilePath(String projectId, String workspacePath) {
+        Path root = workspaceRoot(projectId).normalize();
+        String normalized = normalizeWorkspacePath(workspacePath);
+        Path resolved = root.resolve(normalized).normalize();
+        if (!resolved.startsWith(root)) {
+            throw new IllegalArgumentException("Invalid workspace path: " + workspacePath);
+        }
+        return resolved;
+    }
+
+    private static void deleteDirectoryRecursively(Path root) throws IOException {
+        if (root == null || !Files.exists(root)) {
+            return;
+        }
+        try (var stream = Files.walk(root)) {
+            stream.sorted(Comparator.reverseOrder()).forEach(path -> {
+                try {
+                    Files.deleteIfExists(path);
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+            });
+        } catch (RuntimeException e) {
+            if (e.getCause() instanceof IOException ioException) {
+                throw ioException;
+            }
+            throw e;
         }
     }
 
@@ -334,6 +427,9 @@ public final class ProjectPersistence {
         if (workspace.metadata == null) {
             workspace.metadata = new JsonObject();
         }
+        if (workspace.current == null) {
+            workspace.current = new StructureBuilder.VbsScriptV2();
+        }
         if (workspace.pendingPatch != null) {
             if (workspace.pendingPatch.revisionBefore == null) {
                 workspace.pendingPatch.revisionBefore = workspace.revision;
@@ -463,7 +559,7 @@ public final class ProjectPersistence {
         public String areaTag = "";
         public Vec3Data origin;
         public Vec3Data size;
-        public StructureBuilder.VbsScriptV2 current;
+        public transient StructureBuilder.VbsScriptV2 current;
         public String revision = "rev-0";
         public PendingPatchRecord pendingPatch;
         public List<CommitRecord> undoStack = new ArrayList<>();

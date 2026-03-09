@@ -171,9 +171,12 @@ P2S 是一个用于 Minecraft 结构生成与迭代编辑的 Fabric 模组，支
 ## 存档
 
 - 结构存档：`config/p2s_storage/*.json`
+- project 元数据：`config/p2s_projects_v2/projects/*.json`
+- workspace 文件：`config/p2s_projects_v2/workspaces/<project-id>/**/*.toml`
 - skill 文档：`config/p2s_skills/skills/<skill-id>/SKILL.md`
 - subagent profile：`config/p2s_skills/.agent/*.json`
 - 统一结构格式：V2（`palette + structures`）
+- workspace 可编辑格式：TOML（`workspace + palette + [[part]] + [[part.action]]`）
 
 ## 构建
 

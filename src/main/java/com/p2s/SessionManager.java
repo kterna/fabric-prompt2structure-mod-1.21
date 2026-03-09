@@ -371,6 +371,7 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         workspace.name = name == null || name.isBlank() ? ProjectPersistence.leafName(path) : name.trim();
         workspace.type = type;
         workspace.revision = "rev-0";
+        workspace.current = new StructureBuilder.VbsScriptV2();
         workspace.metadata = new JsonObject();
         if (fromSelection) {
             SelectionManager.Selection selection = SelectionManager.get(player.getUUID());
@@ -403,6 +404,7 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         }
         JsonObject args = normalizeArgsObject(argsElem);
         String path = ProjectPersistence.normalizeWorkspacePath(getString(args, "path"));
+        String workspaceToml = getString(args, "workspace_toml");
         String scriptJson = getString(args, "script_json");
         if (path.isBlank()) {
             return buildToolErrorKey("save_workspace_file", "message.p2s.workspace.save_requires_path");
@@ -413,7 +415,13 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         }
         StructureBuilder.VbsScriptV2 script;
         try {
-            script = scriptJson == null || scriptJson.isBlank() ? new StructureBuilder.VbsScriptV2() : StructureBuilder.parseV2(scriptJson);
+            if (workspaceToml != null && !workspaceToml.isBlank()) {
+                WorkspaceTomlCodec.WorkspaceTomlDocument document = WorkspaceTomlCodec.parse(workspaceToml);
+                WorkspaceTomlCodec.applyToWorkspace(document, workspace);
+                script = WorkspaceTomlCodec.toScript(document);
+            } else {
+                script = scriptJson == null || scriptJson.isBlank() ? new StructureBuilder.VbsScriptV2() : StructureBuilder.parseV2(scriptJson);
+            }
         } catch (Exception e) {
             return buildToolErrorKey("save_workspace_file", "message.p2s.workspace.invalid_script_json", e.getMessage());
         }
@@ -669,6 +677,7 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         workspace.path = path;
         workspace.name = ProjectPersistence.leafName(path);
         workspace.type = type;
+        workspace.current = new StructureBuilder.VbsScriptV2();
         workspace.metadata = new JsonObject();
         if (fromSelection) {
             SelectionManager.Selection selection = SelectionManager.get(player.getUUID());
@@ -1101,6 +1110,7 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         JsonObject payload = new JsonObject();
         payload.addProperty("path", workspace.path == null ? "" : workspace.path);
         payload.addProperty("name", workspace.name == null ? "" : workspace.name);
+        payload.addProperty("format", "toml");
         if (workspace.origin != null) {
             JsonObject origin = new JsonObject();
             origin.addProperty("x", workspace.origin.x);
@@ -1118,17 +1128,16 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         StructureBuilder.VbsScriptV2 effective = committedOnly || workspace.pendingPatch == null || workspace.pendingPatch.nextScript == null
                 ? workspace.current
                 : workspace.pendingPatch.nextScript;
-        if (effective == null) {
-            payload.addProperty("empty", true);
-            return payload;
+        String workspaceToml = "";
+        try {
+            workspaceToml = WorkspaceTomlCodec.write(WorkspaceTomlCodec.fromWorkspace(workspace, effective));
+        } catch (Exception ignored) {
         }
-        JsonElement scriptJson = GSON.toJsonTree(effective);
-        String jsonText = GSON.toJson(scriptJson);
-        if (jsonText.length() <= MAX_TOOL_JSON_CHARS) {
-            payload.add("script", scriptJson);
+        if (workspaceToml.length() <= MAX_TOOL_JSON_CHARS) {
+            payload.addProperty("workspace_toml", workspaceToml);
         } else {
             payload.addProperty("truncated", true);
-            payload.addProperty("script_json", jsonText.substring(0, MAX_TOOL_JSON_CHARS));
+            payload.addProperty("workspace_toml", workspaceToml.substring(0, MAX_TOOL_JSON_CHARS));
         }
         return payload;
     }
@@ -1872,9 +1881,9 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         boolean sessionActive = currentSession != null;
         ProjectPersistence.WorkspaceFileRecord selected = selectedWorkspace(project, currentSession);
         String currentScriptJson = "";
-        if (selected != null && selected.current != null) {
+        if (selected != null) {
             try {
-                currentScriptJson = GSON.toJson(GSON.toJsonTree(selected.current));
+                currentScriptJson = WorkspaceTomlCodec.write(WorkspaceTomlCodec.fromWorkspace(selected, selected.current));
             } catch (Exception ignored) {
             }
         }

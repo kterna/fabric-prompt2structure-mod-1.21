@@ -837,8 +837,8 @@ public final class LLMService {
             JsonObject readFn = new JsonObject();
             readFn.addProperty("name", "read_workspace_file");
             readFn.addProperty("description",
-                    "Read a workspace file state including size, origin, revision, and script. " +
-                    "Returns a full script JSON when small, otherwise truncated=true with script_json.");
+                    "Read a workspace file state including size, origin, revision, and TOML content. " +
+                    "Returns workspace_toml, and may set truncated=true when the text is shortened.");
             JsonObject readParams = new JsonObject();
             readParams.addProperty("type", "object");
             JsonObject readProps = new JsonObject();
@@ -880,7 +880,7 @@ public final class LLMService {
 
             JsonObject createPath = new JsonObject();
             createPath.addProperty("type", "string");
-            createPath.addProperty("description", "Logical project path, such as workspace/floors/f1.json.");
+            createPath.addProperty("description", "Logical project path, such as workspace/floors/f1.toml.");
             createProps.add("path", createPath);
 
             JsonObject createType = new JsonObject();

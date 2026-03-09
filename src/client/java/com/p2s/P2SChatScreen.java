@@ -523,7 +523,7 @@ public class P2SChatScreen extends Screen {
                 setContextJsonText(current);
                 contextLoadedDocId = selectedWorkspacePath == null ? "" : selectedWorkspacePath;
             } else {
-                setContextJsonText("{\n}\n");
+                setContextJsonText(defaultWorkspaceToml(selectedWorkspacePath));
             }
         }
         contextScroll = Math.max(0, contextScroll);
@@ -787,8 +787,9 @@ public class P2SChatScreen extends Screen {
                             selectedExplorerFolderPath = parentFolderOfWorkspacePath(createdPath);
                             workspaceExpandedSelectionPath = "";
                             ClientSessionState.setSelectedWorkspacePath(createdPath);
-                            ClientSessionState.setWorkspaceFileScriptJson(createdPath, "{\n}\n");
-                            setContextJsonText("{\n}\n");
+                            String workspaceToml = defaultWorkspaceToml(createdPath);
+                            ClientSessionState.setWorkspaceFileScriptJson(createdPath, workspaceToml);
+                            setContextJsonText(workspaceToml);
                             contextLoadedDocId = createdPath == null ? "" : createdPath;
                             setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.workspace_created", createdPath), 0x55FF55);
                             createWidgets();
@@ -816,7 +817,7 @@ public class P2SChatScreen extends Screen {
         }
         JsonObject args = new JsonObject();
         args.addProperty("path", selectedWorkspacePath);
-        args.addProperty("script_json", contextLinesToText());
+        args.addProperty("workspace_toml", contextLinesToText());
         setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.saving_workspace"), 0xAAAAAA);
         ClientToolBridge.call("save_workspace_file", args)
                 .thenAccept(result -> {
@@ -827,8 +828,8 @@ public class P2SChatScreen extends Screen {
                                 setContextStatus(resolveToolError(result, "screen.p2s.chat.context.status.workspace_save_failed"), 0xFF5555);
                                 return;
                             }
-                            String json = contextLinesToText();
-                            ClientSessionState.setWorkspaceFileScriptJson(selectedWorkspacePath, json);
+                            String workspaceToml = contextLinesToText();
+                            ClientSessionState.setWorkspaceFileScriptJson(selectedWorkspacePath, workspaceToml);
                             contextLoadedDocId = selectedWorkspacePath;
                             setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.workspace_saved", selectedWorkspacePath), 0x55FF55);
                         });
@@ -1041,10 +1042,10 @@ public class P2SChatScreen extends Screen {
         String baseFolder = selectedCreateBaseFolder();
         int next = Math.max(1, ClientSessionState.getWorkspaceFiles().size() + 1);
         String prefix = baseFolder == null || baseFolder.isBlank() ? "workspace" : baseFolder;
-        String candidate = prefix + "/file-" + next + ".json";
+        String candidate = prefix + "/file-" + next + ".toml";
         while (workspaceFileExists(candidate) || workspaceFolderExists(candidate)) {
             next++;
-            candidate = prefix + "/file-" + next + ".json";
+            candidate = prefix + "/file-" + next + ".toml";
         }
         return candidate;
     }
@@ -1127,7 +1128,7 @@ public class P2SChatScreen extends Screen {
             script = ClientSessionState.getCurrentScriptJson();
         }
         if (script == null || script.isBlank()) {
-            setContextJsonText("{\n}\n");
+            setContextJsonText(defaultWorkspaceToml(selectedWorkspacePath));
             contextLoadedDocId = selectedWorkspacePath;
             return;
         }
@@ -1268,7 +1269,7 @@ public class P2SChatScreen extends Screen {
         String selectedWorkspaceLabel = ClientSessionState.getSelectedWorkspaceLabel();
         if (selectedWorkspaceLabel == null || selectedWorkspaceLabel.isBlank()) {
             String fallbackWorkspacePath = ClientSessionState.getSelectedWorkspacePath();
-            selectedWorkspaceLabel = (fallbackWorkspacePath == null || fallbackWorkspacePath.isBlank()) ? "workspace/main.json" : fallbackWorkspacePath;
+            selectedWorkspaceLabel = (fallbackWorkspacePath == null || fallbackWorkspacePath.isBlank()) ? "workspace/main.toml" : fallbackWorkspacePath;
         }
         return switch (activeContextTab) {
             case STATE -> "workspace-state.json";
@@ -1363,7 +1364,7 @@ public class P2SChatScreen extends Screen {
                             scriptLoading = false;
                             String scriptText = extractWorkspaceScriptText(result);
                             if (scriptText.isBlank()) {
-                                scriptText = "{\n}\n";
+                                scriptText = defaultWorkspaceToml(selectedWorkspacePath);
                                 setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.no_script_data"), 0xFFAA55);
                             } else {
                                 setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.script_loaded"), 0x55FF55);
@@ -1466,16 +1467,19 @@ public class P2SChatScreen extends Screen {
             return "";
         }
         JsonObject state = toolPayload.getAsJsonObject("state");
+        if (state.has("workspace_toml") && state.get("workspace_toml").isJsonPrimitive()) {
+            return state.get("workspace_toml").getAsString();
+        }
         if (state.has("script") && state.get("script").isJsonObject()) {
             return CONTEXT_GSON.toJson(state.get("script"));
         }
         if (state.has("script_json") && state.get("script_json").isJsonPrimitive()) {
-            return formatJsonForEditor(state.get("script_json").getAsString());
+            return formatLegacyJsonForEditor(state.get("script_json").getAsString());
         }
         return "";
     }
 
-    private String formatJsonForEditor(String text) {
+    private String formatLegacyJsonForEditor(String text) {
         if (text == null || text.isBlank()) {
             return text == null ? "" : text;
         }
@@ -1721,7 +1725,7 @@ public class P2SChatScreen extends Screen {
             return;
         }
         try {
-            String formatted = CONTEXT_GSON.toJson(JsonParser.parseString(raw));
+            String formatted = WorkspaceTomlCodec.format(raw);
             setContextJsonText(formatted);
             setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.json_formatted"), 0x55FF55);
         } catch (Exception e) {
@@ -1730,7 +1734,7 @@ public class P2SChatScreen extends Screen {
     }
 
     private void clearContextJson() {
-        setContextJsonText("{\n}\n");
+        setContextJsonText(defaultWorkspaceToml(ClientSessionState.getSelectedWorkspacePath()));
         setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.json_cleared"), 0x55FF55);
     }
 
@@ -1742,7 +1746,7 @@ public class P2SChatScreen extends Screen {
     private void setContextJsonText(String text) {
         exitDiffViewMode();
         contextJsonLines.clear();
-        String normalized = formatJsonForEditor(text == null ? "" : text);
+        String normalized = text == null ? "" : text;
         String[] lines = normalized.replace("\r\n", "\n").replace('\r', '\n').split("\n", -1);
         if (lines.length == 0) {
             contextJsonLines.add("");
@@ -1764,6 +1768,42 @@ public class P2SChatScreen extends Screen {
         clampContextScroll();
         clampContextCursor();
         ensureContextCursorVisible();
+    }
+
+    private String defaultWorkspaceToml(String workspacePath) {
+        ClientSessionState.WorkspaceFileInfo info = null;
+        String normalizedPath = workspacePath == null ? "" : workspacePath.trim();
+        for (ClientSessionState.WorkspaceFileInfo file : ClientSessionState.getWorkspaceFiles()) {
+            if (file != null && normalizedPath.equals(file.path())) {
+                info = file;
+                break;
+            }
+        }
+        if (info == null) {
+            info = selectedWorkspaceFile();
+        }
+
+        ProjectPersistence.Vec3Data origin = null;
+        if (info != null) {
+            origin = new ProjectPersistence.Vec3Data();
+            origin.x = info.originX();
+            origin.y = info.originY();
+            origin.z = info.originZ();
+        }
+
+        ProjectPersistence.Vec3Data size = null;
+        if (info != null && info.hasSize()) {
+            size = new ProjectPersistence.Vec3Data();
+            size.x = info.sizeX();
+            size.y = info.sizeY();
+            size.z = info.sizeZ();
+        }
+
+        String resolvedPath = normalizedPath.isBlank()
+                ? (info == null ? "workspace/main.toml" : info.path())
+                : normalizedPath;
+        String type = info == null ? "manual" : info.type();
+        return WorkspaceTomlCodec.emptyWorkspaceToml(resolvedPath, type, origin, size);
     }
 
     private void clampContextCursor() {
