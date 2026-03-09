@@ -373,26 +373,6 @@ public final class LLMService {
         return GSON.toJson(body);
     }
 
-    private static void applyLegacyToolOrResponseFormat(JsonObject body, boolean useToolCall, boolean forceTool) {
-        if (useToolCall) {
-            body.add("tools", buildLegacyToolDefinitions());
-            if (forceTool) {
-                JsonObject toolChoice = new JsonObject();
-                toolChoice.addProperty("type", "function");
-                JsonObject function = new JsonObject();
-                function.addProperty("name", "apply_structure");
-                toolChoice.add("function", function);
-                body.add("tool_choice", toolChoice);
-            } else {
-                body.addProperty("tool_choice", "auto");
-            }
-        } else {
-            JsonObject responseFormat = new JsonObject();
-            responseFormat.addProperty("type", "json_object");
-            body.add("response_format", responseFormat);
-        }
-    }
-
     private static void applySessionToolOrResponseFormat(
             JsonObject body,
             boolean useToolCall,
@@ -404,171 +384,6 @@ public final class LLMService {
             body.addProperty("tool_choice", "auto");
             return;
         }
-        JsonObject responseFormat = new JsonObject();
-        responseFormat.addProperty("type", "json_object");
-        body.add("response_format", responseFormat);
-    }
-
-    private static JsonArray buildLegacyToolDefinitions() {
-        JsonObject tool = new JsonObject();
-        tool.addProperty("type", "function");
-
-        JsonObject function = new JsonObject();
-        function.addProperty("name", "apply_structure");
-        function.addProperty("description", "Apply a structure definition to the Minecraft world. Call this tool to build or modify blocks in the selected area.");
-
-        JsonObject parameters = new JsonObject();
-        parameters.addProperty("type", "object");
-
-        JsonObject properties = new JsonObject();
-
-        JsonObject palette = new JsonObject();
-        palette.addProperty("type", "object");
-        palette.addProperty("description", "Block palette mapping short names to Minecraft block IDs");
-        JsonObject paletteAdditional = new JsonObject();
-        paletteAdditional.addProperty("type", "string");
-        palette.add("additionalProperties", paletteAdditional);
-        properties.add("palette", palette);
-
-        JsonObject structures = new JsonObject();
-        structures.addProperty("type", "array");
-        structures.addProperty("description", "Array of structure parts, each with a name, priority, and actions");
-        JsonObject structuresItems = new JsonObject();
-        structuresItems.addProperty("type", "object");
-        JsonObject structuresProps = new JsonObject();
-        JsonObject name = new JsonObject();
-        name.addProperty("type", "string");
-        name.addProperty("description", "Name of this structure part (e.g. 'foundation', 'walls', 'roof')");
-        structuresProps.add("name", name);
-        JsonObject priority = new JsonObject();
-        priority.addProperty("type", "integer");
-        priority.addProperty("description", "Build priority (lower = built first). Parts with lower priority are built first, higher priority parts can overwrite lower ones.");
-        structuresProps.add("priority", priority);
-
-        JsonObject actions = new JsonObject();
-        actions.addProperty("type", "array");
-        JsonObject actionsItems = new JsonObject();
-        actionsItems.addProperty("type", "object");
-        JsonObject actionProps = new JsonObject();
-
-        JsonObject type = new JsonObject();
-        type.addProperty("type", "string");
-        JsonArray typeEnum = new JsonArray();
-        typeEnum.add("box");
-        typeEnum.add("plane");
-        typeEnum.add("line");
-        typeEnum.add("points");
-        type.add("enum", typeEnum);
-        actionProps.add("type", type);
-
-        JsonObject block = new JsonObject();
-        block.addProperty("type", "string");
-        actionProps.add("block", block);
-
-        JsonObject from = new JsonObject();
-        from.addProperty("type", "array");
-        JsonObject fromItems = new JsonObject();
-        fromItems.addProperty("type", "integer");
-        from.add("items", fromItems);
-        from.addProperty("minItems", 3);
-        from.addProperty("maxItems", 3);
-        actionProps.add("from", from);
-
-        JsonObject to = new JsonObject();
-        to.addProperty("type", "array");
-        JsonObject toItems = new JsonObject();
-        toItems.addProperty("type", "integer");
-        to.add("items", toItems);
-        to.addProperty("minItems", 3);
-        to.addProperty("maxItems", 3);
-        actionProps.add("to", to);
-
-        JsonObject at = new JsonObject();
-        at.addProperty("type", "array");
-        JsonObject atItems = new JsonObject();
-        atItems.addProperty("type", "array");
-        JsonObject atItemItems = new JsonObject();
-        atItemItems.addProperty("type", "integer");
-        atItems.add("items", atItemItems);
-        atItems.addProperty("minItems", 3);
-        atItems.addProperty("maxItems", 3);
-        at.add("items", atItems);
-        actionProps.add("at", at);
-
-        JsonObject mode = new JsonObject();
-        mode.addProperty("type", "string");
-        JsonArray modeEnum = new JsonArray();
-        modeEnum.add("solid");
-        modeEnum.add("shell");
-        modeEnum.add("walls");
-        modeEnum.add("outline");
-        mode.add("enum", modeEnum);
-        actionProps.add("mode", mode);
-
-        JsonObject axis = new JsonObject();
-        axis.addProperty("type", "string");
-        JsonArray axisEnum = new JsonArray();
-        axisEnum.add("x");
-        axisEnum.add("y");
-        axisEnum.add("z");
-        axis.add("enum", axisEnum);
-        actionProps.add("axis", axis);
-
-        JsonObject facing = new JsonObject();
-        facing.addProperty("type", "string");
-        JsonArray facingEnum = new JsonArray();
-        facingEnum.add("north");
-        facingEnum.add("south");
-        facingEnum.add("east");
-        facingEnum.add("west");
-        facingEnum.add("up");
-        facingEnum.add("down");
-        facing.add("enum", facingEnum);
-        actionProps.add("facing", facing);
-
-        actionsItems.add("properties", actionProps);
-        JsonArray actionRequired = new JsonArray();
-        actionRequired.add("type");
-        actionRequired.add("block");
-        actionsItems.add("required", actionRequired);
-        actionsItems.addProperty("additionalProperties", false);
-        actions.add("items", actionsItems);
-        structuresProps.add("actions", actions);
-
-        structuresItems.add("properties", structuresProps);
-        JsonArray structuresRequired = new JsonArray();
-        structuresRequired.add("name");
-        structuresRequired.add("priority");
-        structuresRequired.add("actions");
-        structuresItems.add("required", structuresRequired);
-        structures.add("items", structuresItems);
-        properties.add("structures", structures);
-
-        parameters.add("properties", properties);
-        JsonArray required = new JsonArray();
-        required.add("palette");
-        required.add("structures");
-        parameters.add("required", required);
-        function.add("parameters", parameters);
-
-        tool.add("function", function);
-
-        JsonObject getTool = new JsonObject();
-        getTool.addProperty("type", "function");
-        JsonObject getFunction = new JsonObject();
-        getFunction.addProperty("name", "get_current_structure");
-        getFunction.addProperty("description", "Read the current structure JSON for the active session.");
-        JsonObject getParameters = new JsonObject();
-        getParameters.addProperty("type", "object");
-        getParameters.add("properties", new JsonObject());
-        getParameters.addProperty("additionalProperties", false);
-        getFunction.add("parameters", getParameters);
-        getTool.add("function", getFunction);
-
-        JsonArray tools = new JsonArray();
-        tools.add(tool);
-        tools.add(getTool);
-        return tools;
     }
 
     private static JsonArray buildSessionToolDefinitions(boolean includeSkillTools, Set<String> allowedTools) {
@@ -1240,91 +1055,6 @@ public final class LLMService {
         return allowedTools == null || allowedTools.contains(toolName);
     }
 
-    private static JsonObject buildActionSchema() {
-        JsonObject schema = new JsonObject();
-        schema.addProperty("type", "object");
-        JsonObject props = new JsonObject();
-
-        JsonObject type = new JsonObject();
-        type.addProperty("type", "string");
-        JsonArray typeEnum = new JsonArray();
-        typeEnum.add("box");
-        typeEnum.add("plane");
-        typeEnum.add("line");
-        typeEnum.add("points");
-        type.add("enum", typeEnum);
-        props.add("type", type);
-
-        JsonObject block = new JsonObject();
-        block.addProperty("type", "string");
-        props.add("block", block);
-
-        JsonObject from = new JsonObject();
-        from.addProperty("type", "array");
-        JsonObject intItem = new JsonObject();
-        intItem.addProperty("type", "integer");
-        from.add("items", intItem);
-        from.addProperty("minItems", 3);
-        from.addProperty("maxItems", 3);
-        props.add("from", from);
-
-        JsonObject to = new JsonObject();
-        to.addProperty("type", "array");
-        to.add("items", intItem.deepCopy());
-        to.addProperty("minItems", 3);
-        to.addProperty("maxItems", 3);
-        props.add("to", to);
-
-        JsonObject at = new JsonObject();
-        at.addProperty("type", "array");
-        JsonObject vec3 = new JsonObject();
-        vec3.addProperty("type", "array");
-        vec3.add("items", intItem.deepCopy());
-        vec3.addProperty("minItems", 3);
-        vec3.addProperty("maxItems", 3);
-        at.add("items", vec3);
-        props.add("at", at);
-
-        JsonObject mode = new JsonObject();
-        mode.addProperty("type", "string");
-        JsonArray modeEnum = new JsonArray();
-        modeEnum.add("solid");
-        modeEnum.add("shell");
-        modeEnum.add("walls");
-        modeEnum.add("outline");
-        mode.add("enum", modeEnum);
-        props.add("mode", mode);
-
-        JsonObject axis = new JsonObject();
-        axis.addProperty("type", "string");
-        JsonArray axisEnum = new JsonArray();
-        axisEnum.add("x");
-        axisEnum.add("y");
-        axisEnum.add("z");
-        axis.add("enum", axisEnum);
-        props.add("axis", axis);
-
-        JsonObject facing = new JsonObject();
-        facing.addProperty("type", "string");
-        JsonArray facingEnum = new JsonArray();
-        facingEnum.add("north");
-        facingEnum.add("south");
-        facingEnum.add("east");
-        facingEnum.add("west");
-        facingEnum.add("up");
-        facingEnum.add("down");
-        facing.add("enum", facingEnum);
-        props.add("facing", facing);
-
-        schema.add("properties", props);
-        JsonArray required = new JsonArray();
-        required.add("type");
-        required.add("block");
-        schema.add("required", required);
-        schema.addProperty("additionalProperties", false);
-        return schema;
-    }
-
     private static SessionResult parseSessionResponse(String responseBody) throws IOException {
         JsonObject root = JsonParser.parseString(responseBody).getAsJsonObject();
         JsonArray choices = root.getAsJsonArray("choices");
@@ -1350,7 +1080,7 @@ public final class LLMService {
             try {
                 String content = cleanContent(textContent);
                 StructureBuilder.VbsScriptV2 script = parseScriptFromContent(content);
-                P2SMod.LOGGER.info("LLM session parse -> toolCalls=0, textLen={}, hasScript=true (json content)", textLen);
+                P2SMod.LOGGER.info("LLM session parse -> toolCalls=0, textLen={}, hasScript=true (toml content)", textLen);
                 return new SessionResult(textContent, script, message, toolCalls);
             } catch (Exception ignored) {
                 // fall through to text-only response
@@ -1361,8 +1091,8 @@ public final class LLMService {
     }
 
     private static StructureBuilder.VbsScriptV2 parseScriptFromContent(String content) {
-        JsonElement elem = JsonParser.parseString(content);
-        return parseScriptFromJson(elem);
+        WorkspaceTomlCodec.WorkspaceTomlDocument document = WorkspaceTomlCodec.parse(content);
+        return WorkspaceTomlCodec.toScript(document);
     }
 
     private static List<ToolCall> extractToolCalls(JsonObject message) {
@@ -1404,96 +1134,6 @@ public final class LLMService {
         return result;
     }
 
-    private static StructureBuilder.VbsScriptV2 parseScriptFromJson(JsonElement elem) {
-        if (elem == null || elem.isJsonNull()) {
-            return null;
-        }
-        if (elem.isJsonObject()) {
-            JsonObject obj = elem.getAsJsonObject();
-            if (obj.has("structures")) {
-                return GSON.fromJson(obj, StructureBuilder.VbsScriptV2.class);
-            }
-            if (obj.has("structure")) {
-                StructureBuilder.VbsScript v1 = GSON.fromJson(obj, StructureBuilder.VbsScript.class);
-                return StructureBuilder.fromV1(v1);
-            }
-        }
-        StructureBuilder.VbsScriptV2 v2 = GSON.fromJson(elem, StructureBuilder.VbsScriptV2.class);
-        if (v2 != null && v2.structures != null) {
-            return v2;
-        }
-        StructureBuilder.VbsScript v1 = GSON.fromJson(elem, StructureBuilder.VbsScript.class);
-        return StructureBuilder.fromV1(v1);
-    }
-
-    private static ToolCallParseResult parseToolCall(JsonObject message) {
-        if (message == null) {
-            return null;
-        }
-
-        if (message.has("tool_calls") && message.get("tool_calls").isJsonArray()) {
-            JsonArray toolCalls = message.getAsJsonArray("tool_calls");
-            for (JsonElement elem : toolCalls) {
-                if (!elem.isJsonObject()) {
-                    continue;
-                }
-                JsonObject call = elem.getAsJsonObject();
-                if (!call.has("function")) {
-                    continue;
-                }
-                JsonObject fn = call.getAsJsonObject("function");
-                if (fn == null || !fn.has("name")) {
-                    continue;
-                }
-                String name = fn.get("name").getAsString();
-                if (!"apply_structure".equals(name)) {
-                    continue;
-                }
-                String callId = call.has("id") ? call.get("id").getAsString() : null;
-                JsonElement argsElem = fn.get("arguments");
-                StructureBuilder.VbsScriptV2 script = parseToolArguments(argsElem);
-                if (script != null) {
-                    return new ToolCallParseResult(script, callId);
-                }
-            }
-        }
-
-        if (message.has("function_call") && message.get("function_call").isJsonObject()) {
-            JsonObject fn = message.getAsJsonObject("function_call");
-            if (fn.has("name") && "apply_structure".equals(fn.get("name").getAsString())) {
-                JsonElement argsElem = fn.get("arguments");
-                StructureBuilder.VbsScriptV2 script = parseToolArguments(argsElem);
-                if (script != null) {
-                    return new ToolCallParseResult(script, null);
-                }
-            }
-        }
-        return null;
-    }
-
-    static StructureBuilder.VbsScriptV2 parseToolArguments(JsonElement argsElem) {
-        if (argsElem == null || argsElem.isJsonNull()) {
-            return null;
-        }
-        try {
-            if (argsElem.isJsonPrimitive() && argsElem.getAsJsonPrimitive().isString()) {
-                String raw = argsElem.getAsString();
-                if (raw == null || raw.isBlank()) {
-                    return null;
-                }
-                JsonElement parsed = JsonParser.parseString(raw);
-                return parseScriptFromJson(parsed);
-            }
-            if (argsElem.isJsonObject()) {
-                return parseScriptFromJson(argsElem);
-            }
-            return null;
-        } catch (Exception e) {
-            P2SMod.LOGGER.warn("Failed to parse tool arguments: {}", e.getMessage());
-            return null;
-        }
-    }
-
     private static String cleanContent(String content) {
         if (content == null) {
             return "";
@@ -1516,9 +1156,11 @@ public final class LLMService {
     }
 
     private static String extractCodeBlock(String text) {
-        int start = text.indexOf("```json");
+        int start = text.indexOf("```toml");
+        int fenceHeaderLength = 7;
         if (start < 0) {
             start = text.indexOf("```");
+            fenceHeaderLength = 3;
         }
         if (start < 0) {
             return null;
@@ -1527,7 +1169,7 @@ public final class LLMService {
         if (end < 0) {
             return null;
         }
-        return text.substring(start + 3 + (text.startsWith("```json", start) ? 4 : 0), end);
+        return text.substring(start + fenceHeaderLength, end);
     }
 
     private static String truncate(String text) {
@@ -1583,9 +1225,6 @@ public final class LLMService {
                 .writeTimeout(Duration.ofSeconds(timeoutSeconds))
                 .callTimeout(Duration.ofSeconds(timeoutSeconds))
                 .build();
-    }
-
-    private record ToolCallParseResult(StructureBuilder.VbsScriptV2 script, String toolCallId) {
     }
 
     public record SessionResult(

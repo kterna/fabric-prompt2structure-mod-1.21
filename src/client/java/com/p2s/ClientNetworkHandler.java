@@ -59,7 +59,7 @@ public final class ClientNetworkHandler {
                     payload.pendingRisk(),
                     payload.pendingChangedBlocks(),
                     payload.checkpointsJson(),
-                    payload.currentScriptJson(),
+                    payload.currentWorkspaceToml(),
                     payload.workspaceFilesJson()
                 );
                 ClientAgentManager.maybeAutoApplyPendingPatch();

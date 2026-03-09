@@ -64,8 +64,8 @@ public final class P2SChatContextWidgets {
             Runnable onFetchWorkspaceScript,
             Runnable onSaveWorkspaceScript,
             Runnable onClearContextQueue,
-            Runnable onFormatContextJson,
-            Runnable onClearContextJson,
+            Runnable onFormatContextToml,
+            Runnable onClearContextEditor,
             Runnable onApplyPatch,
             Runnable onEnterDiscardReasonMode,
             Runnable onNavigateDiffPrev,
@@ -99,13 +99,11 @@ public final class P2SChatContextWidgets {
             int explorerRowHeight,
             int explorerRowGap,
             List<P2SWorkspaceExplorerComponent.ExplorerRow> explorerRows,
-            Button contextTabScriptButton,
-            Button contextTabDiffButton,
             Button contextLoadButton,
             Button contextSaveButton,
             Button contextClearQueueButton,
             Button contextFormatButton,
-            Button contextClearJsonButton,
+            Button contextClearButton,
             Button contextApplyButton,
             Button contextDiscardButton,
             Button contextDiffPrevButton,
@@ -257,18 +255,18 @@ public final class P2SChatContextWidgets {
                 row1ButtonWidth,
                 config.inputHeight(),
                 P2SI18n.tr("screen.p2s.chat.context.format"),
-                btn -> config.onFormatContextJson().run(),
+                btn -> config.onFormatContextToml().run(),
                 P2SFlatButton.Variant.NORMAL
         ));
         row1X += row1ButtonWidth + rowGap;
 
-        Button contextClearJsonButton = host.addButton(new P2SFlatButton(
+        Button contextClearButton = host.addButton(new P2SFlatButton(
                 row1X,
                 row1Y,
                 row1ButtonWidth,
                 config.inputHeight(),
                 P2SI18n.tr("screen.p2s.chat.context.clear"),
-                btn -> config.onClearContextJson().run(),
+                btn -> config.onClearContextEditor().run(),
                 P2SFlatButton.Variant.NORMAL
         ));
         row1X += row1ButtonWidth + rowGap;
@@ -368,13 +366,11 @@ public final class P2SChatContextWidgets {
                 explorerRowHeight,
                 explorerRowGap,
                 explorerRows,
-                null,
-                null,
                 contextLoadButton,
                 contextSaveButton,
                 contextClearQueueButton,
                 contextFormatButton,
-                contextClearJsonButton,
+                contextClearButton,
                 contextApplyButton,
                 contextDiscardButton,
                 contextDiffPrevButton,

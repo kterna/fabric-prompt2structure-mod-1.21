@@ -39,7 +39,7 @@ public record S2CSessionSyncPayload(
         String pendingRisk,
         int pendingChangedBlocks,
         String checkpointsJson,
-        String currentScriptJson,
+        String currentWorkspaceToml,
         String workspaceFilesJson
 ) implements CustomPacketPayload {
     public static final Type<S2CSessionSyncPayload> TYPE = new Type<>(P2SNetworkConstants.S2C_SESSION_SYNC_ID);
@@ -71,7 +71,7 @@ public record S2CSessionSyncPayload(
                 buf.writeUtf(payload.pendingRisk == null ? "" : payload.pendingRisk, 32);
                 buf.writeVarInt(payload.pendingChangedBlocks);
                 buf.writeUtf(encodeLargeJson(payload.checkpointsJson, 16384, "[]"), 16384);
-                buf.writeUtf(encodeLargeJson(payload.currentScriptJson, 65536, ""), 65536);
+                buf.writeUtf(encodeLargeJson(payload.currentWorkspaceToml, 65536, ""), 65536);
                 buf.writeUtf(encodeLargeJson(payload.workspaceFilesJson, 32767, "[]"), 32767);
             },
             buf -> new S2CSessionSyncPayload(

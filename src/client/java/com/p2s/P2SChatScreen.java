@@ -1,10 +1,6 @@
 package com.p2s;
 
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
-import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
 import com.p2s.screen.P2SConfigScreen;
 import com.p2s.screen.P2SCheckpointListScreen;
 import com.p2s.screen.P2SProjectListScreen;
@@ -31,8 +27,6 @@ import java.util.List;
 import java.util.Set;
 
 public class P2SChatScreen extends Screen {
-    private static final Gson CONTEXT_GSON = new GsonBuilder().setPrettyPrinting().create();
-
     private static final int PADDING = 8;
     private static final int INPUT_HEIGHT = 20;
     private static final int BUTTON_WIDTH = 22;
@@ -122,15 +116,12 @@ public class P2SChatScreen extends Screen {
     private Button workspaceRenameCancelButton;
 
     // Left context editor
-    private final List<String> contextJsonLines = new ArrayList<>();
+    private final List<String> contextEditorLines = new ArrayList<>();
     private final List<ContextSnippet> queuedContexts = new ArrayList<>();
-    private Button contextTabStateButton;
-    private Button contextTabScriptButton;
-    private Button contextTabDiffButton;
     private Button contextLoadButton;
     private Button contextSaveButton;
     private Button contextFormatButton;
-    private Button contextClearJsonButton;
+    private Button contextClearButton;
     private Button contextClearQueueButton;
     private Button contextApplyButton;
     private Button contextDiscardButton;
@@ -148,11 +139,7 @@ public class P2SChatScreen extends Screen {
     private int explorerRowGap = 2;
     private double explorerScrollOffset = 0;
     private ContextTab activeContextTab = ContextTab.SCRIPT;
-    private final List<String> stateJsonLines = new ArrayList<>();
-    private int stateCursorLine = 0;
-    private int stateCursorColumn = 0;
-    private int stateScroll = 0;
-    private final List<String> scriptJsonLines = new ArrayList<>();
+    private final List<String> workspaceTomlLines = new ArrayList<>();
     private int scriptCursorLine = 0;
     private int scriptCursorColumn = 0;
     private int scriptScroll = 0;
@@ -510,20 +497,17 @@ public class P2SChatScreen extends Screen {
     }
 
     private void initContextWidgets(int panelX) {
-        if (activeContextTab == ContextTab.STATE) {
-            activeContextTab = ContextTab.SCRIPT;
-        }
-        if (activeContextTab == ContextTab.SCRIPT && contextJsonLines.isEmpty()) {
+        if (activeContextTab == ContextTab.SCRIPT && contextEditorLines.isEmpty()) {
             String selectedWorkspacePath = ClientSessionState.getSelectedWorkspacePath();
-            String current = ClientSessionState.getWorkspaceFileScriptJson(selectedWorkspacePath);
+            String current = ClientSessionState.getWorkspaceFileToml(selectedWorkspacePath);
             if ((current == null || current.isBlank()) && selectedWorkspacePath != null && !selectedWorkspacePath.isBlank()) {
-                current = ClientSessionState.getCurrentScriptJson();
+                current = ClientSessionState.getCurrentWorkspaceToml();
             }
             if (current != null && !current.isBlank()) {
-                setContextJsonText(current);
+                setContextEditorText(current);
                 contextLoadedDocId = selectedWorkspacePath == null ? "" : selectedWorkspacePath;
             } else {
-                setContextJsonText(defaultWorkspaceToml(selectedWorkspacePath));
+                setContextEditorText(defaultWorkspaceToml(selectedWorkspacePath));
             }
         }
         contextScroll = Math.max(0, contextScroll);
@@ -601,8 +585,8 @@ public class P2SChatScreen extends Screen {
                         this::fetchWorkspaceScript,
                         this::saveWorkspaceDoc,
                         this::clearContextQueue,
-                        this::formatContextJson,
-                        this::clearContextJson,
+                        this::formatContextToml,
+                        this::clearContextEditorText,
                         this::applySelectedPendingPatch,
                         this::enterDiscardReasonMode,
                         () -> navigateContextDiffChange(-1),
@@ -636,13 +620,11 @@ public class P2SChatScreen extends Screen {
         explorerRows.clear();
         explorerRows.addAll(contextWidgets.explorerRows());
         clampExplorerScroll();
-        contextTabScriptButton = contextWidgets.contextTabScriptButton();
-        contextTabDiffButton = contextWidgets.contextTabDiffButton();
         contextLoadButton = contextWidgets.contextLoadButton();
         contextSaveButton = contextWidgets.contextSaveButton();
         contextClearQueueButton = contextWidgets.contextClearQueueButton();
         contextFormatButton = contextWidgets.contextFormatButton();
-        contextClearJsonButton = contextWidgets.contextClearJsonButton();
+        contextClearButton = contextWidgets.contextClearButton();
         contextApplyButton = contextWidgets.contextApplyButton();
         contextDiscardButton = contextWidgets.contextDiscardButton();
         contextDiffPrevButton = contextWidgets.contextDiffPrevButton();
@@ -670,11 +652,6 @@ public class P2SChatScreen extends Screen {
         if (workspaceRenameMode && workspaceRenameInput != null) {
             workspaceRenameDraft = workspaceRenameInput.getValue();
         }
-    }
-
-    private void loadWorkspaceStateJson() {
-        setContextJsonText(buildWorkspaceStateJson());
-        setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.loaded_project_state"), 0x55FF55);
     }
 
     private void createWorkspaceDoc() {
@@ -788,8 +765,8 @@ public class P2SChatScreen extends Screen {
                             workspaceExpandedSelectionPath = "";
                             ClientSessionState.setSelectedWorkspacePath(createdPath);
                             String workspaceToml = defaultWorkspaceToml(createdPath);
-                            ClientSessionState.setWorkspaceFileScriptJson(createdPath, workspaceToml);
-                            setContextJsonText(workspaceToml);
+                            ClientSessionState.setWorkspaceFileToml(createdPath, workspaceToml);
+                            setContextEditorText(workspaceToml);
                             contextLoadedDocId = createdPath == null ? "" : createdPath;
                             setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.workspace_created", createdPath), 0x55FF55);
                             createWidgets();
@@ -829,7 +806,7 @@ public class P2SChatScreen extends Screen {
                                 return;
                             }
                             String workspaceToml = contextLinesToText();
-                            ClientSessionState.setWorkspaceFileScriptJson(selectedWorkspacePath, workspaceToml);
+                            ClientSessionState.setWorkspaceFileToml(selectedWorkspacePath, workspaceToml);
                             contextLoadedDocId = selectedWorkspacePath;
                             setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.workspace_saved", selectedWorkspacePath), 0x55FF55);
                         });
@@ -1123,16 +1100,16 @@ public class P2SChatScreen extends Screen {
         if (selectedWorkspacePath.equals(contextLoadedDocId)) {
             return;
         }
-        String script = ClientSessionState.getWorkspaceFileScriptJson(selectedWorkspacePath);
+        String script = ClientSessionState.getWorkspaceFileToml(selectedWorkspacePath);
         if ((script == null || script.isBlank()) && selectedWorkspacePath != null && !selectedWorkspacePath.isBlank()) {
-            script = ClientSessionState.getCurrentScriptJson();
+            script = ClientSessionState.getCurrentWorkspaceToml();
         }
         if (script == null || script.isBlank()) {
-            setContextJsonText(defaultWorkspaceToml(selectedWorkspacePath));
+            setContextEditorText(defaultWorkspaceToml(selectedWorkspacePath));
             contextLoadedDocId = selectedWorkspacePath;
             return;
         }
-        setContextJsonText(script);
+        setContextEditorText(script);
         contextLoadedDocId = selectedWorkspacePath;
     }
 
@@ -1272,7 +1249,6 @@ public class P2SChatScreen extends Screen {
             selectedWorkspaceLabel = (fallbackWorkspacePath == null || fallbackWorkspacePath.isBlank()) ? "workspace/main.toml" : fallbackWorkspacePath;
         }
         return switch (activeContextTab) {
-            case STATE -> "workspace-state.json";
             case SCRIPT -> selectedWorkspaceLabel;
             case DIFF -> selectedWorkspaceLabel + ".diff";
         };
@@ -1280,16 +1256,9 @@ public class P2SChatScreen extends Screen {
 
     private void saveCurrentTabEditorState() {
         switch (activeContextTab) {
-            case STATE -> {
-                stateJsonLines.clear();
-                stateJsonLines.addAll(contextJsonLines);
-                stateCursorLine = contextCursorLine;
-                stateCursorColumn = contextCursorColumn;
-                stateScroll = contextScroll;
-            }
             case SCRIPT -> {
-                scriptJsonLines.clear();
-                scriptJsonLines.addAll(contextJsonLines);
+                workspaceTomlLines.clear();
+                workspaceTomlLines.addAll(contextEditorLines);
                 scriptCursorLine = contextCursorLine;
                 scriptCursorColumn = contextCursorColumn;
                 scriptScroll = contextScroll;
@@ -1302,25 +1271,13 @@ public class P2SChatScreen extends Screen {
 
     private void restoreTabEditorState(ContextTab tab) {
         switch (tab) {
-            case STATE -> {
-                contextDiffMode = false;
-                contextJsonLines.clear();
-                if (stateJsonLines.isEmpty()) {
-                    contextJsonLines.add("");
-                } else {
-                    contextJsonLines.addAll(stateJsonLines);
-                }
-                contextCursorLine = stateCursorLine;
-                contextCursorColumn = stateCursorColumn;
-                contextScroll = stateScroll;
-            }
             case SCRIPT -> {
                 contextDiffMode = false;
-                contextJsonLines.clear();
-                if (scriptJsonLines.isEmpty()) {
-                    contextJsonLines.add("");
+                contextEditorLines.clear();
+                if (workspaceTomlLines.isEmpty()) {
+                    contextEditorLines.add("");
                 } else {
-                    contextJsonLines.addAll(scriptJsonLines);
+                    contextEditorLines.addAll(workspaceTomlLines);
                 }
                 contextCursorLine = scriptCursorLine;
                 contextCursorColumn = scriptCursorColumn;
@@ -1362,7 +1319,7 @@ public class P2SChatScreen extends Screen {
                     if (mc != null) {
                         mc.execute(() -> {
                             scriptLoading = false;
-                            String scriptText = extractWorkspaceScriptText(result);
+                            String scriptText = extractWorkspaceTomlText(result);
                             if (scriptText.isBlank()) {
                                 scriptText = defaultWorkspaceToml(selectedWorkspacePath);
                                 setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.no_script_data"), 0xFFAA55);
@@ -1370,20 +1327,20 @@ public class P2SChatScreen extends Screen {
                                 setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.script_loaded"), 0x55FF55);
                             }
                             if (selectedWorkspacePath != null && !selectedWorkspacePath.isBlank()) {
-                                ClientSessionState.setWorkspaceFileScriptJson(selectedWorkspacePath, scriptText);
+                                ClientSessionState.setWorkspaceFileToml(selectedWorkspacePath, scriptText);
                             }
                             if (activeContextTab == ContextTab.SCRIPT) {
-                                setContextJsonText(scriptText);
+                                setContextEditorText(scriptText);
                                 contextLoadedDocId = selectedWorkspacePath == null ? "" : selectedWorkspacePath;
                             } else {
                                 // Update cache only
-                                scriptJsonLines.clear();
+                                workspaceTomlLines.clear();
                                 String[] lines = scriptText.replace("\r\n", "\n").replace('\r', '\n').split("\n", -1);
                                 for (String line : lines) {
-                                    scriptJsonLines.add(line == null ? "" : line);
+                                    workspaceTomlLines.add(line == null ? "" : line);
                                 }
-                                if (scriptJsonLines.isEmpty()) {
-                                    scriptJsonLines.add("");
+                                if (workspaceTomlLines.isEmpty()) {
+                                    workspaceTomlLines.add("");
                                 }
                                 scriptCursorLine = 0;
                                 scriptCursorColumn = 0;
@@ -1424,8 +1381,8 @@ public class P2SChatScreen extends Screen {
 
         ClientToolBridge.call("read_workspace_file", committedArgs)
                 .thenCombine(ClientToolBridge.call("read_workspace_file", stagedArgs), (committed, staged) -> {
-                    String committedText = extractWorkspaceScriptText(committed);
-                    String stagedText = extractWorkspaceScriptText(staged);
+                    String committedText = extractWorkspaceTomlText(committed);
+                    String stagedText = extractWorkspaceTomlText(staged);
                     return buildContextDiffView(committedText, stagedText);
                 })
                 .thenAccept(diff -> {
@@ -1462,7 +1419,7 @@ public class P2SChatScreen extends Screen {
                 });
     }
 
-    private String extractWorkspaceScriptText(JsonObject toolPayload) {
+    private String extractWorkspaceTomlText(JsonObject toolPayload) {
         if (toolPayload == null || !toolPayload.has("state") || !toolPayload.get("state").isJsonObject()) {
             return "";
         }
@@ -1470,24 +1427,7 @@ public class P2SChatScreen extends Screen {
         if (state.has("workspace_toml") && state.get("workspace_toml").isJsonPrimitive()) {
             return state.get("workspace_toml").getAsString();
         }
-        if (state.has("script") && state.get("script").isJsonObject()) {
-            return CONTEXT_GSON.toJson(state.get("script"));
-        }
-        if (state.has("script_json") && state.get("script_json").isJsonPrimitive()) {
-            return formatLegacyJsonForEditor(state.get("script_json").getAsString());
-        }
         return "";
-    }
-
-    private String formatLegacyJsonForEditor(String text) {
-        if (text == null || text.isBlank()) {
-            return text == null ? "" : text;
-        }
-        try {
-            return CONTEXT_GSON.toJson(JsonParser.parseString(text));
-        } catch (Exception ignored) {
-            return text;
-        }
     }
 
     private String[] normalizeLines(String text) {
@@ -1714,7 +1654,7 @@ public class P2SChatScreen extends Screen {
         clampContextScroll();
     }
 
-    private void formatContextJson() {
+    private void formatContextToml() {
         if (contextDiffMode) {
             setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.diff_read_only"), 0xFFAA55);
             return;
@@ -1726,16 +1666,16 @@ public class P2SChatScreen extends Screen {
         }
         try {
             String formatted = WorkspaceTomlCodec.format(raw);
-            setContextJsonText(formatted);
-            setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.json_formatted"), 0x55FF55);
+            setContextEditorText(formatted);
+            setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.workspace_toml_formatted"), 0x55FF55);
         } catch (Exception e) {
-            setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.invalid_json", shortError(e.getMessage())), 0xFF5555);
+            setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.invalid_workspace_toml", shortError(e.getMessage())), 0xFF5555);
         }
     }
 
-    private void clearContextJson() {
-        setContextJsonText(defaultWorkspaceToml(ClientSessionState.getSelectedWorkspacePath()));
-        setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.json_cleared"), 0x55FF55);
+    private void clearContextEditorText() {
+        setContextEditorText(defaultWorkspaceToml(ClientSessionState.getSelectedWorkspacePath()));
+        setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.workspace_cleared"), 0x55FF55);
     }
 
     private void clearContextQueue() {
@@ -1743,20 +1683,20 @@ public class P2SChatScreen extends Screen {
         setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.queue_cleared"), 0x55FF55);
     }
 
-    private void setContextJsonText(String text) {
+    private void setContextEditorText(String text) {
         exitDiffViewMode();
-        contextJsonLines.clear();
+        contextEditorLines.clear();
         String normalized = text == null ? "" : text;
         String[] lines = normalized.replace("\r\n", "\n").replace('\r', '\n').split("\n", -1);
         if (lines.length == 0) {
-            contextJsonLines.add("");
+            contextEditorLines.add("");
         } else {
             for (String line : lines) {
-                contextJsonLines.add(line == null ? "" : line);
+                contextEditorLines.add(line == null ? "" : line);
             }
         }
-        if (contextJsonLines.isEmpty()) {
-            contextJsonLines.add("");
+        if (contextEditorLines.isEmpty()) {
+            contextEditorLines.add("");
         }
         contextScroll = 0;
         contextCursorLine = 0;
@@ -1807,11 +1747,11 @@ public class P2SChatScreen extends Screen {
     }
 
     private void clampContextCursor() {
-        if (contextJsonLines.isEmpty()) {
-            contextJsonLines.add("");
+        if (contextEditorLines.isEmpty()) {
+            contextEditorLines.add("");
         }
-        contextCursorLine = Math.max(0, Math.min(contextCursorLine, contextJsonLines.size() - 1));
-        String line = contextJsonLines.get(contextCursorLine);
+        contextCursorLine = Math.max(0, Math.min(contextCursorLine, contextEditorLines.size() - 1));
+        String line = contextEditorLines.get(contextCursorLine);
         int maxColumn = line == null ? 0 : line.length();
         contextCursorColumn = Math.max(0, Math.min(contextCursorColumn, maxColumn));
         clampContextSelectionAnchor();
@@ -1821,11 +1761,11 @@ public class P2SChatScreen extends Screen {
         if (!contextSelectionActive) {
             return;
         }
-        if (contextJsonLines.isEmpty()) {
+        if (contextEditorLines.isEmpty()) {
             clearContextSelection();
             return;
         }
-        contextSelectionAnchorLine = Math.max(0, Math.min(contextSelectionAnchorLine, contextJsonLines.size() - 1));
+        contextSelectionAnchorLine = Math.max(0, Math.min(contextSelectionAnchorLine, contextEditorLines.size() - 1));
         String line = getContextLine(contextSelectionAnchorLine);
         contextSelectionAnchorColumn = Math.max(0, Math.min(contextSelectionAnchorColumn, line.length()));
     }
@@ -1858,18 +1798,18 @@ public class P2SChatScreen extends Screen {
     }
 
     private String getContextLine(int lineIndex) {
-        if (lineIndex < 0 || lineIndex >= contextJsonLines.size()) {
+        if (lineIndex < 0 || lineIndex >= contextEditorLines.size()) {
             return "";
         }
-        String value = contextJsonLines.get(lineIndex);
+        String value = contextEditorLines.get(lineIndex);
         return value == null ? "" : value;
     }
 
     private void setContextLine(int lineIndex, String value) {
-        if (lineIndex < 0 || lineIndex >= contextJsonLines.size()) {
+        if (lineIndex < 0 || lineIndex >= contextEditorLines.size()) {
             return;
         }
-        contextJsonLines.set(lineIndex, value == null ? "" : value);
+        contextEditorLines.set(lineIndex, value == null ? "" : value);
     }
 
     private void clearContextSelection() {
@@ -1940,7 +1880,7 @@ public class P2SChatScreen extends Screen {
             String merged = startLineText.substring(0, startColumn) + endLineText.substring(endColumn);
             setContextLine(range.startLine(), merged);
             for (int line = range.endLine(); line > range.startLine(); line--) {
-                contextJsonLines.remove(line);
+                contextEditorLines.remove(line);
             }
         }
 
@@ -1984,13 +1924,13 @@ public class P2SChatScreen extends Screen {
     }
 
     private void selectAllContextText() {
-        if (contextJsonLines.isEmpty()) {
-            contextJsonLines.add("");
+        if (contextEditorLines.isEmpty()) {
+            contextEditorLines.add("");
         }
         contextSelectionActive = true;
         contextSelectionAnchorLine = 0;
         contextSelectionAnchorColumn = 0;
-        int lastLine = contextJsonLines.size() - 1;
+        int lastLine = contextEditorLines.size() - 1;
         setContextCursor(lastLine, getContextLine(lastLine).length(), false);
     }
 
@@ -1998,8 +1938,8 @@ public class P2SChatScreen extends Screen {
         if (text == null || text.isEmpty()) {
             return;
         }
-        if (contextJsonLines.isEmpty()) {
-            contextJsonLines.add("");
+        if (contextEditorLines.isEmpty()) {
+            contextEditorLines.add("");
         }
         deleteContextSelection();
         String normalized = text.replace("\r\n", "\n").replace('\r', '\n');
@@ -2017,7 +1957,7 @@ public class P2SChatScreen extends Screen {
         setContextLine(contextCursorLine, before + parts[0]);
         int insertAt = contextCursorLine + 1;
         for (int i = 1; i < parts.length; i++) {
-            contextJsonLines.add(insertAt, parts[i]);
+            contextEditorLines.add(insertAt, parts[i]);
             insertAt++;
         }
 
@@ -2030,8 +1970,8 @@ public class P2SChatScreen extends Screen {
         if (deleteContextSelection()) {
             return;
         }
-        if (contextJsonLines.isEmpty()) {
-            contextJsonLines.add("");
+        if (contextEditorLines.isEmpty()) {
+            contextEditorLines.add("");
             setContextCursor(0, 0, false);
             return;
         }
@@ -2051,7 +1991,7 @@ public class P2SChatScreen extends Screen {
         String currentLine = getContextLine(contextCursorLine);
         int newColumn = prevLine.length();
         setContextLine(contextCursorLine - 1, prevLine + currentLine);
-        contextJsonLines.remove(contextCursorLine);
+        contextEditorLines.remove(contextCursorLine);
         setContextCursor(contextCursorLine - 1, newColumn, false);
     }
 
@@ -2059,8 +1999,8 @@ public class P2SChatScreen extends Screen {
         if (deleteContextSelection()) {
             return;
         }
-        if (contextJsonLines.isEmpty()) {
-            contextJsonLines.add("");
+        if (contextEditorLines.isEmpty()) {
+            contextEditorLines.add("");
             setContextCursor(0, 0, false);
             return;
         }
@@ -2070,18 +2010,18 @@ public class P2SChatScreen extends Screen {
             return;
         }
 
-        if (contextCursorLine >= contextJsonLines.size() - 1) {
+        if (contextCursorLine >= contextEditorLines.size() - 1) {
             return;
         }
 
         String nextLine = getContextLine(contextCursorLine + 1);
         setContextLine(contextCursorLine, line + nextLine);
-        contextJsonLines.remove(contextCursorLine + 1);
+        contextEditorLines.remove(contextCursorLine + 1);
         setContextCursor(contextCursorLine, contextCursorColumn, false);
     }
 
     private void moveContextCursorHorizontal(int delta, boolean selecting) {
-        if (delta == 0 || contextJsonLines.isEmpty()) {
+        if (delta == 0 || contextEditorLines.isEmpty()) {
             return;
         }
         if (!selecting && hasContextSelection()) {
@@ -2111,18 +2051,18 @@ public class P2SChatScreen extends Screen {
         String current = getContextLine(line);
         if (column < current.length()) {
             setContextCursor(line, column + 1, false);
-        } else if (line < contextJsonLines.size() - 1) {
+        } else if (line < contextEditorLines.size() - 1) {
             setContextCursor(line + 1, 0, false);
         }
     }
 
     private void moveContextCursorVertical(int deltaRows, boolean selecting) {
-        if (deltaRows == 0 || contextJsonLines.isEmpty()) {
+        if (deltaRows == 0 || contextEditorLines.isEmpty()) {
             return;
         }
         updateContextSelectionForCursorMove(selecting);
         int preferred = contextPreferredColumn >= 0 ? contextPreferredColumn : contextCursorColumn;
-        int targetLine = Math.max(0, Math.min(contextCursorLine + deltaRows, contextJsonLines.size() - 1));
+        int targetLine = Math.max(0, Math.min(contextCursorLine + deltaRows, contextEditorLines.size() - 1));
         int targetColumn = Math.min(preferred, getContextLine(targetLine).length());
         contextPreferredColumn = preferred;
         setContextCursor(targetLine, targetColumn, true);
@@ -2139,7 +2079,7 @@ public class P2SChatScreen extends Screen {
     }
 
     private void clampContextScroll() {
-        int totalLines = contextDiffMode ? contextDiffLines.size() : contextJsonLines.size();
+        int totalLines = contextDiffMode ? contextDiffLines.size() : contextEditorLines.size();
         int max = Math.max(0, totalLines - Math.max(1, contextVisibleRows));
         contextScroll = Math.max(0, Math.min(contextScroll, max));
     }
@@ -2161,12 +2101,12 @@ public class P2SChatScreen extends Screen {
             setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.too_many_snippets", CONTEXT_MAX_SNIPPETS), 0xFF5555);
             return false;
         }
-        if (contextJsonLines.isEmpty()) {
-            setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.no_json_lines"), 0xFF5555);
+        if (contextEditorLines.isEmpty()) {
+            setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.no_context_lines"), 0xFF5555);
             return false;
         }
 
-        int maxLine = contextJsonLines.size();
+        int maxLine = contextEditorLines.size();
         start = Math.max(1, Math.min(start, maxLine));
         end = Math.max(1, Math.min(end, maxLine));
         if (start > end) {
@@ -2207,32 +2147,32 @@ public class P2SChatScreen extends Screen {
     }
 
     private String buildContextRangeText(int startLine, int endLine) {
-        if (contextJsonLines.isEmpty()) {
+        if (contextEditorLines.isEmpty()) {
             return "";
         }
         int start = Math.max(1, startLine);
         int end = Math.max(start, endLine);
         StringBuilder sb = new StringBuilder();
-        for (int line = start; line <= end && line <= contextJsonLines.size(); line++) {
+        for (int line = start; line <= end && line <= contextEditorLines.size(); line++) {
             if (line > start) {
                 sb.append('\n');
             }
-            String value = contextJsonLines.get(line - 1);
+            String value = contextEditorLines.get(line - 1);
             sb.append(value == null ? "" : value);
         }
         return sb.toString();
     }
 
     private String contextLinesToText() {
-        if (contextJsonLines.isEmpty()) {
+        if (contextEditorLines.isEmpty()) {
             return "";
         }
         StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < contextJsonLines.size(); i++) {
+        for (int i = 0; i < contextEditorLines.size(); i++) {
             if (i > 0) {
                 sb.append('\n');
             }
-            sb.append(contextJsonLines.get(i) == null ? "" : contextJsonLines.get(i));
+            sb.append(contextEditorLines.get(i) == null ? "" : contextEditorLines.get(i));
         }
         return sb.toString();
     }
@@ -2243,85 +2183,6 @@ public class P2SChatScreen extends Screen {
             total += snippet.content().length();
         }
         return total;
-    }
-
-    private String buildWorkspaceStateJson() {
-        JsonObject root = new JsonObject();
-        root.addProperty("active", ClientSessionState.isActive());
-        root.addProperty("sessionId", ClientSessionState.getSessionId());
-        root.addProperty("turnCount", ClientSessionState.getTurnCount());
-        root.addProperty("status", ClientSessionState.getStatus());
-        root.addProperty("runtimeState", ClientSessionState.getRuntimeState());
-        root.addProperty("revision", ClientSessionState.getRevision());
-
-        JsonObject origin = new JsonObject();
-        origin.addProperty("x", ClientSessionState.getOriginX());
-        origin.addProperty("y", ClientSessionState.getOriginY());
-        origin.addProperty("z", ClientSessionState.getOriginZ());
-        root.add("origin", origin);
-
-        JsonObject bounds = new JsonObject();
-        bounds.addProperty("hasSize", ClientSessionState.hasSize());
-        bounds.addProperty("x", ClientSessionState.getSizeX());
-        bounds.addProperty("y", ClientSessionState.getSizeY());
-        bounds.addProperty("z", ClientSessionState.getSizeZ());
-        root.add("size", bounds);
-
-        JsonObject pendingPatch = new JsonObject();
-        pendingPatch.addProperty("hasPendingPatch", ClientSessionState.hasPendingPatch());
-        pendingPatch.addProperty("summary", ClientSessionState.getPendingSummary());
-        pendingPatch.addProperty("risk", ClientSessionState.getPendingRisk());
-        pendingPatch.addProperty("changedBlocks", ClientSessionState.getPendingChangedBlocks());
-        root.add("pendingPatch", pendingPatch);
-
-        JsonObject preview = new JsonObject();
-        preview.addProperty("summary", ClientSessionState.getPreviewSummary());
-        preview.addProperty("detail", ClientSessionState.getPreviewDetail());
-        preview.addProperty("risk", ClientSessionState.getPreviewRisk());
-        preview.addProperty("changedBlocks", ClientSessionState.getPreviewChangedBlocks());
-        root.add("preview", preview);
-
-        JsonArray todos = new JsonArray();
-        for (ClientSessionState.TodoItem item : ClientSessionState.getTodoItems()) {
-            JsonObject todo = new JsonObject();
-            todo.addProperty("id", item.id());
-            todo.addProperty("content", item.content());
-            todo.addProperty("status", item.status());
-            todos.add(todo);
-        }
-        root.addProperty("todoTitle", ClientSessionState.getTodoTitle());
-        root.add("todoItems", todos);
-
-        ClientSessionState.ChoiceRequest choice = ClientSessionState.getPendingChoice();
-        if (choice != null) {
-            JsonObject choiceJson = new JsonObject();
-            choiceJson.addProperty("requestId", choice.requestId());
-            choiceJson.addProperty("prompt", choice.prompt());
-            JsonArray options = new JsonArray();
-            for (ClientSessionState.ChoiceOption option : choice.options()) {
-                JsonObject opt = new JsonObject();
-                opt.addProperty("id", option.id());
-                opt.addProperty("label", option.label());
-                opt.addProperty("description", option.description());
-                options.add(opt);
-            }
-            choiceJson.add("options", options);
-            root.add("pendingChoice", choiceJson);
-        }
-
-        JsonArray recent = new JsonArray();
-        List<ClientSessionState.ChatMessage> messages = ClientSessionState.getMessages();
-        int from = Math.max(0, messages.size() - 20);
-        for (int i = from; i < messages.size(); i++) {
-            ClientSessionState.ChatMessage msg = messages.get(i);
-            JsonObject entry = new JsonObject();
-            entry.addProperty("role", msg.role());
-            entry.addProperty("text", msg.text());
-            recent.add(entry);
-        }
-        root.add("recentMessages", recent);
-
-        return CONTEXT_GSON.toJson(root);
     }
 
     private String buildMessageWithQueuedContext(String userText) {
@@ -2336,11 +2197,27 @@ public class P2SChatScreen extends Screen {
         }
         for (ContextSnippet snippet : queuedContexts) {
             sb.append("\n### ").append(snippet.label()).append("\n");
-            sb.append("```json\n");
+            sb.append("```").append(contextSnippetFenceLanguage(snippet.label())).append('\n');
             sb.append(snippet.content());
             sb.append("\n```\n");
         }
         return sb.toString().trim();
+    }
+
+    private String contextSnippetFenceLanguage(String label) {
+        if (label == null || label.isBlank()) {
+            return "text";
+        }
+        int colon = label.indexOf(':');
+        String fileName = colon >= 0 ? label.substring(0, colon) : label;
+        String normalized = fileName.trim().toLowerCase();
+        if (normalized.endsWith(".toml")) {
+            return "toml";
+        }
+        if (normalized.endsWith(".diff")) {
+            return "diff";
+        }
+        return "text";
     }
 
     private String buildVisibleMessageText(String userText) {
@@ -2506,13 +2383,13 @@ public class P2SChatScreen extends Screen {
     }
 
     private void placeContextCursorFromMouse(double mouseX, double mouseY) {
-        if (contextJsonLines.isEmpty()) {
-            contextJsonLines.add("");
+        if (contextEditorLines.isEmpty()) {
+            contextEditorLines.add("");
         }
         int rowStep = CONTEXT_ROW_HEIGHT + CONTEXT_ROW_GAP;
         int row = (int) ((mouseY - (contextEditorY + CONTEXT_EDITOR_PADDING)) / rowStep);
         row = Math.max(0, Math.min(row, Math.max(0, contextVisibleRows - 1)));
-        int line = Math.max(0, Math.min(contextScroll + row, contextJsonLines.size() - 1));
+        int line = Math.max(0, Math.min(contextScroll + row, contextEditorLines.size() - 1));
 
         int textX = contextEditorX + CONTEXT_EDITOR_GUTTER;
         int targetX = (int) (mouseX - textX);
@@ -3087,8 +2964,8 @@ public class P2SChatScreen extends Screen {
         if (contextFormatButton != null) {
             contextFormatButton.active = !contextReadOnly;
         }
-        if (contextClearJsonButton != null) {
-            contextClearJsonButton.active = !contextReadOnly;
+        if (contextClearButton != null) {
+            contextClearButton.active = !contextReadOnly;
         }
         refreshContextDiffControls();
         refreshWorkspaceExplorerIfNeeded();
@@ -3408,8 +3285,8 @@ public class P2SChatScreen extends Screen {
     }
 
     private void drawContextTextEditor(GuiGraphics gfx) {
-        if (contextJsonLines.isEmpty()) {
-            contextJsonLines.add("");
+        if (contextEditorLines.isEmpty()) {
+            contextEditorLines.add("");
         }
         clampContextCursor();
         clampContextScroll();
@@ -3434,7 +3311,7 @@ public class P2SChatScreen extends Screen {
 
         int firstLine = contextScroll;
         int visibleRows = Math.max(1, contextVisibleRows);
-        int lastLineExclusive = Math.min(contextJsonLines.size(), firstLine + visibleRows);
+        int lastLineExclusive = Math.min(contextEditorLines.size(), firstLine + visibleRows);
         for (int lineIndex = firstLine; lineIndex < lastLineExclusive; lineIndex++) {
             int row = lineIndex - firstLine;
             int rowY = baseY + row * rowStep;
@@ -4701,7 +4578,6 @@ public class P2SChatScreen extends Screen {
     }
 
     private enum ContextTab {
-        STATE,
         SCRIPT,
         DIFF
     }

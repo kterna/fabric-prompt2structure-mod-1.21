@@ -1,7 +1,5 @@
 package com.p2s;
 
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -16,7 +14,6 @@ import java.util.Map;
 import java.util.UUID;
 
 public final class ClientSessionState {
-    private static final Gson DISPLAY_GSON = new GsonBuilder().setPrettyPrinting().create();
     public static final String MESSAGE_KIND_NORMAL = "normal";
     public static final String MESSAGE_KIND_TOOL_CALL = "tool_call";
     public static final String MESSAGE_KIND_TOOL_ERROR = "tool_error";
@@ -51,7 +48,7 @@ public final class ClientSessionState {
     private static int sizeZ = 0;
     private static String selectedWorkspacePath = "";
     private static final List<WorkspaceFileInfo> workspaceFiles = new ArrayList<>();
-    private static final Map<String, String> workspaceFileScripts = new LinkedHashMap<>();
+    private static final Map<String, String> workspaceFileTomls = new LinkedHashMap<>();
     private static String todoTitle = "";
     private static final List<TodoItem> todoItems = new ArrayList<>();
     private static ChoiceRequest pendingChoice = null;
@@ -61,7 +58,7 @@ public final class ClientSessionState {
     private static final List<ChatMessage> messages = new ArrayList<>();
     private static final StringBuilder streamingBuffer = new StringBuilder();
     private static volatile boolean streaming = false;
-    private static String currentScriptJson = "";
+    private static String currentWorkspaceToml = "";
 
     private ClientSessionState() {
     }
@@ -93,7 +90,7 @@ public final class ClientSessionState {
             String risk,
             int changed,
             String checkpointsJson,
-            String scriptJson,
+            String currentWorkspaceTomlValue,
             String workspaceFilesJson
     ) {
         hasProject = hasProjectFlag;
@@ -121,11 +118,11 @@ public final class ClientSessionState {
         pendingSummary = pendingPatchSummary == null ? "" : pendingPatchSummary;
         pendingRisk = risk == null ? "" : risk;
         pendingChangedBlocks = Math.max(0, changed);
-        currentScriptJson = formatJsonForDisplay(scriptJson);
+        currentWorkspaceToml = normalizeWorkspaceText(currentWorkspaceTomlValue);
 
         updateWorkspaceFiles(workspaceFilesJson);
-        if (sessionActive && !selectedWorkspacePath.isBlank() && !currentScriptJson.isBlank()) {
-            workspaceFileScripts.put(selectedWorkspacePath, currentScriptJson);
+        if (sessionActive && !selectedWorkspacePath.isBlank() && !currentWorkspaceToml.isBlank()) {
+            workspaceFileTomls.put(selectedWorkspacePath, currentWorkspaceToml);
         }
         updateCheckpoints(checkpointsJson);
         if (!pending) {
@@ -139,7 +136,7 @@ public final class ClientSessionState {
             clearPendingChoice();
             checkpoints.clear();
             selectedCheckpointIndex = -1;
-            currentScriptJson = "";
+            currentWorkspaceToml = "";
             runtimeState = "";
             revision = "";
             pendingPath = "";
@@ -169,7 +166,7 @@ public final class ClientSessionState {
             sizeY = 0;
             sizeZ = 0;
             workspaceFiles.clear();
-            workspaceFileScripts.clear();
+            workspaceFileTomls.clear();
         }
     }
 
@@ -440,7 +437,7 @@ public final class ClientSessionState {
         sizeZ = 0;
         selectedWorkspacePath = "";
         workspaceFiles.clear();
-        workspaceFileScripts.clear();
+        workspaceFileTomls.clear();
         todoTitle = "";
         todoItems.clear();
         pendingChoice = null;
@@ -450,7 +447,7 @@ public final class ClientSessionState {
         messages.clear();
         streamingBuffer.setLength(0);
         streaming = false;
-        currentScriptJson = "";
+        currentWorkspaceToml = "";
     }
 
     public static synchronized List<ChatMessage> getMessages() {
@@ -575,8 +572,8 @@ public final class ClientSessionState {
         return sizeZ;
     }
 
-    public static synchronized String getCurrentScriptJson() {
-        return currentScriptJson;
+    public static synchronized String getCurrentWorkspaceToml() {
+        return currentWorkspaceToml;
     }
 
     public static synchronized String getProjectId() {
@@ -625,54 +622,50 @@ public final class ClientSessionState {
         return List.copyOf(workspaceFiles);
     }
 
-    public static synchronized String getWorkspaceFileScriptJson(String workspacePath) {
+    public static synchronized String getWorkspaceFileToml(String workspacePath) {
         String normalized = normalizeWorkspacePath(workspacePath);
         if (normalized.isBlank()) {
             return "";
         }
-        String value = workspaceFileScripts.get(normalized);
+        String value = workspaceFileTomls.get(normalized);
         return value == null ? "" : value;
     }
 
-    public static synchronized Map<String, String> getWorkspaceFileScripts() {
-        return Map.copyOf(workspaceFileScripts);
+    public static synchronized Map<String, String> getWorkspaceFileTomls() {
+        return Map.copyOf(workspaceFileTomls);
     }
 
-    public static synchronized void setWorkspaceFileScriptJson(String workspacePath, String scriptJson) {
+    public static synchronized void setWorkspaceFileToml(String workspacePath, String workspaceToml) {
         String normalized = normalizeWorkspacePath(workspacePath);
         if (normalized.isBlank()) {
             return;
         }
-        if (scriptJson == null || scriptJson.isBlank()) {
-            workspaceFileScripts.remove(normalized);
+        if (workspaceToml == null || workspaceToml.isBlank()) {
+            workspaceFileTomls.remove(normalized);
             return;
         }
-        workspaceFileScripts.put(normalized, formatJsonForDisplay(scriptJson));
+        workspaceFileTomls.put(normalized, normalizeWorkspaceText(workspaceToml));
     }
 
-    private static String formatJsonForDisplay(String scriptJson) {
-        if (scriptJson == null || scriptJson.isBlank()) {
+    private static String normalizeWorkspaceText(String workspaceToml) {
+        if (workspaceToml == null || workspaceToml.isBlank()) {
             return "";
         }
-        try {
-            return DISPLAY_GSON.toJson(JsonParser.parseString(scriptJson));
-        } catch (Exception ignored) {
-            return scriptJson;
-        }
+        return workspaceToml.replace("\r\n", "\n").replace('\r', '\n');
     }
 
     private static synchronized void updateWorkspaceFiles(String workspaceFilesJson) {
         workspaceFiles.clear();
         List<String> validPaths = new ArrayList<>();
         if (workspaceFilesJson == null || workspaceFilesJson.isBlank()) {
-            workspaceFileScripts.clear();
+            workspaceFileTomls.clear();
             selectedWorkspacePath = "";
             return;
         }
         try {
             JsonElement root = JsonParser.parseString(workspaceFilesJson);
             if (!root.isJsonArray()) {
-                workspaceFileScripts.clear();
+                workspaceFileTomls.clear();
                 selectedWorkspacePath = "";
                 return;
             }
@@ -706,7 +699,7 @@ public final class ClientSessionState {
             }
         } catch (Exception ignored) {
         }
-        workspaceFileScripts.keySet().removeIf(path -> !validPaths.contains(path));
+        workspaceFileTomls.keySet().removeIf(path -> !validPaths.contains(path));
         if (!selectedWorkspacePath.isBlank() && !validPaths.contains(selectedWorkspacePath)) {
             selectedWorkspacePath = "";
         }

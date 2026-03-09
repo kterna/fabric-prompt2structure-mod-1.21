@@ -11,14 +11,14 @@ public final class PatchModels {
     }
 
     public static final class StructurePatch {
-        @SerializedName(value = "base_revision", alternate = {"baseRevision"})
+        @SerializedName("base_revision")
         public String baseRevision = "";
 
         public String intent = "";
 
         public List<PatchOperation> operations = new ArrayList<>();
 
-        @SerializedName(value = "message_to_user", alternate = {"messageToUser"})
+        @SerializedName("message_to_user")
         public String messageToUser = "";
     }
 
@@ -27,18 +27,18 @@ public final class PatchModels {
         public String part;
         public Integer priority;
 
-        @SerializedName(value = "actions_add", alternate = {"actionsAdd"})
+        @SerializedName("actions_add")
         public List<StructureBuilder.VbsAction> actionsAdd;
 
-        @SerializedName(value = "old_actions", alternate = {"oldActions"})
+        @SerializedName("old_actions")
         public List<StructureBuilder.VbsAction> oldActions;
 
-        @SerializedName(value = "new_actions", alternate = {"newActions"})
+        @SerializedName("new_actions")
         public List<StructureBuilder.VbsAction> newActions;
 
         public List<Integer> offset;
 
-        @SerializedName(value = "target_part", alternate = {"targetPart"})
+        @SerializedName("target_part")
         public String targetPart;
 
         public List<PaletteEntry> entries;
@@ -47,15 +47,15 @@ public final class PatchModels {
     public static final class PaletteEntry {
         public String key;
 
-        @SerializedName(value = "old_value", alternate = {"oldValue"})
+        @SerializedName("old_value")
         public String oldValue;
 
-        @SerializedName(value = "new_value", alternate = {"newValue"})
+        @SerializedName("new_value")
         public String newValue;
     }
 
     public static final class VerificationError {
-        @SerializedName(value = "operation_index", alternate = {"operationIndex"})
+        @SerializedName("operation_index")
         public int operationIndex;
         public String op;
         public String part;
