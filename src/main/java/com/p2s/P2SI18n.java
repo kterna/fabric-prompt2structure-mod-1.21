@@ -153,6 +153,7 @@ public final class P2SI18n {
             case "error" -> tr("status.p2s.error");
             case "pending" -> tr("status.p2s.pending");
             case "in_progress" -> tr("status.p2s.in_progress");
+            case "completed" -> tr("status.p2s.completed");
             case "done" -> tr("status.p2s.done");
             case "blocked" -> tr("status.p2s.blocked");
             case "compacting" -> tr("status.p2s.compacting");

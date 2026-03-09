@@ -109,7 +109,6 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
                 case "delete_workspace_file" -> handleDeleteWorkspaceFileTool(player, arguments);
                 case "propose_patch" -> handleProposePatchTool(player, arguments);
                 case "search_block_ids" -> handleSearchBlockIds(arguments);
-                case "explain_plan" -> handleExplainPlan();
                 default -> buildToolErrorKey(normalizedTool, "message.p2s.tool.unknown_tool");
             };
             sendSessionSync(player, sessions.get(player.getUUID()));
@@ -640,12 +639,6 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         if (matches.isEmpty()) {
             addToolWarning(payload, "message.p2s.search.no_matches");
         }
-        return payload;
-    }
-
-    private static JsonObject handleExplainPlan() {
-        JsonObject payload = buildToolSuccess("explain_plan");
-        payload.addProperty("accepted", true);
         return payload;
     }
 

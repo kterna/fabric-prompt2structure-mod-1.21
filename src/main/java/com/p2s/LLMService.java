@@ -482,87 +482,56 @@ public final class LLMService {
             tools.add(searchSkillTool);
         }
 
-        if (includeSkillTools && allowsTool(allowedTools, "todo")) {
-            JsonObject todoTool = new JsonObject();
-            todoTool.addProperty("type", "function");
-            JsonObject todoFn = new JsonObject();
-            todoFn.addProperty("name", "todo");
-            todoFn.addProperty("description", "Manage explicit todo list. Supported actions: get, set, upsert, delete, clear.");
-            JsonObject todoParams = new JsonObject();
-            todoParams.addProperty("type", "object");
-            JsonObject todoProps = new JsonObject();
+        if (includeSkillTools && allowsTool(allowedTools, "update_plan")) {
+            JsonObject planTool = new JsonObject();
+            planTool.addProperty("type", "function");
+            JsonObject planFn = new JsonObject();
+            planFn.addProperty("name", "update_plan");
+            planFn.addProperty("description", "Updates the task plan. Provide an optional explanation and a list of plan items, each with a step and status. At most one step can be in_progress at a time.");
+            JsonObject planParams = new JsonObject();
+            planParams.addProperty("type", "object");
+            JsonObject planProps = new JsonObject();
 
-            JsonObject action = new JsonObject();
-            action.addProperty("type", "string");
-            JsonArray actionEnum = new JsonArray();
-            actionEnum.add("get");
-            actionEnum.add("set");
-            actionEnum.add("upsert");
-            actionEnum.add("delete");
-            actionEnum.add("clear");
-            action.add("enum", actionEnum);
-            action.addProperty("description", "Todo operation.");
-            todoProps.add("action", action);
+            JsonObject explanation = new JsonObject();
+            explanation.addProperty("type", "string");
+            planProps.add("explanation", explanation);
 
-            JsonObject title = new JsonObject();
-            title.addProperty("type", "string");
-            title.addProperty("description", "Optional todo title (used by action=set).");
-            todoProps.add("title", title);
-
-            JsonObject id = new JsonObject();
-            id.addProperty("type", "string");
-            id.addProperty("description", "Todo item id (used by action=upsert/delete).");
-            todoProps.add("id", id);
-
-            JsonObject content = new JsonObject();
-            content.addProperty("type", "string");
-            content.addProperty("description", "Todo text (used by action=upsert). Optional when updating only status.");
-            todoProps.add("content", content);
-
-            JsonObject status = new JsonObject();
-            status.addProperty("type", "string");
+            JsonObject stepStatus = new JsonObject();
+            stepStatus.addProperty("type", "string");
             JsonArray statusEnum = new JsonArray();
             statusEnum.add("pending");
             statusEnum.add("in_progress");
-            statusEnum.add("done");
-            statusEnum.add("blocked");
-            status.add("enum", statusEnum);
-            status.addProperty("description", "Todo status (used by action=set/upsert).");
-            todoProps.add("status", status);
+            statusEnum.add("completed");
+            stepStatus.add("enum", statusEnum);
+            stepStatus.addProperty("description", "One of: pending, in_progress, completed.");
 
-            JsonObject items = new JsonObject();
-            items.addProperty("type", "array");
+            JsonObject plan = new JsonObject();
+            plan.addProperty("type", "array");
+            plan.addProperty("description", "The list of steps.");
             JsonObject item = new JsonObject();
             item.addProperty("type", "object");
             JsonObject itemProps = new JsonObject();
-            JsonObject itemId = new JsonObject();
-            itemId.addProperty("type", "string");
-            itemId.addProperty("description", "Stable todo item id.");
-            itemProps.add("id", itemId);
-            JsonObject itemContent = new JsonObject();
-            itemContent.addProperty("type", "string");
-            itemContent.addProperty("description", "Todo text.");
-            itemProps.add("content", itemContent);
-            JsonObject itemStatus = new JsonObject();
-            itemStatus.addProperty("type", "string");
-            itemStatus.add("enum", statusEnum.deepCopy());
-            itemProps.add("status", itemStatus);
+            JsonObject step = new JsonObject();
+            step.addProperty("type", "string");
+            itemProps.add("step", step);
+            itemProps.add("status", stepStatus);
             item.add("properties", itemProps);
             JsonArray itemRequired = new JsonArray();
-            itemRequired.add("content");
+            itemRequired.add("step");
+            itemRequired.add("status");
             item.add("required", itemRequired);
-            items.add("items", item);
-            items.addProperty("description", "Todo items array (used by action=set).");
-            todoProps.add("items", items);
+            item.addProperty("additionalProperties", false);
+            plan.add("items", item);
+            planProps.add("plan", plan);
 
-            todoParams.add("properties", todoProps);
-            JsonArray todoRequired = new JsonArray();
-            todoRequired.add("action");
-            todoParams.add("required", todoRequired);
-            todoParams.addProperty("additionalProperties", false);
-            todoFn.add("parameters", todoParams);
-            todoTool.add("function", todoFn);
-            tools.add(todoTool);
+            planParams.add("properties", planProps);
+            JsonArray required = new JsonArray();
+            required.add("plan");
+            planParams.add("required", required);
+            planParams.addProperty("additionalProperties", false);
+            planFn.add("parameters", planParams);
+            planTool.add("function", planFn);
+            tools.add(planTool);
         }
 
         if (includeSkillTools && allowsTool(allowedTools, "request_user_choice")) {
@@ -849,24 +818,6 @@ public final class LLMService {
             patchFn.add("parameters", params);
             patchTool.add("function", patchFn);
             tools.add(patchTool);
-        }
-
-        if (allowsTool(allowedTools, "explain_plan")) {
-            JsonObject explainTool = new JsonObject();
-            explainTool.addProperty("type", "function");
-            JsonObject explainFn = new JsonObject();
-            explainFn.addProperty("name", "explain_plan");
-            explainFn.addProperty("description", "Optional: provide short plan rationale to show users before patch confirmation.");
-            JsonObject explainParams = new JsonObject();
-            explainParams.addProperty("type", "object");
-            JsonObject explainProps = new JsonObject();
-            JsonObject plan = new JsonObject();
-            plan.addProperty("type", "string");
-            explainProps.add("plan", plan);
-            explainParams.add("properties", explainProps);
-            explainFn.add("parameters", explainParams);
-            explainTool.add("function", explainFn);
-            tools.add(explainTool);
         }
 
         if (includeSkillTools && allowsTool(allowedTools, "list_subagents")) {

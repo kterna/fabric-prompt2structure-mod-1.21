@@ -35,6 +35,7 @@ public final class SubagentManager {
     private static final int MAX_SUMMARY_CHARS = 512;
     private static final int MAX_TRACE_ITEMS = 40;
     private static final int MAX_ATTEMPT_RECORDS = 20;
+    private static final int MAX_PLAN_ITEMS = 40;
     private static final int MAX_TOOL_LOOPS = 30;
     private static final ThreadPoolExecutor EXECUTOR = new ThreadPoolExecutor(
             MAX_ACTIVE_SUBAGENTS,
@@ -57,7 +58,7 @@ public final class SubagentManager {
         return t;
     });
     private static final Set<String> PARALLEL_SAFE_TOOLS = Set.of(
-            "list_skills", "read_skill", "read_subdoc", "search_skill",
+            "list_skills", "read_skill", "read_subdoc", "search_skill", "update_plan",
             "get_project_state", "read_workspace_file", "search_block_ids"
     );
 
@@ -582,12 +583,41 @@ public final class SubagentManager {
             case "read_skill" -> readSkillPayload(task, call.arguments());
             case "read_subdoc" -> readSubdocPayload(task, call.arguments());
             case "search_skill" -> searchSkillPayload(task, call.arguments());
+            case "update_plan" -> updatePlanPayload(call.arguments());
             case "get_project_state", "read_workspace_file",
                     "create_workspace_file", "rename_workspace_file", "delete_workspace_file",
                     "propose_patch", "search_block_ids" ->
                     callServerTool(toolName, normalizeArgsObject(call.arguments()));
             default -> toolError(toolName, "Unsupported tool");
         };
+    }
+
+    private static JsonObject updatePlanPayload(JsonElement arguments) {
+        JsonObject args = normalizeArgsObject(arguments);
+        if (!args.has("plan") || !args.get("plan").isJsonArray()) {
+            return toolError("update_plan", "Missing plan array");
+        }
+
+        List<ClientSessionState.PlanItem> items = new ArrayList<>();
+        for (JsonElement element : args.getAsJsonArray("plan")) {
+            if (items.size() >= MAX_PLAN_ITEMS) {
+                break;
+            }
+            if (element == null || !element.isJsonObject()) {
+                continue;
+            }
+            JsonObject obj = element.getAsJsonObject();
+            String step = asString(obj, "step");
+            if (step.isBlank()) {
+                continue;
+            }
+            items.add(new ClientSessionState.PlanItem(step.trim(), normalizePlanStatus(asString(obj, "status"))));
+        }
+
+        ClientSessionState.setPlan(asString(args, "explanation"), items);
+        JsonObject payload = toolOk("update_plan");
+        payload.addProperty("count", items.size());
+        return payload;
     }
 
     private static JsonObject listSkillsPayload(SubagentTask task) {
@@ -1043,6 +1073,18 @@ public final class SubagentManager {
         } catch (Exception ignored) {
             return "";
         }
+    }
+
+    private static String normalizePlanStatus(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return "pending";
+        }
+        return switch (raw.trim().toLowerCase()) {
+            case "completed" -> "completed";
+            case "in_progress" -> "in_progress";
+            case "pending" -> "pending";
+            default -> "pending";
+        };
     }
 
     private static String statusName(SubagentStatus status) {

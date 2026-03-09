@@ -49,8 +49,8 @@ public final class ClientSessionState {
     private static String selectedWorkspacePath = "";
     private static final List<WorkspaceFileInfo> workspaceFiles = new ArrayList<>();
     private static final Map<String, String> workspaceFileTomls = new LinkedHashMap<>();
-    private static String todoTitle = "";
-    private static final List<TodoItem> todoItems = new ArrayList<>();
+    private static String planExplanation = "";
+    private static final List<PlanItem> planItems = new ArrayList<>();
     private static ChoiceRequest pendingChoice = null;
     private static final List<CheckpointInfo> checkpoints = new ArrayList<>();
     private static int selectedCheckpointIndex = -1;
@@ -132,7 +132,7 @@ public final class ClientSessionState {
         if (!sessionActiveFlag) {
             status = "";
             clearPreview();
-            clearTodo();
+            clearPlan();
             clearPendingChoice();
             checkpoints.clear();
             selectedCheckpointIndex = -1;
@@ -239,72 +239,35 @@ public final class ClientSessionState {
         }
     }
 
-    public static synchronized void setTodo(String title, List<TodoItem> items) {
-        todoTitle = title == null ? "" : title.trim();
-        todoItems.clear();
+    public static synchronized void setPlan(String explanation, List<PlanItem> items) {
+        planExplanation = explanation == null ? "" : explanation.trim();
+        planItems.clear();
         if (items == null) {
             return;
         }
-        for (TodoItem item : items) {
-            if (item == null || item.id() == null || item.id().isBlank()) {
+        for (PlanItem item : items) {
+            if (item == null) {
                 continue;
             }
-            String content = item.content() == null ? "" : item.content().trim();
-            if (content.isBlank()) {
+            String step = item.step() == null ? "" : item.step().trim();
+            if (step.isBlank()) {
                 continue;
             }
-            todoItems.add(new TodoItem(item.id().trim(), content, normalizeTodoStatus(item.status())));
+            planItems.add(new PlanItem(step, normalizePlanStatus(item.status())));
         }
     }
 
-    public static synchronized String getTodoTitle() {
-        return todoTitle;
+    public static synchronized String getPlanExplanation() {
+        return planExplanation;
     }
 
-    public static synchronized List<TodoItem> getTodoItems() {
-        return List.copyOf(todoItems);
+    public static synchronized List<PlanItem> getPlanItems() {
+        return List.copyOf(planItems);
     }
 
-    public static synchronized boolean upsertTodoItem(String id, String content, String statusValue) {
-        if (id == null || id.isBlank()) {
-            return false;
-        }
-        String itemId = id.trim();
-        String normalizedStatus = statusValue == null || statusValue.isBlank() ? "" : normalizeTodoStatus(statusValue);
-        for (int i = 0; i < todoItems.size(); i++) {
-            TodoItem existing = todoItems.get(i);
-            if (!itemId.equals(existing.id())) {
-                continue;
-            }
-            String nextContent = content == null || content.isBlank() ? existing.content() : content.trim();
-            String nextStatus = normalizedStatus.isBlank() ? existing.status() : normalizedStatus;
-            todoItems.set(i, new TodoItem(itemId, nextContent, nextStatus));
-            return true;
-        }
-        if (content == null || content.isBlank()) {
-            return false;
-        }
-        todoItems.add(new TodoItem(itemId, content.trim(), normalizedStatus.isBlank() ? "pending" : normalizedStatus));
-        return true;
-    }
-
-    public static synchronized boolean removeTodoItem(String id) {
-        if (id == null || id.isBlank()) {
-            return false;
-        }
-        String itemId = id.trim();
-        for (int i = 0; i < todoItems.size(); i++) {
-            if (itemId.equals(todoItems.get(i).id())) {
-                todoItems.remove(i);
-                return true;
-            }
-        }
-        return false;
-    }
-
-    public static synchronized void clearTodo() {
-        todoTitle = "";
-        todoItems.clear();
+    public static synchronized void clearPlan() {
+        planExplanation = "";
+        planItems.clear();
     }
 
     public static synchronized void setPendingChoice(String requestId, String prompt, List<ChoiceOption> options) {
@@ -438,8 +401,8 @@ public final class ClientSessionState {
         selectedWorkspacePath = "";
         workspaceFiles.clear();
         workspaceFileTomls.clear();
-        todoTitle = "";
-        todoItems.clear();
+        planExplanation = "";
+        planItems.clear();
         pendingChoice = null;
         checkpoints.clear();
         selectedCheckpointIndex = -1;
@@ -815,10 +778,12 @@ public final class ClientSessionState {
         previewChangedBlocks = 0;
     }
 
-    private static String normalizeTodoStatus(String raw) {
+    private static String normalizePlanStatus(String raw) {
         String value = raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT);
         return switch (value) {
-            case "pending", "in_progress", "done", "blocked" -> value;
+            case "completed" -> "completed";
+            case "in_progress" -> "in_progress";
+            case "pending" -> "pending";
             default -> "pending";
         };
     }
@@ -876,7 +841,7 @@ public final class ClientSessionState {
     public record ChatMessage(String id, String role, String text, String kind, String detail) {
     }
 
-    public record TodoItem(String id, String content, String status) {
+    public record PlanItem(String step, String status) {
     }
 
     public record ChoiceOption(String id, String label, String description) {

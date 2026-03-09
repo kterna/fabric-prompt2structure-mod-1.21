@@ -30,7 +30,7 @@ public final class ClientAgentManager {
     });
     private static final int MAX_HISTORY = 40;
     private static final int SAFETY_LOOP_LIMIT = 50;
-    private static final int MAX_TODO_ITEMS = 40;
+    private static final int MAX_PLAN_ITEMS = 40;
     private static final int MAX_CHOICE_OPTIONS = 3;
     private static final String CLIENT_TOOL_CONTRACT = """
             ## Client Agent Contract
@@ -39,7 +39,9 @@ public final class ClientAgentManager {
             - Read full skill text only when needed via read_skill.
             - Read focused skill sub-documents via read_subdoc when read_skill exposes subdocs.
             - Use search_skill to locate relevant snippets quickly before reading full body.
-            - Keep an explicit todo list with the todo tool (actions: get/set/upsert/delete/clear).
+            - Use update_plan to record user-visible progress with an optional explanation and ordered steps.
+            - Each update_plan step must use one of: pending, in_progress, completed.
+            - update_plan is for progress tracking only; it does not replace actually doing the work.
             - Before asking the user to choose among alternatives, call request_user_choice.
             - After request_user_choice, wait for user selection before continuing execution.
             - Tool calls operate on the current project implicitly; never send project_id.
@@ -63,8 +65,8 @@ public final class ClientAgentManager {
     });
     private static final Set<String> PARALLEL_SAFE_TOOLS = Set.of(
             "list_skills", "read_skill", "read_subdoc", "search_skill",
-            "todo", "get_todo",
-            "get_project_state", "read_workspace_file", "search_block_ids", "explain_plan",
+            "update_plan",
+            "get_project_state", "read_workspace_file", "search_block_ids",
             "list_subagents", "get_subagent", "list_profiles", "get_profile"
     );
 
@@ -705,12 +707,7 @@ public final class ClientAgentManager {
             case "read_skill" -> readSkillPayload(call.arguments());
             case "read_subdoc" -> readSubdocPayload(call.arguments());
             case "search_skill" -> searchSkillPayload(call.arguments());
-            case "todo" -> todoPayload(call.arguments());
-            case "get_todo" -> todoPayload(buildTodoActionArgs("get", call.arguments()));
-            case "set_todo" -> todoPayload(buildTodoActionArgs("set", call.arguments()));
-            case "edit_todo_item" -> todoPayload(buildTodoActionArgs("upsert", call.arguments()));
-            case "delete_todo_item" -> todoPayload(buildTodoActionArgs("delete", call.arguments()));
-            case "clear_todo" -> todoPayload(buildTodoActionArgs("clear", call.arguments()));
+            case "update_plan" -> updatePlanPayload(call.arguments());
             case "request_user_choice" -> requestUserChoicePayload(call.arguments());
             case "clear_user_choice" -> clearUserChoicePayload();
             case "list_subagents" -> listSubagentsPayload(session, call.arguments());
@@ -720,11 +717,6 @@ public final class ClientAgentManager {
             case "delete_subagent" -> deleteSubagentPayload(session, call.arguments());
             case "list_profiles" -> SubagentManager.listProfiles();
             case "get_profile" -> getProfilePayload(call.arguments());
-            case "explain_plan" -> {
-                JsonObject ok = toolOk(toolName);
-                ok.addProperty("accepted", true);
-                yield ok;
-            }
             case "get_project_state", "read_workspace_file",
                     "create_workspace_file", "rename_workspace_file", "delete_workspace_file",
                     "propose_patch", "search_block_ids" ->
@@ -880,164 +872,40 @@ public final class ClientAgentManager {
         return payload;
     }
 
-    private static JsonObject todoPayload(JsonElement arguments) {
+    private static JsonObject updatePlanPayload(JsonElement arguments) {
         JsonObject args = normalizeArgsObject(arguments);
-        String action = normalizeTodoAction(asString(args, "action"));
-        if (action.isBlank()) {
-            action = inferLegacyTodoAction(args);
-        }
-        if (action.isBlank()) {
-            return toolError("todo", "Missing action (get/set/upsert/delete/clear)");
+        if (!args.has("plan") || !args.get("plan").isJsonArray()) {
+            return toolError("update_plan", "Missing plan array");
         }
 
-        return switch (action) {
-            case "get" -> todoGetPayload();
-            case "set" -> todoSetPayload(args);
-            case "upsert" -> todoUpsertPayload(args);
-            case "delete" -> todoDeletePayload(args);
-            case "clear" -> todoClearPayload();
-            default -> toolError("todo", "Unsupported action: " + action);
-        };
-    }
+        String explanation = asString(args, "explanation");
+        List<ClientSessionState.PlanItem> items = parsePlanItems(args.getAsJsonArray("plan"));
+        ClientSessionState.setPlan(explanation, items);
 
-    private static JsonObject todoGetPayload() {
-        JsonObject payload = toolOk("todo");
-        payload.addProperty("action", "get");
-        payload.addProperty("title", ClientSessionState.getTodoTitle());
-        JsonArray arr = new JsonArray();
-        for (ClientSessionState.TodoItem item : ClientSessionState.getTodoItems()) {
-            JsonObject entry = new JsonObject();
-            entry.addProperty("id", item.id());
-            entry.addProperty("content", item.content());
-            entry.addProperty("status", item.status());
-            arr.add(entry);
-        }
-        payload.add("items", arr);
-        payload.addProperty("count", arr.size());
+        JsonObject payload = toolOk("update_plan");
+        payload.addProperty("explanation", explanation == null ? "" : explanation.trim());
+        payload.addProperty("count", items.size());
         return payload;
     }
 
-    private static JsonObject todoSetPayload(JsonObject args) {
-        if (!args.has("items") || !args.get("items").isJsonArray()) {
-            return toolError("todo", "Missing items array for action=set");
-        }
-        String title = asString(args, "title");
-        JsonArray itemsArg = args.getAsJsonArray("items");
-        List<ClientSessionState.TodoItem> items = new ArrayList<>();
-        int index = 1;
+    private static List<ClientSessionState.PlanItem> parsePlanItems(JsonArray itemsArg) {
+        List<ClientSessionState.PlanItem> items = new ArrayList<>();
         for (JsonElement element : itemsArg) {
-            if (items.size() >= MAX_TODO_ITEMS) {
+            if (items.size() >= MAX_PLAN_ITEMS) {
                 break;
             }
             if (element == null || !element.isJsonObject()) {
                 continue;
             }
             JsonObject obj = element.getAsJsonObject();
-            String id = normalizeTodoId(asString(obj, "id"));
-            if (id.isBlank()) {
-                id = "todo-" + index;
-            }
-            String content = asString(obj, "content");
+            String content = asString(obj, "step");
             if (content.isBlank()) {
-                content = asString(obj, "text");
-            }
-            if (content.isBlank()) {
-                index += 1;
                 continue;
             }
-            String status = normalizeTodoStatus(asString(obj, "status"));
-            items.add(new ClientSessionState.TodoItem(id, content.trim(), status));
-            index += 1;
+            String status = normalizePlanStatus(asString(obj, "status"));
+            items.add(new ClientSessionState.PlanItem(content.trim(), status));
         }
-
-        ClientSessionState.setTodo(title, items);
-        JsonObject payload = toolOk("todo");
-        payload.addProperty("action", "set");
-        payload.addProperty("title", title == null ? "" : title.trim());
-        payload.addProperty("count", items.size());
-        return payload;
-    }
-
-    private static JsonObject todoUpsertPayload(JsonObject args) {
-        String id = normalizeTodoId(asString(args, "id"));
-        if (id.isBlank()) {
-            return toolError("todo", "Missing id for action=upsert");
-        }
-        String content = asString(args, "content");
-        if (content.isBlank()) {
-            content = asString(args, "text");
-        }
-        String status = asString(args, "status");
-        boolean exists = ClientSessionState.getTodoItems().stream().anyMatch(item -> id.equals(item.id()));
-
-        boolean ok = ClientSessionState.upsertTodoItem(id, content, status);
-        if (!ok) {
-            return toolError("todo", "Cannot create item without content");
-        }
-
-        JsonObject payload = toolOk("todo");
-        payload.addProperty("action", "upsert");
-        payload.addProperty("id", id);
-        payload.addProperty("result", exists ? "updated" : "created");
-        return payload;
-    }
-
-    private static JsonObject todoDeletePayload(JsonObject args) {
-        String id = normalizeTodoId(asString(args, "id"));
-        if (id.isBlank()) {
-            return toolError("todo", "Missing id for action=delete");
-        }
-        boolean removed = ClientSessionState.removeTodoItem(id);
-        if (!removed) {
-            return toolError("todo", "Todo item not found: " + id);
-        }
-        JsonObject payload = toolOk("todo");
-        payload.addProperty("action", "delete");
-        payload.addProperty("id", id);
-        return payload;
-    }
-
-    private static JsonObject todoClearPayload() {
-        ClientSessionState.clearTodo();
-        JsonObject payload = toolOk("todo");
-        payload.addProperty("action", "clear");
-        payload.addProperty("cleared", true);
-        return payload;
-    }
-
-    private static String normalizeTodoAction(String value) {
-        if (value == null || value.isBlank()) {
-            return "";
-        }
-        String action = value.trim().toLowerCase();
-        return switch (action) {
-            case "get", "set", "upsert", "delete", "clear" -> action;
-            case "edit", "update", "create" -> "upsert";
-            case "remove" -> "delete";
-            default -> "";
-        };
-    }
-
-    private static String inferLegacyTodoAction(JsonObject args) {
-        if (args == null) {
-            return "";
-        }
-        if (args.has("items") && args.get("items").isJsonArray()) {
-            return "set";
-        }
-        if (args.has("id") && args.get("id").isJsonPrimitive()) {
-            if (args.has("content") || args.has("text") || args.has("status")) {
-                return "upsert";
-            }
-            return "delete";
-        }
-        return "get";
-    }
-
-    private static JsonElement buildTodoActionArgs(String action, JsonElement originalArgs) {
-        JsonObject args = normalizeArgsObject(originalArgs);
-        args.addProperty("action", action == null ? "" : action.trim().toLowerCase());
-        return args;
+        return items;
     }
 
     private static JsonObject requestUserChoicePayload(JsonElement arguments) {
@@ -1065,7 +933,7 @@ public final class ClientAgentManager {
             String description = "";
             if (element != null && element.isJsonObject()) {
                 JsonObject obj = element.getAsJsonObject();
-                id = normalizeTodoId(asString(obj, "id"));
+                id = normalizeStableId(asString(obj, "id"));
                 label = asString(obj, "label");
                 description = asString(obj, "description");
             } else if (element != null && element.isJsonPrimitive()) {
@@ -1131,7 +999,20 @@ public final class ClientAgentManager {
         return "thinking";
     }
 
-    private static String normalizeTodoId(String raw) {
+    private static String normalizePlanStatus(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return "pending";
+        }
+        String value = raw.trim().toLowerCase();
+        return switch (value) {
+            case "completed" -> "completed";
+            case "in_progress" -> "in_progress";
+            case "pending" -> "pending";
+            default -> "pending";
+        };
+    }
+
+    private static String normalizeStableId(String raw) {
         if (raw == null) {
             return "";
         }
@@ -1141,17 +1022,6 @@ public final class ClientAgentManager {
         value = value.replaceAll("^-+", "");
         value = value.replaceAll("-+$", "");
         return value;
-    }
-
-    private static String normalizeTodoStatus(String raw) {
-        if (raw == null || raw.isBlank()) {
-            return "pending";
-        }
-        String value = raw.trim().toLowerCase();
-        return switch (value) {
-            case "pending", "in_progress", "done", "blocked" -> value;
-            default -> "pending";
-        };
     }
 
     private static JsonObject normalizeArgsObject(JsonElement argsElem) {
@@ -1288,18 +1158,12 @@ public final class ClientAgentManager {
 
     private static String toolSummaryKey(LLMService.ToolCall call) {
         String toolName = rawToolName(call);
-        JsonObject args = normalizeArgsObject(call == null ? null : call.arguments());
         return switch (toolName) {
             case "list_skills" -> "message.p2s.agent.tool.summary.list_skills";
             case "read_skill" -> "message.p2s.agent.tool.summary.read_skill";
             case "read_subdoc" -> "message.p2s.agent.tool.summary.read_subdoc";
             case "search_skill" -> "message.p2s.agent.tool.summary.search_skill";
-            case "todo" -> todoSummaryKey(asString(args, "action"));
-            case "get_todo" -> "message.p2s.agent.tool.summary.todo_get";
-            case "set_todo" -> "message.p2s.agent.tool.summary.todo_set";
-            case "edit_todo_item" -> "message.p2s.agent.tool.summary.todo_upsert";
-            case "delete_todo_item" -> "message.p2s.agent.tool.summary.todo_delete";
-            case "clear_todo" -> "message.p2s.agent.tool.summary.todo_clear";
+            case "update_plan" -> "message.p2s.agent.tool.summary.update_plan";
             case "request_user_choice" -> "message.p2s.agent.tool.summary.request_user_choice";
             case "clear_user_choice" -> "message.p2s.agent.tool.summary.clear_user_choice";
             case "list_subagents" -> "message.p2s.agent.tool.summary.list_subagents";
@@ -1309,7 +1173,6 @@ public final class ClientAgentManager {
             case "delete_subagent" -> "message.p2s.agent.tool.summary.delete_subagent";
             case "list_profiles" -> "message.p2s.agent.tool.summary.list_profiles";
             case "get_profile" -> "message.p2s.agent.tool.summary.get_profile";
-            case "explain_plan" -> "message.p2s.agent.tool.summary.explain_plan";
             case "get_project_state" -> "message.p2s.agent.tool.summary.get_project_state";
             case "read_workspace_file" -> "message.p2s.agent.tool.summary.read_workspace_file";
             case "create_workspace_file" -> "message.p2s.agent.tool.summary.create_workspace_file";
@@ -1318,18 +1181,6 @@ public final class ClientAgentManager {
             case "propose_patch" -> "message.p2s.agent.tool.summary.propose_patch";
             case "search_block_ids" -> "message.p2s.agent.tool.summary.search_block_ids";
             default -> "";
-        };
-    }
-
-    private static String todoSummaryKey(String action) {
-        String normalized = action == null ? "" : action.trim().toLowerCase();
-        return switch (normalized) {
-            case "get" -> "message.p2s.agent.tool.summary.todo_get";
-            case "set" -> "message.p2s.agent.tool.summary.todo_set";
-            case "upsert", "edit", "update", "create" -> "message.p2s.agent.tool.summary.todo_upsert";
-            case "delete", "remove" -> "message.p2s.agent.tool.summary.todo_delete";
-            case "clear" -> "message.p2s.agent.tool.summary.todo_clear";
-            default -> "message.p2s.agent.tool.summary.todo";
         };
     }
 
@@ -1531,9 +1382,9 @@ public final class ClientAgentManager {
                 ));
             }
 
-            List<SessionPersistence.TodoItemEntry> todoEntries = new ArrayList<>();
-            for (ClientSessionState.TodoItem item : ClientSessionState.getTodoItems()) {
-                todoEntries.add(new SessionPersistence.TodoItemEntry(item.id(), item.content(), item.status()));
+            List<SessionPersistence.PlanItemEntry> planEntries = new ArrayList<>();
+            for (ClientSessionState.PlanItem item : ClientSessionState.getPlanItems()) {
+                planEntries.add(new SessionPersistence.PlanItemEntry(item.step(), item.status()));
             }
 
             SessionPersistence.ChoiceRequestEntry pendingChoiceEntry = null;
@@ -1587,8 +1438,8 @@ public final class ClientAgentManager {
                     chatLog.size(),
                     historyCopy,
                     chatLog,
-                    todoEntries,
-                    ClientSessionState.getTodoTitle(),
+                    planEntries,
+                    ClientSessionState.getPlanExplanation(),
                     session.selectedWorkspacePath,
                     pendingChoiceEntry
             );
@@ -1726,12 +1577,15 @@ public final class ClientAgentManager {
                     ClientSessionState.addMessage(entry.id(), entry.role(), entry.text(), entry.kind(), entry.detail());
                 }
             }
-            if (saved.todoItems() != null && !saved.todoItems().isEmpty()) {
-                List<ClientSessionState.TodoItem> items = new ArrayList<>();
-                for (SessionPersistence.TodoItemEntry entry : saved.todoItems()) {
-                    items.add(new ClientSessionState.TodoItem(entry.id(), entry.content(), entry.status()));
+            if ((saved.planItems() != null && !saved.planItems().isEmpty())
+                    || (saved.planExplanation() != null && !saved.planExplanation().isBlank())) {
+                List<ClientSessionState.PlanItem> items = new ArrayList<>();
+                if (saved.planItems() != null) {
+                    for (SessionPersistence.PlanItemEntry entry : saved.planItems()) {
+                        items.add(new ClientSessionState.PlanItem(entry.step(), entry.status()));
+                    }
                 }
-                ClientSessionState.setTodo(saved.todoTitle(), items);
+                ClientSessionState.setPlan(saved.planExplanation(), items);
             }
             if (saved.pendingChoice() != null && saved.pendingChoice().options() != null && !saved.pendingChoice().options().isEmpty()) {
                 List<ClientSessionState.ChoiceOption> options = new ArrayList<>();
@@ -1826,7 +1680,7 @@ public final class ClientAgentManager {
 
     private static void clearLocalSessionView() {
         ClientSessionState.clearMessages();
-        ClientSessionState.clearTodo();
+        ClientSessionState.clearPlan();
         ClientSessionState.clearPendingChoice();
         ClientSessionState.clearPendingPatch();
         ClientSessionState.endStreaming();

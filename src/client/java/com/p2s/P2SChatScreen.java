@@ -16,6 +16,7 @@ import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.util.FormattedCharSequence;
@@ -3779,7 +3780,7 @@ public class P2SChatScreen extends Screen {
         if (!getChoicePromptLines(contentWidth).isEmpty()) count++;
         if (!getPreviewLines(contentWidth).isEmpty()) count++;
         if (!getSummaryLines(contentWidth).isEmpty()) count++;
-        if (!getTodoLines(contentWidth).isEmpty()) count++;
+        if (!getPlanLines(contentWidth).isEmpty()) count++;
         if (!getCheckpointLines(contentWidth).isEmpty()) count++;
         return count;
     }
@@ -3842,10 +3843,10 @@ public class P2SChatScreen extends Screen {
             allLines.add(new OverlayLine(null, 0, false, null));
         }
 
-        List<FormattedCharSequence> todoLines = getTodoLines(cw);
-        if (!todoLines.isEmpty()) {
-            allLines.add(new OverlayLine(null, 0x99CCFF, true, P2SI18n.tr("screen.p2s.chat.overlay.todo").getString()));
-            for (FormattedCharSequence line : todoLines) {
+        List<FormattedCharSequence> planLines = getPlanLines(cw);
+        if (!planLines.isEmpty()) {
+            allLines.add(new OverlayLine(null, 0x99CCFF, true, P2SI18n.tr("screen.p2s.chat.overlay.plan").getString()));
+            for (FormattedCharSequence line : planLines) {
                 allLines.add(new OverlayLine(line, 0xCCDDEE, false, null));
             }
             allLines.add(new OverlayLine(null, 0, false, null));
@@ -4301,22 +4302,33 @@ public class P2SChatScreen extends Screen {
         return this.font.split(Component.literal(choice.prompt().trim()), contentWidth);
     }
 
-    private List<FormattedCharSequence> getTodoLines(int contentWidth) {
-        List<ClientSessionState.TodoItem> items = ClientSessionState.getTodoItems();
-        if (items.isEmpty()) {
+    private List<FormattedCharSequence> getPlanLines(int contentWidth) {
+        List<ClientSessionState.PlanItem> items = ClientSessionState.getPlanItems();
+        String explanation = ClientSessionState.getPlanExplanation();
+        if (items.isEmpty() && (explanation == null || explanation.isBlank())) {
             return List.of();
         }
         List<FormattedCharSequence> lines = new ArrayList<>();
-        String title = ClientSessionState.getTodoTitle();
-        if (title != null && !title.isBlank()) {
-            lines.addAll(this.font.split(Component.literal(title.trim()), contentWidth));
+        if (explanation != null && !explanation.isBlank()) {
+            lines.addAll(this.font.split(Component.literal(explanation.trim()).withStyle(ChatFormatting.GRAY, ChatFormatting.ITALIC), contentWidth));
+        }
+        if (items.isEmpty()) {
+            return lines;
         }
         int limit = Math.min(8, items.size());
         for (int i = 0; i < limit; i++) {
-            ClientSessionState.TodoItem item = items.get(i);
-            MutableComponent line = Component.literal("[")
-                    .append(P2SI18n.statusComponent(item.status()))
-                    .append(Component.literal("] " + item.id() + " " + item.content()));
+            ClientSessionState.PlanItem item = items.get(i);
+            String status = item.status() == null ? "pending" : item.status();
+            MutableComponent body = Component.literal(item.step());
+            if ("completed".equals(status)) {
+                body = body.withStyle(ChatFormatting.DARK_GRAY, ChatFormatting.STRIKETHROUGH);
+            } else if ("in_progress".equals(status)) {
+                body = body.withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD);
+            } else {
+                body = body.withStyle(ChatFormatting.GRAY);
+            }
+            String marker = "completed".equals(status) ? "✔ " : "□ ";
+            MutableComponent line = Component.literal(marker).append(body);
             lines.addAll(this.font.split(line, contentWidth));
         }
         int more = items.size() - limit;

@@ -24,7 +24,7 @@ P2S 是一个用于 Minecraft 结构生成与迭代编辑的 Fabric 模组，支
 - 客户端 agent： [ClientAgentManager](src/client/java/com/p2s/ClientAgentManager.java)
   - 客户端聊天面板发送消息时，本地调用 LLM（使用 `p2s_client.json` 的模型配置）。
   - 支持本地 skill 工具：`list_skills` / `read_skill` / `search_skill`。
-  - 支持显式计划工具：`get_todo` / `set_todo` / `edit_todo_item` / `delete_todo_item` / `clear_todo`。
+  - 支持 Codex 风格计划工具：`update_plan`（可选 `explanation` + `plan[]`，状态为 `pending` / `in_progress` / `completed`）。
   - 支持审批选项工具：`request_user_choice` / `clear_user_choice`（用户在聊天 UI 里点选后继续流程）。
   - 支持 subagent 管理工具：`list_subagents` / `create_subagent` / `get_subagent` / `delete_subagent` / `list_profiles` / `get_profile`。
 - 服务端工具桥接： [ClientToolBridge](src/client/java/com/p2s/ClientToolBridge.java)
@@ -151,7 +151,7 @@ P2S 是一个用于 Minecraft 结构生成与迭代编辑的 Fabric 模组，支
 说明：
 - 客户端聊天面板使用 `p2s_client.json` 的 LLM 配置（包括 `apiKey`）。
 - 进入聊天面板后点 `Config`，可在 `LLM` / `Skills` 页面直接编辑。
-- 聊天面板会显示 todo 清单与待选择项；当 agent 发起 `request_user_choice` 后，需先点选选项再继续。
+- 聊天面板会显示计划清单与待选择项；当 agent 发起 `request_user_choice` 后，需先点选选项再继续。
 
 ### Subagent Profile 配置
 

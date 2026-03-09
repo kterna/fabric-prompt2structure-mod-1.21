@@ -39,8 +39,8 @@ public final class SessionPersistence {
             int messageCount,
             List<JsonObject> llmHistory,
             List<ChatMessageEntry> chatLog,
-            List<TodoItemEntry> todoItems,
-            String todoTitle,
+            List<PlanItemEntry> planItems,
+            String planExplanation,
             String selectedWorkspacePath,
             ChoiceRequestEntry pendingChoice
     ) {
@@ -49,7 +49,7 @@ public final class SessionPersistence {
     public record ChatMessageEntry(String id, String role, String text, String kind, String detail) {
     }
 
-    public record TodoItemEntry(String id, String content, String status) {
+    public record PlanItemEntry(String step, String status) {
     }
 
     public record ChoiceRequestEntry(String requestId, String prompt, List<ChoiceOptionEntry> options) {
@@ -72,7 +72,8 @@ public final class SessionPersistence {
             sessionJson.addProperty("createdAt", session.createdAt());
             sessionJson.addProperty("updatedAt", session.updatedAt());
             sessionJson.addProperty("messageCount", session.messageCount());
-            sessionJson.addProperty("todoTitle", session.todoTitle() == null ? "" : session.todoTitle());
+            String planExplanation = session.planExplanation() == null ? "" : session.planExplanation();
+            sessionJson.addProperty("planExplanation", planExplanation);
             sessionJson.addProperty("selectedWorkspacePath", session.selectedWorkspacePath() == null ? "" : session.selectedWorkspacePath());
 
             JsonArray historyArray = new JsonArray();
@@ -97,17 +98,16 @@ public final class SessionPersistence {
             }
             sessionJson.add("chatLog", chatArray);
 
-            JsonArray todoArray = new JsonArray();
-            if (session.todoItems() != null) {
-                for (TodoItemEntry item : session.todoItems()) {
+            JsonArray planArray = new JsonArray();
+            if (session.planItems() != null) {
+                for (PlanItemEntry item : session.planItems()) {
                     JsonObject obj = new JsonObject();
-                    obj.addProperty("id", item.id() == null ? "" : item.id());
-                    obj.addProperty("content", item.content() == null ? "" : item.content());
+                    obj.addProperty("step", item.step() == null ? "" : item.step());
                     obj.addProperty("status", item.status() == null ? "pending" : item.status());
-                    todoArray.add(obj);
+                    planArray.add(obj);
                 }
             }
-            sessionJson.add("todoItems", todoArray);
+            sessionJson.add("planItems", planArray);
 
             if (session.pendingChoice() != null) {
                 JsonObject pendingChoice = new JsonObject();
@@ -227,14 +227,14 @@ public final class SessionPersistence {
                 }
             }
 
-            List<TodoItemEntry> todoItems = new ArrayList<>();
-            if (root.has("todoItems") && root.get("todoItems").isJsonArray()) {
-                for (JsonElement elem : root.getAsJsonArray("todoItems")) {
+            List<PlanItemEntry> planItems = new ArrayList<>();
+            if (root.has("planItems") && root.get("planItems").isJsonArray()) {
+                for (JsonElement elem : root.getAsJsonArray("planItems")) {
                     if (!elem.isJsonObject()) {
                         continue;
                     }
                     JsonObject obj = elem.getAsJsonObject();
-                    todoItems.add(new TodoItemEntry(getStr(obj, "id"), getStr(obj, "content"), getStr(obj, "status")));
+                    planItems.add(new PlanItemEntry(getStr(obj, "step"), getStr(obj, "status")));
                 }
             }
 
@@ -271,8 +271,8 @@ public final class SessionPersistence {
                     getInt(root, "messageCount"),
                     llmHistory,
                     chatLog,
-                    todoItems,
-                    getStr(root, "todoTitle"),
+                    planItems,
+                    getStr(root, "planExplanation"),
                     getStr(root, "selectedWorkspacePath"),
                     pendingChoice
             );
