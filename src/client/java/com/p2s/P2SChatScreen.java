@@ -9,6 +9,7 @@ import com.p2s.screen.chat.P2SChatContextWidgets;
 import com.p2s.screen.chat.P2SChatSessionWidgets;
 import com.p2s.screen.chat.P2SWorkspaceExplorerComponent;
 import com.p2s.screen.widget.P2SFlatButton;
+import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.AbstractWidget;
@@ -51,6 +52,7 @@ public class P2SChatScreen extends Screen {
     private static final int CONTEXT_SELECTION_CONFIRM_HEIGHT = 54;
     private static final int CONTEXT_SELECTION_CONFIRM_BUTTON_WIDTH = 56;
     private static final int CONTEXT_SELECTION_CONFIRM_BUTTON_HEIGHT = 18;
+    private static final int CONTEXT_COLLAPSED_FOOTER_HEIGHT = 24;
     private static final int DOCK_SPLITTER_WIDTH = 4;
     private static final int DOCK_COLLAPSED_WIDTH = 22;
     private static final int DOCK_TOGGLE_BUTTON_SIZE = 18;
@@ -123,6 +125,7 @@ public class P2SChatScreen extends Screen {
     private Button contextFormatButton;
     private Button contextClearButton;
     private Button contextClearQueueButton;
+    private Button contextEditorToggleButton;
     private Button contextApplyButton;
     private Button contextDiscardButton;
     private Button contextDiffPrevButton;
@@ -177,8 +180,10 @@ public class P2SChatScreen extends Screen {
     private int currentExplorerSplitterX = 0;
     private boolean sessionPanelCollapsed = false;
     private boolean explorerPanelCollapsed = false;
+    private boolean contextEditorCollapsed = false;
     private boolean draggingSessionSplitter = false;
     private boolean draggingExplorerSplitter = false;
+    private boolean gameplayInputActive = false;
     private boolean contextDiffMode = false;
     private final List<DiffViewLine> contextDiffLines = new ArrayList<>();
     private final List<Integer> contextDiffChangeRows = new ArrayList<>();
@@ -193,6 +198,8 @@ public class P2SChatScreen extends Screen {
     private final Set<String> collapsedWorkspaceFolders = new LinkedHashSet<>();
     private String workspaceExpandedSelectionPath = "";
     private String selectedExplorerFolderPath = "";
+
+    private PanelFocus collapsedPanelFocus = PanelFocus.NONE;
 
     public P2SChatScreen() {
         super(P2SI18n.tr("screen.p2s.chat.title"));
@@ -275,6 +282,151 @@ public class P2SChatScreen extends Screen {
         createWidgets();
     }
 
+    private void toggleContextEditor() {
+        contextEditorCollapsed = !contextEditorCollapsed;
+        if (contextEditorCollapsed) {
+            contextEditorFocused = false;
+            contextMouseSelecting = false;
+            hideContextSelectionConfirm();
+            collapsedPanelFocus = PanelFocus.NONE;
+        } else {
+            collapsedPanelFocus = PanelFocus.LEFT;
+            setContextEditorFocused(true);
+        }
+        createWidgets();
+    }
+
+    private PanelFocus effectiveCollapsedPanelFocus() {
+        if (!contextEditorCollapsed) {
+            return PanelFocus.NONE;
+        }
+        if (workspaceCreateMode || workspaceRenameMode) {
+            return PanelFocus.LEFT;
+        }
+        if (discardReasonMode || choicePopupVisible || infoOverlayVisible) {
+            return PanelFocus.RIGHT;
+        }
+        return collapsedPanelFocus;
+    }
+
+    private boolean hasPinnedCollapsedPanelFocus() {
+        return workspaceCreateMode || workspaceRenameMode || discardReasonMode || choicePopupVisible || infoOverlayVisible;
+    }
+
+    private boolean shouldUseGameplayInput() {
+        return contextEditorCollapsed
+                && effectiveCollapsedPanelFocus() == PanelFocus.NONE
+                && !contextSelectionConfirmVisible;
+    }
+
+    private boolean isGameplayInputActive() {
+        return gameplayInputActive && shouldUseGameplayInput();
+    }
+
+    private void syncGameplayInputMode() {
+        boolean next = shouldUseGameplayInput();
+        if (this.minecraft == null || gameplayInputActive == next) {
+            if (next) {
+                KeyMapping.setAll();
+            }
+            gameplayInputActive = next;
+            return;
+        }
+        if (next) {
+            this.minecraft.mouseHandler.grabMouse();
+            KeyMapping.setAll();
+        } else {
+            this.minecraft.mouseHandler.releaseMouse();
+            KeyMapping.releaseAll();
+        }
+        gameplayInputActive = next;
+    }
+
+    private void clearAllPanelTextFocus() {
+        if (input != null) {
+            input.setFocused(false);
+        }
+        if (workspaceCreateInput != null) {
+            workspaceCreateInput.setFocused(false);
+        }
+        if (workspaceRenameInput != null) {
+            workspaceRenameInput.setFocused(false);
+        }
+        if (checkpointNameInput != null) {
+            checkpointNameInput.setFocused(false);
+        }
+        if (choiceCustomInput != null) {
+            choiceCustomInput.setFocused(false);
+        }
+        if (discardReasonInput != null) {
+            discardReasonInput.setFocused(false);
+        }
+    }
+
+    private void applyCollapsedPanelFocusState() {
+        if (!contextEditorCollapsed) {
+            syncGameplayInputMode();
+            return;
+        }
+        clearAllPanelTextFocus();
+        switch (effectiveCollapsedPanelFocus()) {
+            case LEFT -> {
+                if (workspaceCreateMode && workspaceCreateInput != null) {
+                    workspaceCreateInput.setFocused(true);
+                } else if (workspaceRenameMode && workspaceRenameInput != null) {
+                    workspaceRenameInput.setFocused(true);
+                }
+            }
+            case RIGHT -> {
+                if (discardReasonMode && discardReasonInput != null) {
+                    discardReasonInput.setFocused(true);
+                } else if (choicePopupVisible && choiceCustomInput != null) {
+                    choiceCustomInput.setFocused(true);
+                } else if (!infoOverlayVisible && input != null) {
+                    input.setFocused(true);
+                }
+            }
+            case NONE -> {
+            }
+        }
+        syncGameplayInputMode();
+    }
+
+    private void setCollapsedPanelFocus(PanelFocus focus) {
+        collapsedPanelFocus = focus == null ? PanelFocus.NONE : focus;
+        if (collapsedPanelFocus == PanelFocus.NONE) {
+            contextEditorFocused = false;
+            contextMouseSelecting = false;
+        }
+        applyCollapsedPanelFocusState();
+    }
+
+    private void cycleCollapsedPanelFocus(int direction) {
+        PanelFocus[] order = {PanelFocus.NONE, PanelFocus.LEFT, PanelFocus.RIGHT};
+        int currentIndex = 0;
+        for (int index = 0; index < order.length; index++) {
+            if (order[index] == collapsedPanelFocus) {
+                currentIndex = index;
+                break;
+            }
+        }
+        int nextIndex = Math.floorMod(currentIndex + direction, order.length);
+        setCollapsedPanelFocus(order[nextIndex]);
+    }
+
+    private int getContextDockRight(int panelX) {
+        return contextEditorCollapsed ? currentExplorerSplitterX : panelX;
+    }
+
+    private boolean isInsideLeftDock(double mouseX, double mouseY, int panelX) {
+        int right = getContextDockRight(panelX);
+        return mouseX >= 0 && mouseX < right && mouseY >= 0 && mouseY < this.height;
+    }
+
+    private boolean isInsideSessionPanel(double mouseX, double mouseY, int panelX, int panelWidth) {
+        return mouseX >= panelX && mouseX < panelX + panelWidth && mouseY >= 0 && mouseY < this.height;
+    }
+
     private boolean isInsideSessionSplitter(double mouseX, double mouseY) {
         if (sessionPanelCollapsed) {
             return false;
@@ -345,6 +497,19 @@ public class P2SChatScreen extends Screen {
                 P2SFlatButton.Variant.MUTED
         ));
 
+        int contextEditorToggleX = contextEditorCollapsed
+                ? Math.max(PADDING + 2, currentExplorerSplitterX + DOCK_SPLITTER_WIDTH + 2)
+                : Math.max(PADDING + 2, currentExplorerSplitterX + DOCK_SPLITTER_WIDTH + 2);
+        contextEditorToggleButton = addRenderableWidget(new P2SFlatButton(
+                contextEditorToggleX,
+                PADDING,
+                DOCK_TOGGLE_BUTTON_SIZE,
+                DOCK_TOGGLE_BUTTON_SIZE,
+                Component.literal(contextEditorCollapsed ? ">" : "<"),
+                btn -> toggleContextEditor(),
+                P2SFlatButton.Variant.MUTED
+        ));
+
         int sessionToggleX = sessionPanelCollapsed ? panelX + 2 : Math.max(panelX - DOCK_TOGGLE_BUTTON_SIZE - DOCK_SPLITTER_WIDTH - 2, PADDING + 2);
         Button sessionToggle = addRenderableWidget(new P2SFlatButton(
                 sessionToggleX,
@@ -386,6 +551,7 @@ public class P2SChatScreen extends Screen {
             discardReasonInput = null;
             discardOkButton = null;
             discardCancelButton = null;
+            applyCollapsedPanelFocusState();
             return;
         }
 
@@ -494,6 +660,7 @@ public class P2SChatScreen extends Screen {
                 input.setFocused(false);
             }
         }
+        applyCollapsedPanelFocusState();
     }
 
     private void initContextWidgets(int panelX) {
@@ -559,6 +726,7 @@ public class P2SChatScreen extends Screen {
                         EDITOR_MIN_WIDTH,
                         6,
                         explorerPanelCollapsed,
+                        contextEditorCollapsed,
                         workspaceCreateMode,
                         workspaceCreateFolderMode,
                         workspaceRenameMode,
@@ -662,12 +830,13 @@ public class P2SChatScreen extends Screen {
         workspaceCreateMode = true;
         workspaceCreateFolderMode = false;
         workspaceRenameMode = false;
+        collapsedPanelFocus = PanelFocus.LEFT;
         workspaceCreateDraft = defaultNewWorkspaceFilePath();
         createWidgets();
         if (workspaceCreateInput != null) {
             workspaceCreateInput.setFocused(true);
         }
-        if (input != null) {
+        if (!contextEditorCollapsed && input != null) {
             input.setFocused(false);
         }
         setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.create_workspace_file"), 0xAAD5FF);
@@ -677,12 +846,13 @@ public class P2SChatScreen extends Screen {
         workspaceCreateMode = true;
         workspaceCreateFolderMode = true;
         workspaceRenameMode = false;
+        collapsedPanelFocus = PanelFocus.LEFT;
         workspaceCreateDraft = defaultNewWorkspaceFolderPath();
         createWidgets();
         if (workspaceCreateInput != null) {
             workspaceCreateInput.setFocused(true);
         }
-        if (input != null) {
+        if (!contextEditorCollapsed && input != null) {
             input.setFocused(false);
         }
         setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.create_workspace_folder"), 0xAAD5FF);
@@ -693,7 +863,7 @@ public class P2SChatScreen extends Screen {
         workspaceCreateFolderMode = false;
         workspaceCreateDraft = "";
         createWidgets();
-        if (input != null) {
+        if (!contextEditorCollapsed && input != null) {
             input.setFocused(true);
         }
     }
@@ -2368,6 +2538,10 @@ public class P2SChatScreen extends Screen {
     }
 
     private void setContextEditorFocused(boolean focused) {
+        if (contextEditorCollapsed) {
+            contextEditorFocused = false;
+            return;
+        }
         contextEditorFocused = focused;
         if (!focused) {
             return;
@@ -2378,6 +2552,9 @@ public class P2SChatScreen extends Screen {
     }
 
     private boolean isInsideContextEditor(double mouseX, double mouseY) {
+        if (contextEditorCollapsed || contextEditorWidth <= 0 || contextEditorHeight <= 0) {
+            return false;
+        }
         return mouseX >= contextEditorX && mouseX < contextEditorX + contextEditorWidth
                 && mouseY >= contextEditorY && mouseY < contextEditorY + contextEditorHeight;
     }
@@ -2621,6 +2798,21 @@ public class P2SChatScreen extends Screen {
             hideContextSelectionConfirm();
         }
 
+        if (contextEditorCollapsed && !hasPinnedCollapsedPanelFocus()) {
+            if (keyCode == GLFW.GLFW_KEY_TAB) {
+                cycleCollapsedPanelFocus(hasShiftDown() ? -1 : 1);
+                return true;
+            }
+            if (keyCode == GLFW.GLFW_KEY_ESCAPE && collapsedPanelFocus != PanelFocus.NONE) {
+                setCollapsedPanelFocus(PanelFocus.NONE);
+                return true;
+            }
+        }
+
+        if (isGameplayInputActive()) {
+            return false;
+        }
+
         if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
             onClose();
             return true;
@@ -2668,6 +2860,9 @@ public class P2SChatScreen extends Screen {
         if (choicePopupVisible && choiceCustomInput != null && choiceCustomInput.charTyped(codePoint, modifiers)) {
             return true;
         }
+        if (isGameplayInputActive()) {
+            return false;
+        }
         if (handleContextEditorCharTyped(codePoint, modifiers)) {
             return true;
         }
@@ -2681,6 +2876,15 @@ public class P2SChatScreen extends Screen {
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        if (isGameplayInputActive()) {
+            return false;
+        }
+
+        int panelWidth = getPanelWidth();
+        int panelX = getPanelX(panelWidth);
+        boolean insideLeftDock = isInsideLeftDock(mouseX, mouseY, panelX);
+        boolean insideSessionPanel = isInsideSessionPanel(mouseX, mouseY, panelX, panelWidth);
+
         if (button == 0 && isInsideSessionSplitter(mouseX, mouseY)) {
             draggingSessionSplitter = true;
             return true;
@@ -2692,8 +2896,6 @@ public class P2SChatScreen extends Screen {
 
         // Handle info overlay clicks
         if (button == 0 && infoOverlayVisible) {
-            int panelWidth = getPanelWidth();
-            int panelX = getPanelX(panelWidth);
             int overlayLeft = panelX + PADDING;
             int overlayTop = getMessageTop(panelWidth);
             int overlayBottom = getMessageBottom();
@@ -2742,11 +2944,22 @@ public class P2SChatScreen extends Screen {
             }
         }
 
+        if (button == 0 && contextEditorCollapsed) {
+            if (insideLeftDock) {
+                setCollapsedPanelFocus(PanelFocus.LEFT);
+            } else if (insideSessionPanel) {
+                setCollapsedPanelFocus(PanelFocus.RIGHT);
+            }
+        }
+
         if (button == 0 && !sessionPanelCollapsed && !infoOverlayVisible && toggleToolLogAt(mouseX, mouseY)) {
             return true;
         }
 
         if (button == 0 && handleExplorerClick(mouseX, mouseY)) {
+            if (contextEditorCollapsed) {
+                setCollapsedPanelFocus(PanelFocus.LEFT);
+            }
             contextEditorFocused = false;
             contextMouseSelecting = false;
             return true;
@@ -2783,11 +2996,27 @@ public class P2SChatScreen extends Screen {
         if (contextEditorFocused) {
             contextEditorFocused = false;
         }
-        return super.mouseClicked(mouseX, mouseY, button);
+        boolean handled = super.mouseClicked(mouseX, mouseY, button);
+        if (handled) {
+            return true;
+        }
+        if (button == 0 && contextEditorCollapsed) {
+            if (insideLeftDock || insideSessionPanel) {
+                return true;
+            }
+            if (!hasPinnedCollapsedPanelFocus() && effectiveCollapsedPanelFocus() != PanelFocus.NONE) {
+                setCollapsedPanelFocus(PanelFocus.NONE);
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override
     public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
+        if (isGameplayInputActive()) {
+            return false;
+        }
         if (button == 0 && draggingSessionSplitter) {
             updateSessionWidthFromMouse(mouseX);
             createWidgets();
@@ -2811,6 +3040,9 @@ public class P2SChatScreen extends Screen {
 
     @Override
     public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        if (isGameplayInputActive()) {
+            return false;
+        }
         if (button == 0) {
             boolean releasedSplitter = draggingSessionSplitter || draggingExplorerSplitter;
             draggingSessionSplitter = false;
@@ -2828,6 +3060,9 @@ public class P2SChatScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+        if (isGameplayInputActive()) {
+            return false;
+        }
         if (choicePopupVisible && isInsideChoicePopup(mouseX, mouseY)) {
             return true;
         }
@@ -2854,6 +3089,9 @@ public class P2SChatScreen extends Screen {
             int delta = verticalAmount > 0 ? -step : verticalAmount < 0 ? step : 0;
             explorerScrollOffset = clamp(explorerScrollOffset + delta, 0, getExplorerMaxScroll());
             return true;
+        }
+        if (contextEditorCollapsed && mouseX < panelX) {
+            return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
         }
         if (mouseX < panelX) {
             int delta = verticalAmount > 0 ? -3 : 3;
@@ -3008,6 +3246,8 @@ public class P2SChatScreen extends Screen {
             }
         }
 
+        applyCollapsedPanelFocusState();
+
         super.render(gfx, mouseX, mouseY, delta);
     }
 
@@ -3017,17 +3257,26 @@ public class P2SChatScreen extends Screen {
     }
 
     private void drawContextPanel(GuiGraphics gfx, int panelX, int mouseX, int mouseY) {
-        if (panelX <= 0) {
+        int contextPanelRight = getContextDockRight(panelX);
+        if (contextPanelRight <= 0) {
             return;
         }
-        gfx.fill(0, 0, panelX, this.height, 0xC0141A26);
-        gfx.fill(panelX - 1, 0, panelX, this.height, 0xFF2F3A4D);
+        gfx.fill(0, 0, contextPanelRight, this.height, 0xC0141A26);
+        gfx.fill(contextPanelRight - 1, 0, contextPanelRight, this.height, 0xFF2F3A4D);
         explorerHitAreas.clear();
         if (explorerPanelCollapsed) {
             drawCollapsedExplorerRail(gfx);
         } else {
             drawExplorerHeader(gfx);
             drawWorkspaceExplorer(gfx, mouseX, mouseY);
+        }
+
+        if (contextEditorCollapsed) {
+            if (contextStatus != null && !contextStatus.getString().isBlank()) {
+                String status = trimEndToWidth(contextStatus.getString(), Math.max(40, contextPanelRight - PADDING * 2));
+                gfx.drawString(this.font, status, PADDING, this.height - CONTEXT_COLLAPSED_FOOTER_HEIGHT + 6, contextStatusColor, false);
+            }
+            return;
         }
 
         int x = PADDING;
@@ -3277,6 +3526,9 @@ public class P2SChatScreen extends Screen {
     }
 
     private void drawContextEditor(GuiGraphics gfx) {
+        if (contextEditorCollapsed) {
+            return;
+        }
         if (contextDiffMode) {
             drawContextDiffEditor(gfx);
             return;
@@ -4140,6 +4392,7 @@ public class P2SChatScreen extends Screen {
         workspaceCreateFolderMode = false;
         workspaceCreateDraft = "";
         workspaceRenameMode = true;
+        collapsedPanelFocus = PanelFocus.LEFT;
         String selectedName = ClientSessionState.getSelectedWorkspaceLabel();
         workspaceRenameDraft = selectedName == null ? "" : selectedName;
         createWidgets();
@@ -4148,7 +4401,7 @@ public class P2SChatScreen extends Screen {
         } else if (workspaceRenameInput != null) {
             workspaceRenameInput.setFocused(true);
         }
-        if (input != null) {
+        if (!contextEditorCollapsed && input != null) {
             input.setFocused(false);
         }
         setContextStatus(P2SI18n.tr("screen.p2s.chat.context.status.rename_workspace"), 0xAAD5FF);
@@ -4158,7 +4411,7 @@ public class P2SChatScreen extends Screen {
         workspaceRenameMode = false;
         workspaceRenameDraft = "";
         createWidgets();
-        if (input != null) {
+        if (!contextEditorCollapsed && input != null) {
             input.setFocused(true);
         }
     }
@@ -4394,11 +4647,12 @@ public class P2SChatScreen extends Screen {
             return;
         }
         choicePopupVisible = true;
+        collapsedPanelFocus = PanelFocus.RIGHT;
         infoOverlayVisible = false;
         if (choiceCustomInput != null) {
             choiceCustomInput.setFocused(true);
         }
-        if (input != null) {
+        if (!contextEditorCollapsed && input != null) {
             input.setFocused(false);
         }
     }
@@ -4409,9 +4663,10 @@ public class P2SChatScreen extends Screen {
             choiceCustomInput.setFocused(false);
         }
         choicePopupVisible = false;
-        if (!discardReasonMode && input != null) {
+        if (!contextEditorCollapsed && !discardReasonMode && input != null) {
             input.setFocused(true);
         }
+        applyCollapsedPanelFocusState();
     }
 
     private static int roleColor(String role) {
@@ -4446,6 +4701,7 @@ public class P2SChatScreen extends Screen {
             return;
         }
         discardReasonMode = true;
+        collapsedPanelFocus = PanelFocus.RIGHT;
         if (choicePopupVisible) {
             closeChoicePopup();
         }
@@ -4453,7 +4709,7 @@ public class P2SChatScreen extends Screen {
             discardReasonInput.setValue("");
             discardReasonInput.setFocused(true);
         }
-        if (input != null) {
+        if (!contextEditorCollapsed && input != null) {
             input.setFocused(false);
         }
     }
@@ -4464,9 +4720,10 @@ public class P2SChatScreen extends Screen {
             discardReasonInput.setValue("");
             discardReasonInput.setFocused(false);
         }
-        if (input != null) {
+        if (!contextEditorCollapsed && input != null) {
             input.setFocused(true);
         }
+        applyCollapsedPanelFocusState();
     }
 
     private void confirmDiscard() {
@@ -4544,6 +4801,12 @@ public class P2SChatScreen extends Screen {
     }
 
     private record ContextSelectionRange(int startLine, int startColumn, int endLine, int endColumn) {
+    }
+
+    private enum PanelFocus {
+        NONE,
+        LEFT,
+        RIGHT
     }
 
     private enum DiffOpType {

@@ -38,6 +38,7 @@ public final class P2SChatContextWidgets {
             int editorMinWidth,
             int splitGap,
             boolean explorerPanelCollapsed,
+            boolean contextEditorCollapsed,
             boolean workspaceCreateMode,
             boolean workspaceCreateFolderMode,
             boolean workspaceRenameMode,
@@ -117,6 +118,7 @@ public final class P2SChatContextWidgets {
         int currentExplorerSplitterX = leftX + config.explorerWidth();
         int editorXBase = leftX + config.explorerWidth() + config.splitGap();
         int editorWidth = Math.max(config.editorMinWidth(), leftWidth - config.explorerWidth() - config.splitGap());
+        int reservedFooterHeight = config.contextEditorCollapsed() ? 24 : config.contextFooterHeight();
         int rowGap = 4;
         int row1Y = config.padding();
         int row2Y = row1Y + config.inputHeight() + rowGap;
@@ -172,7 +174,7 @@ public final class P2SChatContextWidgets {
                             explorerRow2Y,
                             config.explorerWidth(),
                             config.inputHeight(),
-                            config.contextFooterHeight(),
+                            reservedFooterHeight,
                             config.workspaceCreateMode(),
                             config.workspaceCreateFolderMode(),
                             config.workspaceRenameMode(),
@@ -215,130 +217,149 @@ public final class P2SChatContextWidgets {
             explorerRows = explorer.rows();
         }
 
-        int row1ButtonCount = 5;
-        int row1ButtonWidth = Math.max(40, (editorWidth - rowGap * (row1ButtonCount - 1)) / row1ButtonCount);
-        int row1X = editorXBase;
+        Button contextLoadButton = null;
+        Button contextSaveButton = null;
+        Button contextClearQueueButton = null;
+        Button contextFormatButton = null;
+        Button contextClearButton = null;
+        Button contextApplyButton = null;
+        Button contextDiscardButton = null;
+        Button contextDiffPrevButton = null;
+        Button contextDiffNextButton = null;
 
-        Button contextLoadButton = host.addButton(new P2SFlatButton(
-                row1X,
-                row1Y,
-                row1ButtonWidth,
-                config.inputHeight(),
-                P2SI18n.tr(config.selectedWorkspacePending() || config.inlineDiffMode()
-                        ? "screen.p2s.common.refresh"
-                        : "screen.p2s.chat.context.fetch"),
-                btn -> {
-                    if (config.selectedWorkspacePending() || config.inlineDiffMode()) {
-                        config.onLoadWorkspaceDiff().run();
-                    } else {
-                        config.onFetchWorkspaceScript().run();
-                    }
-                },
-                P2SFlatButton.Variant.MUTED
-        ));
-        row1X += row1ButtonWidth + rowGap;
-
-        Button contextSaveButton = host.addButton(new P2SFlatButton(
-                row1X,
-                row1Y,
-                row1ButtonWidth,
-                config.inputHeight(),
-                P2SI18n.tr("screen.p2s.common.save"),
-                btn -> config.onSaveWorkspaceScript().run(),
-                P2SFlatButton.Variant.PRIMARY
-        ));
-        row1X += row1ButtonWidth + rowGap;
-
-        Button contextFormatButton = host.addButton(new P2SFlatButton(
-                row1X,
-                row1Y,
-                row1ButtonWidth,
-                config.inputHeight(),
-                P2SI18n.tr("screen.p2s.chat.context.format"),
-                btn -> config.onFormatContextToml().run(),
-                P2SFlatButton.Variant.NORMAL
-        ));
-        row1X += row1ButtonWidth + rowGap;
-
-        Button contextClearButton = host.addButton(new P2SFlatButton(
-                row1X,
-                row1Y,
-                row1ButtonWidth,
-                config.inputHeight(),
-                P2SI18n.tr("screen.p2s.chat.context.clear"),
-                btn -> config.onClearContextEditor().run(),
-                P2SFlatButton.Variant.NORMAL
-        ));
-        row1X += row1ButtonWidth + rowGap;
-
-        Button contextClearQueueButton = host.addButton(new P2SFlatButton(
-                row1X,
-                row1Y,
-                row1ButtonWidth,
-                config.inputHeight(),
-                P2SI18n.tr("screen.p2s.chat.context.clear_queue"),
-                btn -> config.onClearContextQueue().run(),
-                P2SFlatButton.Variant.NORMAL
-        ));
-
-        int row2ButtonCount = 4;
-        int row2ButtonWidth = Math.max(40, (editorWidth - rowGap * (row2ButtonCount - 1)) / row2ButtonCount);
-        int row2X = editorXBase;
-
-        Button contextApplyButton = host.addButton(new P2SFlatButton(
-                row2X,
-                row2Y,
-                row2ButtonWidth,
-                config.inputHeight(),
-                P2SI18n.tr("screen.p2s.chat.apply"),
-                btn -> config.onApplyPatch().run(),
-                P2SFlatButton.Variant.PRIMARY
-        ));
-        row2X += row2ButtonWidth + rowGap;
-
-        Button contextDiscardButton = host.addButton(new P2SFlatButton(
-                row2X,
-                row2Y,
-                row2ButtonWidth,
-                config.inputHeight(),
-                P2SI18n.tr("screen.p2s.chat.discard"),
-                btn -> config.onEnterDiscardReasonMode().run(),
-                P2SFlatButton.Variant.DANGER
-        ));
-        row2X += row2ButtonWidth + rowGap;
-
-        Button contextDiffPrevButton = host.addButton(new P2SFlatButton(
-                row2X,
-                row2Y,
-                row2ButtonWidth,
-                config.inputHeight(),
-                Component.literal("<D"),
-                btn -> config.onNavigateDiffPrev().run(),
-                P2SFlatButton.Variant.MUTED
-        ));
-        row2X += row2ButtonWidth + rowGap;
-
-        Button contextDiffNextButton = host.addButton(new P2SFlatButton(
-                row2X,
-                row2Y,
-                row2ButtonWidth,
-                config.inputHeight(),
-                Component.literal("D>"),
-                btn -> config.onNavigateDiffNext().run(),
-                P2SFlatButton.Variant.MUTED
-        ));
-
-        int editorTop = row2Y + config.inputHeight() + 4;
-        int editorBottom = host.screenHeight() - config.contextFooterHeight();
-        int available = Math.max(0, editorBottom - editorTop);
-        int rowStep = config.contextRowHeight() + config.contextRowGap();
-        int contextVisibleRows = Math.max(4, Math.min(40, available / rowStep));
-        int renderedRows = Math.max(1, contextVisibleRows);
+        int contextVisibleRows = 0;
         int contextEditorX = editorXBase;
-        int contextEditorY = editorTop;
-        int contextEditorWidth = editorWidth;
-        int contextEditorHeight = renderedRows * rowStep - config.contextRowGap() + config.contextEditorPadding() * 2;
-        int contextQueueTopY = contextEditorY + contextEditorHeight + 6;
+        int contextEditorY = row2Y + config.inputHeight() + 4;
+        int contextEditorWidth = 0;
+        int contextEditorHeight = 0;
+        int contextQueueTopY = host.screenHeight() - reservedFooterHeight;
+
+        if (!config.contextEditorCollapsed()) {
+            int row1ButtonCount = 5;
+            int row1ButtonWidth = Math.max(40, (editorWidth - rowGap * (row1ButtonCount - 1)) / row1ButtonCount);
+            int row1X = editorXBase;
+
+            contextLoadButton = host.addButton(new P2SFlatButton(
+                    row1X,
+                    row1Y,
+                    row1ButtonWidth,
+                    config.inputHeight(),
+                    P2SI18n.tr(config.selectedWorkspacePending() || config.inlineDiffMode()
+                            ? "screen.p2s.common.refresh"
+                            : "screen.p2s.chat.context.fetch"),
+                    btn -> {
+                        if (config.selectedWorkspacePending() || config.inlineDiffMode()) {
+                            config.onLoadWorkspaceDiff().run();
+                        } else {
+                            config.onFetchWorkspaceScript().run();
+                        }
+                    },
+                    P2SFlatButton.Variant.MUTED
+            ));
+            row1X += row1ButtonWidth + rowGap;
+
+            contextSaveButton = host.addButton(new P2SFlatButton(
+                    row1X,
+                    row1Y,
+                    row1ButtonWidth,
+                    config.inputHeight(),
+                    P2SI18n.tr("screen.p2s.common.save"),
+                    btn -> config.onSaveWorkspaceScript().run(),
+                    P2SFlatButton.Variant.PRIMARY
+            ));
+            row1X += row1ButtonWidth + rowGap;
+
+            contextFormatButton = host.addButton(new P2SFlatButton(
+                    row1X,
+                    row1Y,
+                    row1ButtonWidth,
+                    config.inputHeight(),
+                    P2SI18n.tr("screen.p2s.chat.context.format"),
+                    btn -> config.onFormatContextToml().run(),
+                    P2SFlatButton.Variant.NORMAL
+            ));
+            row1X += row1ButtonWidth + rowGap;
+
+            contextClearButton = host.addButton(new P2SFlatButton(
+                    row1X,
+                    row1Y,
+                    row1ButtonWidth,
+                    config.inputHeight(),
+                    P2SI18n.tr("screen.p2s.chat.context.clear"),
+                    btn -> config.onClearContextEditor().run(),
+                    P2SFlatButton.Variant.NORMAL
+            ));
+            row1X += row1ButtonWidth + rowGap;
+
+            contextClearQueueButton = host.addButton(new P2SFlatButton(
+                    row1X,
+                    row1Y,
+                    row1ButtonWidth,
+                    config.inputHeight(),
+                    P2SI18n.tr("screen.p2s.chat.context.clear_queue"),
+                    btn -> config.onClearContextQueue().run(),
+                    P2SFlatButton.Variant.NORMAL
+            ));
+
+            int row2ButtonCount = 4;
+            int row2ButtonWidth = Math.max(40, (editorWidth - rowGap * (row2ButtonCount - 1)) / row2ButtonCount);
+            int row2X = editorXBase;
+
+            contextApplyButton = host.addButton(new P2SFlatButton(
+                    row2X,
+                    row2Y,
+                    row2ButtonWidth,
+                    config.inputHeight(),
+                    P2SI18n.tr("screen.p2s.chat.apply"),
+                    btn -> config.onApplyPatch().run(),
+                    P2SFlatButton.Variant.PRIMARY
+            ));
+            row2X += row2ButtonWidth + rowGap;
+
+            contextDiscardButton = host.addButton(new P2SFlatButton(
+                    row2X,
+                    row2Y,
+                    row2ButtonWidth,
+                    config.inputHeight(),
+                    P2SI18n.tr("screen.p2s.chat.discard"),
+                    btn -> config.onEnterDiscardReasonMode().run(),
+                    P2SFlatButton.Variant.DANGER
+            ));
+            row2X += row2ButtonWidth + rowGap;
+
+            contextDiffPrevButton = host.addButton(new P2SFlatButton(
+                    row2X,
+                    row2Y,
+                    row2ButtonWidth,
+                    config.inputHeight(),
+                    Component.literal("<D"),
+                    btn -> config.onNavigateDiffPrev().run(),
+                    P2SFlatButton.Variant.MUTED
+            ));
+            row2X += row2ButtonWidth + rowGap;
+
+            contextDiffNextButton = host.addButton(new P2SFlatButton(
+                    row2X,
+                    row2Y,
+                    row2ButtonWidth,
+                    config.inputHeight(),
+                    Component.literal("D>"),
+                    btn -> config.onNavigateDiffNext().run(),
+                    P2SFlatButton.Variant.MUTED
+            ));
+
+            int editorTop = row2Y + config.inputHeight() + 4;
+            int editorBottom = host.screenHeight() - config.contextFooterHeight();
+            int available = Math.max(0, editorBottom - editorTop);
+            int rowStep = config.contextRowHeight() + config.contextRowGap();
+            contextVisibleRows = Math.max(4, Math.min(40, available / rowStep));
+            int renderedRows = Math.max(1, contextVisibleRows);
+            contextEditorX = editorXBase;
+            contextEditorY = editorTop;
+            contextEditorWidth = editorWidth;
+            contextEditorHeight = renderedRows * rowStep - config.contextRowGap() + config.contextEditorPadding() * 2;
+            contextQueueTopY = contextEditorY + contextEditorHeight + 6;
+        }
 
         return new BuildResult(
                 currentExplorerSplitterX,
