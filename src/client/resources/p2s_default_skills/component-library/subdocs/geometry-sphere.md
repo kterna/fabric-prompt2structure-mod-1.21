@@ -17,7 +17,7 @@ description: "通过多层环形轮廓近似球体。"
 ## 示例（节选）
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "sphere_r4"
 
 [[operation.actions_add]]

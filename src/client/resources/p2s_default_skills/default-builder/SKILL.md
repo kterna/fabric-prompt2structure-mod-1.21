@@ -50,6 +50,7 @@ description: "建筑总控规则：定义动作协议、补丁策略，并在细
 - 对现有动作做精确匹配时，使用 `[[operation.old_actions]]` / `[[operation.new_actions]]`。
 - 小范围调整优先 `insert_actions` / `delete_actions` / `replace_actions`。
 - 整块新增/替换/删除优先 `insert_part` / `replace_part` / `delete_part`。
+- 创建全新 `part` 必须使用 `insert_part`；`insert_actions` 只用于给已存在的 `part` 追加动作。
 - 纯平移使用 `move_actions` + `offset = [dx, dy, dz]`。
 - palette 调整使用 `update_palette` + `[[operation.entry]]`。
 

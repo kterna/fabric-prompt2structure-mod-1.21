@@ -13,7 +13,7 @@ description: "多风格沙发模板（12+示例），覆盖单人/双人/三人/
 ## 1) 现代单人沙发
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "sofa_1"
 
 [[operation.actions_add]]
@@ -40,7 +40,7 @@ at = [[-1, 1, 0], [2, 1, 0]]
 ## 2) 皮质单人椅
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "sofa_2"
 
 [[operation.actions_add]]
@@ -67,7 +67,7 @@ at = [[-1, 1, 0], [2, 1, 0]]
 ## 3) 懒人沙发/豆袋
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "sofa_3"
 
 [[operation.actions_add]]
@@ -86,7 +86,7 @@ at = [[0, 1, 0], [1, 1, 0]]
 ## 4) 现代双人沙发
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "sofa_4"
 
 [[operation.actions_add]]
@@ -113,7 +113,7 @@ at = [[-1, 1, 0], [3, 1, 0]]
 ## 5) 复古双人沙发
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "sofa_5"
 
 [[operation.actions_add]]
@@ -140,7 +140,7 @@ at = [[-1, 1, 0], [-1, 1, 1], [3, 1, 0], [3, 1, 1]]
 ## 6) 三人沙发
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "sofa_6"
 
 [[operation.actions_add]]
@@ -176,7 +176,7 @@ to = [4, 1, 1]
 ## 7) 带躺椅三人沙发
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "sofa_7"
 
 [[operation.actions_add]]
@@ -205,7 +205,7 @@ to = [4, 0, 2]
 ## 8) L型沙发
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "sofa_8"
 
 [[operation.actions_add]]
@@ -247,7 +247,7 @@ at = [[5, 1, 0], [-1, 1, 4]]
 ## 9) 大型转角沙发
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "sofa_9"
 
 [[operation.actions_add]]
@@ -289,7 +289,7 @@ at = [[6, 1, 0], [-1, 1, 5]]
 ## 10) 藤编户外沙发
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "sofa_10"
 
 [[operation.actions_add]]
@@ -316,7 +316,7 @@ at = [[-1, 1, 0], [3, 1, 0]]
 ## 11) 石质户外长椅
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "sofa_11"
 
 [[operation.actions_add]]
@@ -335,7 +335,7 @@ at = [[0, 0, -1], [4, 0, -1]]
 ## 12) 沙发配件：抱枕 + 边几
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "sofa_12"
 
 [[operation.actions_add]]

@@ -10,7 +10,7 @@ description: "梁柱、轮廓线与细节点位的基础模式。"
 ## 梁柱
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "line_beam_pillar"
 
 [[operation.actions_add]]
@@ -29,7 +29,7 @@ to = [8, 5, 0]
 ## 点位细节
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "points_lights"
 
 [[operation.actions_add]]

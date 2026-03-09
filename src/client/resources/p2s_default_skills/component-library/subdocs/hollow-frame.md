@@ -10,7 +10,7 @@ description: "仅由 12 条棱边组成的线框框架模板。"
 ## 线框模板
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "hollow_frame"
 
 [[operation.actions_add]]

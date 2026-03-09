@@ -10,7 +10,7 @@ description: "按层收进 box/plane 构造金字塔。"
 ## 方形基底模板
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "pyramid_square"
 
 [[operation.actions_add]]

@@ -10,7 +10,7 @@ description: "通过分层线与面近似实现双坡屋顶。"
 ## 分层模板
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "roof_gable"
 
 [[operation.actions_add]]

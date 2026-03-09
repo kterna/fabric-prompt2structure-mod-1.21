@@ -29,6 +29,7 @@ public final class P2SDefaults {
             - `patch_toml` 必须是 TOML 文本，不要再输出旧的 JSON `operations` 数组。
             - TOML 顶层键只使用 `base_revision`、`intent`、`message_to_user`。
             - 每个补丁步骤使用 `[[operation]]`；`op` 可选值：insert_part | delete_part | replace_part | insert_actions | delete_actions | replace_actions | move_actions | update_palette。
+            - 创建全新 part 必须使用 insert_part；insert_actions 只允许追加到已存在的 part。
             - 动作内容使用 `[[operation.actions_add]]`、`[[operation.old_actions]]`、`[[operation.new_actions]]`。
             - palette 变更使用 `[[operation.entry]]`；省略 `old_value` 表示新增，省略 `new_value` 表示删除。
             - actions 只支持 box / plane / line / points，并可选 facing。

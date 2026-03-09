@@ -30,7 +30,7 @@ description: "现代极简的体量、材料、空间组织与模板。"
 ## 立面模板
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "modern_minimalist_1"
 
 [[operation.actions_add]]

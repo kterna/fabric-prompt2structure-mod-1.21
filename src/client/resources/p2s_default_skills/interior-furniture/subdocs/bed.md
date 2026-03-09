@@ -14,7 +14,7 @@ description: "多风格床体模板（10+示例），覆盖现代、中世纪、
 ## 1) 现代简约双人床
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "bed_1"
 
 [[operation.actions_add]]
@@ -42,7 +42,7 @@ to = [2, 1, 4]
 ## 2) 榻榻米床
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "bed_2"
 
 [[operation.actions_add]]
@@ -68,7 +68,7 @@ at = [[0, 2, 0], [1, 2, 0]]
 ## 3) 四柱大床（中世纪）
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "bed_3"
 
 [[operation.actions_add]]
@@ -119,7 +119,7 @@ at = [[0, 3, 0], [0, 3, 3], [2, 3, 0], [2, 3, 3]]
 ## 4) 稻草床（乡村）
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "bed_4"
 
 [[operation.actions_add]]
@@ -138,7 +138,7 @@ at = [[0, 1, 1], [1, 1, 1], [0, 1, 2], [1, 1, 2]]
 ## 5) 木质单人床
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "bed_5"
 
 [[operation.actions_add]]
@@ -173,7 +173,7 @@ to = [1, 1, 3]
 ## 6) 日式布团
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "bed_6"
 
 [[operation.actions_add]]
@@ -199,7 +199,7 @@ to = [2, 0, 3]
 ## 7) 中式架子床
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "bed_7"
 
 [[operation.actions_add]]
@@ -244,7 +244,7 @@ to = [3, 4, 4]
 ## 8) 上下铺
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "bed_8"
 
 [[operation.actions_add]]
@@ -285,7 +285,7 @@ to = [2, 4, 0]
 ## 9) 吊床
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "bed_9"
 
 [[operation.actions_add]]
@@ -303,7 +303,7 @@ to = [1, 1, 0]
 ## 10) 棺材床（哥特）
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "bed_10"
 
 [[operation.actions_add]]
@@ -334,7 +334,7 @@ to = [1, 0, 2]
 ## 11) 沙发床
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "bed_11"
 
 [[operation.actions_add]]

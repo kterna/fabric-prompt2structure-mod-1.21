@@ -10,7 +10,7 @@ description: "窗框、玻璃、窗台的可复用模板。"
 ## 窗口模板（宽 3 高 3）
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "window_module"
 
 [[operation.actions_add]]

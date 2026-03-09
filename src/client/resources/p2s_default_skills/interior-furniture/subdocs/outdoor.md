@@ -13,7 +13,7 @@ description: "多风格户外家具模板（13+示例），覆盖桌椅、秋千
 ## 1) 小庭院整体
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "outdoor_1"
 
 [[operation.actions_add]]
@@ -40,7 +40,7 @@ at = [[5, 0, 1], [6, 0, 1], [5, 0, 6], [6, 0, 6]]
 ## 2) 野餐桌
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "outdoor_2"
 
 [[operation.actions_add]]
@@ -72,7 +72,7 @@ at = [[0, 0, 0], [4, 0, 0]]
 ## 3) 木质躺椅
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "outdoor_3"
 
 [[operation.actions_add]]
@@ -95,7 +95,7 @@ at = [[0, 0, -1], [0, 0, 4]]
 ## 4) 单人秋千
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "outdoor_4"
 
 [[operation.actions_add]]
@@ -131,7 +131,7 @@ at = [[0, 1, 0]]
 ## 5) 双人秋千椅
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "outdoor_5"
 
 [[operation.actions_add]]
@@ -195,7 +195,7 @@ to = [1, 2, -1]
 ## 6) 简易凉亭
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "outdoor_6"
 
 [[operation.actions_add]]
@@ -234,7 +234,7 @@ to = [3, 3, 3]
 ## 7) 遮阳伞
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "outdoor_7"
 
 [[operation.actions_add]]
@@ -260,7 +260,7 @@ at = [[0, 3, 0]]
 ## 8) 藤架/葡萄架
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "outdoor_8"
 
 [[operation.actions_add]]
@@ -308,7 +308,7 @@ at = [[1, 2, 0], [2, 2, 3], [3, 2, 1]]
 ## 9) 花盆组合
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "outdoor_9"
 
 [[operation.actions_add]]
@@ -332,7 +332,7 @@ at = [[0, 2, 2]]
 ## 10) 喷泉
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "outdoor_10"
 
 [[operation.actions_add]]
@@ -362,7 +362,7 @@ at = [[0, 0, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]]
 ## 11) BBQ 烤架
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "outdoor_11"
 
 [[operation.actions_add]]
@@ -386,7 +386,7 @@ at = [[0, 2, 0], [2, 2, 0]]
 ## 12) 户外壁炉
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "outdoor_12"
 
 [[operation.actions_add]]
@@ -411,7 +411,7 @@ to = [1, 5, 0]
 ## 13) 鸟浴盆
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "outdoor_13"
 
 [[operation.actions_add]]

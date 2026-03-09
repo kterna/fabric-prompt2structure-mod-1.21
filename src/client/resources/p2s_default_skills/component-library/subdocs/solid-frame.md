@@ -10,7 +10,7 @@ description: "有厚度的梁柱框架，适合工业或重型风格。"
 ## 梁柱模板
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "solid_frame"
 
 [[operation.actions_add]]

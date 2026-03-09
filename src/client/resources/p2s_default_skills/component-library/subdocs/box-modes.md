@@ -10,7 +10,7 @@ description: "solid/shell/walls 的典型用法。"
 ## solid
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "box_solid"
 
 [[operation.actions_add]]
@@ -24,7 +24,7 @@ to = [6, 4, 6]
 ## shell
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "box_shell"
 
 [[operation.actions_add]]
@@ -38,7 +38,7 @@ to = [6, 4, 6]
 ## walls
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "box_walls"
 
 [[operation.actions_add]]

@@ -19,7 +19,7 @@ description: "哥特暗黑 的体量、材料与动作偏好。"
 ## 立面模板
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "gothic_noir_1"
 
 [[operation.actions_add]]

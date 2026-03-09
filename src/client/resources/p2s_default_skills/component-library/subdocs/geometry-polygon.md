@@ -10,7 +10,7 @@ description: "多边形底面 + 竖向拉伸的模板。"
 ## 六边形柱（近似）
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "polygon_hex_column"
 
 [[operation.actions_add]]

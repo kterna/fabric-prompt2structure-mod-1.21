@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 2026-03-09 Patch 工具语义对齐
+- 关闭中间编辑区后不再切到 gameplay input，避免界面保持收起态时无法重新操作。
+- 让聊天界面在重新打开时保留左目录 / 中编辑区 / 右会话栏的开启或关闭状态。
+- 修复聊天界面中间编辑区关闭按钮与“获取”按钮的重叠点击区域。
+- 清理 TOML patch 重构残留：移除 `upsert_part` 兼容路径，并恢复严格的 `insert_part` / `insert_actions` 语义分工。
+- 批量修正内置 skills / profiles 的 patch 示例与提示词，要求“新建 part 用 `insert_part`，已有 part 增量修改用 `insert_actions`”。
+
 ## 2025-11-30 基础版本落地
 - 完成 Fabric 模组初始化：工程骨架、构建/CI、主入口、命令系统、LLM 调用、结构构建与存档能力。
 - 配置与 Prompt 管理体系成型：支持多 prompt、active prompt 切换、`/p2sprompt` 管理命令，以及配置持久化。

@@ -13,7 +13,7 @@ description: "多风格收纳家具模板（10+示例），覆盖衣柜、书架
 ## 1) 现代衣柜（双门）
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "storage_1"
 
 [[operation.actions_add]]
@@ -48,7 +48,7 @@ at = [[0, 2, 1], [2, 2, 1]]
 ## 2) 中世纪木衣柜
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "storage_2"
 
 [[operation.actions_add]]
@@ -80,7 +80,7 @@ at = [[0, 2, 1], [1, 2, 1]]
 ## 3) 满墙书架
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "storage_3"
 
 [[operation.actions_add]]
@@ -104,7 +104,7 @@ at = [[4, 3, 0]]
 ## 4) 现代开放书架
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "storage_4"
 
 [[operation.actions_add]]
@@ -150,7 +150,7 @@ at = [[1, 1, 0], [2, 3, 0]]
 ## 5) 宝箱堆
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "storage_5"
 
 [[operation.actions_add]]
@@ -172,7 +172,7 @@ at = [[2, 0, 0]]
 ## 6) 储物架（三层）
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "storage_6"
 
 [[operation.actions_add]]
@@ -214,7 +214,7 @@ at = [[1, 1, 0], [2, 3, 0]]
 ## 7) 厨房橱柜组合（上下柜 + 台面）
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "storage_7"
 
 [[operation.actions_add]]
@@ -248,7 +248,7 @@ at = [[0, 0, 1], [1, 0, 1], [2, 0, 1], [3, 0, 1], [4, 0, 1]]
 ## 8) 玻璃展示柜
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "storage_8"
 
 [[operation.actions_add]]
@@ -307,7 +307,7 @@ at = [[1, 1, 1]]
 ## 9) 武器架
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "storage_9"
 
 [[operation.actions_add]]
@@ -327,7 +327,7 @@ at = [[1, 2, 0], [2, 2, 0]]
 ## 10) 行李箱（旅行风）
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "storage_10"
 
 [[operation.actions_add]]

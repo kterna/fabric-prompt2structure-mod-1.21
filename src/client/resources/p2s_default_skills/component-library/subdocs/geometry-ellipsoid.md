@@ -21,7 +21,7 @@ description: "通过多层变半径环形轮廓近似椭球体（三轴半径不
 ## 示例（扁平穹顶，节选）
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "ellipsoid_flat_dome"
 
 [[operation.actions_add]]
@@ -48,7 +48,7 @@ at = [[0, 3, 0]]
 ## 高蛋形（rx=3, ry=6, rz=3）示例（节选）
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "ellipsoid_tall_egg"
 
 [[operation.actions_add]]

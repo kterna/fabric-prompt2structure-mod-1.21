@@ -31,7 +31,7 @@ description: "城堡防御语汇、体量要素与动作模板。"
 ## 城墙+塔楼模板
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "medieval_castle_1"
 
 [[operation.actions_add]]

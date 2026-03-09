@@ -10,7 +10,7 @@ description: "用层层收进的 outline 平面构造四坡屋顶。"
 ## 层收进模板
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "roof_hip"
 
 [[operation.actions_add]]

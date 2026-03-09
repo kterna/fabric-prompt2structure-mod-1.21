@@ -10,7 +10,7 @@ description: "将曲线采样为折线点，再使用 line/points 绘制。"
 ## 采样折线示例
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "curve_bezier"
 
 [[operation.actions_add]]

@@ -14,7 +14,7 @@ description: "多风格椅子/凳子模板（10+示例），均为可平移复�
 ## 1) 现代办公椅
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "chair_1"
 
 [[operation.actions_add]]
@@ -47,7 +47,7 @@ at = [[-1, 0, -1], [1, 0, -1], [-1, 0, 1], [1, 0, 1]]
 ## 2) 吧台高脚椅
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "chair_2"
 
 [[operation.actions_add]]
@@ -74,7 +74,7 @@ to = [1, 1, 0]
 ## 3) 现代扶手椅
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "chair_3"
 
 [[operation.actions_add]]
@@ -108,7 +108,7 @@ to = [2, 1, 2]
 ## 4) 橡木餐椅
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "chair_4"
 
 [[operation.actions_add]]
@@ -135,7 +135,7 @@ to = [1, 3, 0]
 ## 5) 王座椅
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "chair_5"
 
 [[operation.actions_add]]
@@ -166,7 +166,7 @@ at = [[1, 5, 0]]
 ## 6) 酒馆长凳（双人）
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "chair_6"
 
 [[operation.actions_add]]
@@ -192,7 +192,7 @@ to = [3, 2, -1]
 ## 7) 日式坐垫
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "chair_7"
 
 [[operation.actions_add]]
@@ -212,7 +212,7 @@ at = [[0, 0, 0], [1, 0, 0], [0, 0, 1], [1, 0, 1]]
 ## 8) 中式太师椅
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "chair_8"
 
 [[operation.actions_add]]
@@ -246,7 +246,7 @@ to = [1, 3, 1]
 ## 9) 北欧木椅
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "chair_9"
 
 [[operation.actions_add]]
@@ -272,7 +272,7 @@ to = [1, 3, 0]
 ## 10) 工业铁椅
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "chair_10"
 
 [[operation.actions_add]]
@@ -305,7 +305,7 @@ to = [1, 2, 0]
 ## 11) 户外铁艺椅
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "chair_11"
 
 [[operation.actions_add]]
@@ -333,7 +333,7 @@ to = [1, 3, 0]
 ## 12) 赛博霓虹椅
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "chair_12"
 
 [[operation.actions_add]]
@@ -360,7 +360,7 @@ at = [[0, 2, 1], [1, 2, 1]]
 ## 13) 奇幻水晶椅
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "chair_13"
 
 [[operation.actions_add]]
@@ -385,7 +385,7 @@ at = [[0, 3, 1], [1, 3, 1]]
 ## 14) 长排候客椅（四座）
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "chair_14"
 
 [[operation.actions_add]]

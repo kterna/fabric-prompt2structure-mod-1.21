@@ -22,7 +22,7 @@ description: "精灵/自然建筑 的体量、材料与动作偏好。"
 ## 立面模板
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "fantasy_nature_1"
 
 [[operation.actions_add]]

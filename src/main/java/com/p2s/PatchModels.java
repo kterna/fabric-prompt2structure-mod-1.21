@@ -73,7 +73,7 @@ public final class PatchModels {
             this.error = error;
             this.expected = expected;
             this.actual = actual;
-            this.hint = "Read the workspace again with read_workspace_file and retry with corrected old_actions in patch_toml.";
+            this.hint = "Read the workspace again with read_workspace_file and retry with a patch_toml that matches the current TOML patch schema and workspace state.";
         }
     }
 

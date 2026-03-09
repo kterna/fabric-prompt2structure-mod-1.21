@@ -19,6 +19,8 @@ public final class PatchValidator {
             "update_palette"
     );
 
+    private static final String SUPPORTED_OPS_TEXT = "insert_part, delete_part, replace_part, insert_actions, delete_actions, replace_actions, move_actions, update_palette";
+
     private static final Set<String> SUPPORTED_ACTION_TYPES = Set.of(
             "box",
             "plane",
@@ -140,7 +142,7 @@ public final class PatchValidator {
                 continue;
             }
             if (!SUPPORTED_OPS.contains(opName)) {
-                result.addError(prefix + " unsupported op '" + op.op + "'");
+                result.addError(prefix + " unsupported op '" + op.op + "' (supported: " + SUPPORTED_OPS_TEXT + ")");
                 continue;
             }
 

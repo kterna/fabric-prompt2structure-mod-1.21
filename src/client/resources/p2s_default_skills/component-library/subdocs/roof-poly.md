@@ -15,7 +15,7 @@ description: "通过分层缩减多边形近似圆锥、穹顶等多边形屋顶
 ## 圆锥塔楼屋顶（r=4, h=6, 近似圆）
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "roof_poly_cone"
 
 [[operation.actions_add]]
@@ -52,7 +52,7 @@ at = [[0, 5, 0], [0, 6, 0]]
 ## 八角塔楼屋顶（r=5, h=4, sides=8）
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "roof_poly_octagon"
 
 [[operation.actions_add]]

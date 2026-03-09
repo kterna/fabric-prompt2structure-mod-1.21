@@ -13,7 +13,7 @@ description: "多风格卫浴模板（12+示例），覆盖马桶、浴缸、淋
 ## 1) 紧凑卫浴（整体）
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "bathroom_1"
 
 [[operation.actions_add]]
@@ -51,7 +51,7 @@ to = [4, 3, 4]
 ## 2) 现代马桶
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "bathroom_2"
 
 [[operation.actions_add]]
@@ -78,7 +78,7 @@ at = [[0, 0, 1]]
 ## 3) 简约马桶
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "bathroom_3"
 
 [[operation.actions_add]]
@@ -100,7 +100,7 @@ at = [[0, 1, -1]]
 ## 4) 现代浴缸
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "bathroom_4"
 
 [[operation.actions_add]]
@@ -126,7 +126,7 @@ at = [[1, 2, 0]]
 ## 5) 爪足浴缸（复古）
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "bathroom_5"
 
 [[operation.actions_add]]
@@ -150,7 +150,7 @@ at = [[0, 1, 1], [1, 1, 1], [0, 1, 2], [1, 1, 2]]
 ## 6) 现代淋浴间
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "bathroom_6"
 
 [[operation.actions_add]]
@@ -192,7 +192,7 @@ to = [1, 3, 1]
 ## 7) 现代洗手台
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "bathroom_7"
 
 [[operation.actions_add]]
@@ -223,7 +223,7 @@ to = [2, 4, -1]
 ## 8) 双人洗手台
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "bathroom_8"
 
 [[operation.actions_add]]
@@ -254,7 +254,7 @@ to = [4, 4, -1]
 ## 9) 毛巾架 + 镜柜
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "bathroom_9"
 
 [[operation.actions_add]]
@@ -287,7 +287,7 @@ to = [5, 4, -1]
 ## 10) 卫浴配件组合
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "bathroom_10"
 
 [[operation.actions_add]]
@@ -309,7 +309,7 @@ at = [[2, 2, 0]]
 ## 11) 按摩浴缸
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "bathroom_11"
 
 [[operation.actions_add]]
@@ -335,7 +335,7 @@ at = [[0, 1, 0], [3, 1, 0], [0, 1, 3], [3, 1, 3]]
 ## 12) 浴帘
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "bathroom_12"
 
 [[operation.actions_add]]

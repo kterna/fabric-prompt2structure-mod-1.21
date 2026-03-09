@@ -29,6 +29,7 @@ import java.util.List;
 import java.util.Set;
 
 public class P2SChatScreen extends Screen {
+    private static DockLayoutState retainedDockLayout = new DockLayoutState(false, false, false, -1, -1, -1, -1);
     private static final int PADDING = 8;
     private static final int INPUT_HEIGHT = 20;
     private static final int BUTTON_WIDTH = 22;
@@ -204,12 +205,43 @@ public class P2SChatScreen extends Screen {
 
     public P2SChatScreen() {
         super(P2SI18n.tr("screen.p2s.chat.title"));
+        restoreRetainedDockLayout();
+    }
+
+    private void restoreRetainedDockLayout() {
+        DockLayoutState state = retainedDockLayout;
+        sessionPanelCollapsed = state.sessionPanelCollapsed();
+        explorerPanelCollapsed = state.explorerPanelCollapsed();
+        contextEditorCollapsed = state.contextEditorCollapsed();
+        sessionPanelWidth = state.sessionPanelWidth();
+        explorerPanelWidth = state.explorerPanelWidth();
+        lastSessionPanelWidth = state.lastSessionPanelWidth();
+        lastExplorerPanelWidth = state.lastExplorerPanelWidth();
+        collapsedPanelFocus = contextEditorCollapsed ? PanelFocus.LEFT : PanelFocus.NONE;
+    }
+
+    private void rememberRetainedDockLayout() {
+        retainedDockLayout = new DockLayoutState(
+                sessionPanelCollapsed,
+                explorerPanelCollapsed,
+                contextEditorCollapsed,
+                sessionPanelWidth,
+                explorerPanelWidth,
+                lastSessionPanelWidth,
+                lastExplorerPanelWidth
+        );
     }
 
     @Override
     protected void init() {
         super.init();
         createWidgets();
+    }
+
+    @Override
+    public void removed() {
+        rememberRetainedDockLayout();
+        super.removed();
     }
 
     @Override
@@ -289,7 +321,7 @@ public class P2SChatScreen extends Screen {
             contextEditorFocused = false;
             contextMouseSelecting = false;
             hideContextSelectionConfirm();
-            collapsedPanelFocus = PanelFocus.NONE;
+            collapsedPanelFocus = PanelFocus.LEFT;
         } else {
             collapsedPanelFocus = PanelFocus.LEFT;
             setContextEditorFocused(true);
@@ -315,9 +347,7 @@ public class P2SChatScreen extends Screen {
     }
 
     private boolean shouldUseGameplayInput() {
-        return contextEditorCollapsed
-                && effectiveCollapsedPanelFocus() == PanelFocus.NONE
-                && !contextSelectionConfirmVisible;
+        return false;
     }
 
     private boolean isGameplayInputActive() {
@@ -725,7 +755,7 @@ public class P2SChatScreen extends Screen {
                         CONTEXT_ROW_GAP,
                         CONTEXT_EDITOR_PADDING,
                         EDITOR_MIN_WIDTH,
-                        6,
+                        DOCK_TOGGLE_BUTTON_SIZE + DOCK_SPLITTER_WIDTH + 4,
                         explorerPanelCollapsed,
                         contextEditorCollapsed,
                         workspaceCreateMode,
@@ -4810,6 +4840,17 @@ public class P2SChatScreen extends Screen {
     @Override
     public boolean isPauseScreen() {
         return false;
+    }
+
+    private record DockLayoutState(
+            boolean sessionPanelCollapsed,
+            boolean explorerPanelCollapsed,
+            boolean contextEditorCollapsed,
+            int sessionPanelWidth,
+            int explorerPanelWidth,
+            int lastSessionPanelWidth,
+            int lastExplorerPanelWidth
+    ) {
     }
 
     private record ContextSelectionRange(int startLine, int startColumn, int endLine, int endColumn) {

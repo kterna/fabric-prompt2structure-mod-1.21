@@ -31,7 +31,7 @@ description: "和风民居/庭院通用语汇与构造模板。"
 ## 基础模板
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "japanese_general_1"
 
 [[operation.actions_add]]

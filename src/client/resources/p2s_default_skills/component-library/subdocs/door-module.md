@@ -10,7 +10,7 @@ description: "门洞挖空、门框和门楣的组合模板。"
 ## 门洞 + 门框
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "door_module"
 
 [[operation.actions_add]]

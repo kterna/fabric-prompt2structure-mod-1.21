@@ -12,7 +12,7 @@ description: "从顶部向下延伸的悬挂元素（藤蔓、锁链、吊灯）
 
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "hanging_single"
 
 [[operation.actions_add]]
@@ -32,7 +32,7 @@ at = [[5, 5, 5]]
 
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "hanging_weeping"
 
 [[operation.actions_add]]
@@ -65,7 +65,7 @@ to = [5, 9, 6]
 
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "hanging_ring"
 
 [[operation.actions_add]]

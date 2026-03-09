@@ -10,7 +10,7 @@ description: "由每层环形点位 + 纵向线段构造圆柱。"
 ## 半径 3 高 6 模板
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "cylinder_r3_h6"
 
 [[operation.actions_add]]

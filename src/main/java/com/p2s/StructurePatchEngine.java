@@ -309,9 +309,11 @@ public final class StructurePatchEngine {
 
         StructureBuilder.StructurePart existing = parts.get(partName);
         if (existing == null) {
-            return new PatchModels.VerificationError(opIndex, "insert_actions", partName,
-                    "Part '" + partName + "' does not exist (insert_actions does not auto-create parts)",
+            PatchModels.VerificationError error = new PatchModels.VerificationError(opIndex, "insert_actions", partName,
+                    "Part '" + partName + "' does not exist; insert_actions only appends to an existing part",
                     null, new ArrayList<>());
+            error.hint = "Use insert_part with [[operation.actions_add]] when creating a brand-new part, or read_workspace_file again and target an existing part.";
+            return error;
         }
 
         StructureBuilder.StructurePart part = copyPart(existing);

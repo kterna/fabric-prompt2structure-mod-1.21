@@ -805,6 +805,7 @@ public final class LLMService {
             patchToml.addProperty("description",
                     "Patch body in TOML. Top-level keys: base_revision, intent, message_to_user. " +
                     "Use [[operation]] with op=insert_part|delete_part|replace_part|insert_actions|delete_actions|replace_actions|move_actions|update_palette. " +
+                    "Use insert_part for a brand-new part, and reserve insert_actions for appending to an existing part. " +
                     "For actions, use nested [[operation.actions_add]], [[operation.old_actions]], [[operation.new_actions]]. " +
                     "For palette updates, use [[operation.entry]] where omitting old_value means add-new and omitting new_value means delete.");
             properties.add("patch_toml", patchToml);

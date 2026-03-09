@@ -10,7 +10,7 @@ description: "中心柱 + 台阶点位的螺旋楼梯离散模板。"
 ## 局部模板
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "stairs_spiral"
 
 [[operation.actions_add]]

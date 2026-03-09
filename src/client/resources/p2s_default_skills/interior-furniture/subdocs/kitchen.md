@@ -13,7 +13,7 @@ description: "多风格厨房家具模板（12+示例），覆盖灶台、水槽
 ## 1) 直线型厨房（整体）
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "kitchen_1"
 
 [[operation.actions_add]]
@@ -47,7 +47,7 @@ at = [[1, 1, 1], [4, 1, 1]]
 ## 2) 现代燃气灶
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "kitchen_2"
 
 [[operation.actions_add]]
@@ -78,7 +78,7 @@ at = [[0, 0, 1], [1, 0, 1]]
 ## 3) 中世纪灶台
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "kitchen_3"
 
 [[operation.actions_add]]
@@ -102,7 +102,7 @@ at = [[1, 2, 1]]
 ## 4) 现代水槽
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "kitchen_4"
 
 [[operation.actions_add]]
@@ -125,7 +125,7 @@ at = [[0, 2, -1]]
 ## 5) 双槽水槽
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "kitchen_5"
 
 [[operation.actions_add]]
@@ -148,7 +148,7 @@ at = [[0, 2, -1]]
 ## 6) 现代冰箱
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "kitchen_6"
 
 [[operation.actions_add]]
@@ -175,7 +175,7 @@ at = [[0, 2, 1]]
 ## 7) 复古冰箱
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "kitchen_7"
 
 [[operation.actions_add]]
@@ -199,7 +199,7 @@ at = [[0, 3, 0]]
 ## 8) 岛台
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "kitchen_8"
 
 [[operation.actions_add]]
@@ -226,7 +226,7 @@ at = [[0, 0, 2], [3, 0, 2]]
 ## 9) 上柜 + 下柜（带抽屉）
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "kitchen_9"
 
 [[operation.actions_add]]
@@ -265,7 +265,7 @@ at = [[0, 4, 1], [1, 4, 1], [2, 4, 1], [3, 4, 1]]
 ## 10) 锅具挂架
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "kitchen_10"
 
 [[operation.actions_add]]
@@ -288,7 +288,7 @@ at = [[1, 2, 0], [3, 2, 0]]
 ## 11) 调料架
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "kitchen_11"
 
 [[operation.actions_add]]
@@ -306,7 +306,7 @@ at = [[0, 3, 0], [1, 3, 0], [2, 3, 0], [3, 3, 0]]
 ## 12) 厨房电器（微波炉 + 咖啡机）
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "kitchen_12"
 
 [[operation.actions_add]]

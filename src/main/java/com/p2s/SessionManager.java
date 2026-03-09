@@ -1629,19 +1629,20 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         if (action == null) {
             return "";
         }
-        String type = action.type == null ? "action" : action.type.trim();
+        String type = action.type == null ? "action" : action.type.trim().toLowerCase();
         String block = formatBlock(action.block, palette);
         return switch (type) {
-            case "fill" -> "fill " + block + " " + formatRange(action.from, action.to);
             case "box" -> {
                 String mode = action.mode == null || action.mode.isBlank() ? "solid" : action.mode.trim();
                 yield "box[" + mode + "] " + block + " " + formatRange(action.from, action.to);
             }
             case "plane" -> {
-                String axis = action.axis == null ? "?" : action.axis.trim();
-                yield "plane[" + axis + "] " + block + " " + formatRange(action.from, action.to);
+                String axis = action.axis == null || action.axis.isBlank() ? "?" : action.axis.trim();
+                String mode = action.mode == null || action.mode.isBlank() ? "solid" : action.mode.trim();
+                yield "plane[" + axis + ":" + mode + "] " + block + " " + formatRange(action.from, action.to);
             }
-            case "line" -> "line " + block + " " + formatAt(action.at);
+            case "line" -> "line " + block + " " + formatRange(action.from, action.to);
+            case "points" -> "points " + block + " " + formatAt(action.at);
             default -> type + " " + block;
         };
     }
@@ -1693,10 +1694,10 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
                 }
                 String type = action.type.trim().toLowerCase();
                 total += switch (type) {
-                    case "fill", "setblock" -> countBox(action);
                     case "box" -> countBox(action);
                     case "plane" -> countPlane(action);
                     case "line" -> countLine(action);
+                    case "points" -> countPoints(action);
                     default -> 0;
                 };
             }
@@ -1711,14 +1712,24 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         int dx = Math.abs(action.to.get(0) - action.from.get(0)) + 1;
         int dy = Math.abs(action.to.get(1) - action.from.get(1)) + 1;
         int dz = Math.abs(action.to.get(2) - action.from.get(2)) + 1;
+        int volume = dx * dy * dz;
         String mode = action.mode == null ? "solid" : action.mode.trim().toLowerCase();
-        if (!"hollow".equals(mode)) {
-            return dx * dy * dz;
-        }
-        if (dx <= 2 || dy <= 2 || dz <= 2) {
-            return dx * dy * dz;
-        }
-        return dx * dy * dz - Math.max(0, dx - 2) * Math.max(0, dy - 2) * Math.max(0, dz - 2);
+        return switch (mode) {
+            case "shell" -> {
+                if (dx <= 2 || dy <= 2 || dz <= 2) {
+                    yield volume;
+                }
+                yield volume - Math.max(0, dx - 2) * Math.max(0, dy - 2) * Math.max(0, dz - 2);
+            }
+            case "walls" -> {
+                if (dx <= 2 || dz <= 2) {
+                    yield volume;
+                }
+                yield (2 * dx + 2 * dz - 4) * dy;
+            }
+            case "solid" -> volume;
+            default -> volume;
+        };
     }
 
     private static int countPlane(StructureBuilder.VbsAction action) {
@@ -1736,7 +1747,7 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
             case "z" -> dx * dy;
             default -> dx * dy * dz;
         };
-        if (!"frame".equals(mode)) {
+        if (!"outline".equals(mode)) {
             return area;
         }
         return switch (axis) {
@@ -1748,6 +1759,16 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
     }
 
     private static int countLine(StructureBuilder.VbsAction action) {
+        if (action == null || action.from == null || action.to == null || action.from.size() < 3 || action.to.size() < 3) {
+            return 0;
+        }
+        int dx = Math.abs(action.to.get(0) - action.from.get(0));
+        int dy = Math.abs(action.to.get(1) - action.from.get(1));
+        int dz = Math.abs(action.to.get(2) - action.from.get(2));
+        return Math.max(dx, Math.max(dy, dz)) + 1;
+    }
+
+    private static int countPoints(StructureBuilder.VbsAction action) {
         if (action == null || action.at == null) {
             return 0;
         }

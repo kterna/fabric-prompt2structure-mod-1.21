@@ -10,7 +10,7 @@ public class P2SMod implements ModInitializer {
 	public static final String MOD_ID = "prompt2structure";
 
 	/** Enable verbose debug logging. When false, the JIT eliminates all debug code paths (zero overhead). */
-	public static final boolean DEBUG = false;
+	public static final boolean DEBUG = true;
 
 	// This logger is used to write text to the console and the log file.
 	// It is considered best practice to use your mod id as the logger's name.

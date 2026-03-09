@@ -10,7 +10,7 @@ description: "axis + solid/outline 的平面构造方式。"
 ## 地板与天花
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "plane_floor_ceiling"
 
 [[operation.actions_add]]
@@ -33,7 +33,7 @@ to = [10, 6, 10]
 ## 立面轮廓
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "plane_facade_outline"
 
 [[operation.actions_add]]

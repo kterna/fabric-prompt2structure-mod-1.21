@@ -10,7 +10,7 @@ description: "主环路径 + 横截面点位的近似构造。"
 ## 主环路径（节选）
 ```toml
 [[operation]]
-op = "insert_actions"
+op = "insert_part"
 part = "torus_ring"
 
 [[operation.actions_add]]
