@@ -1,0 +1,15 @@
+{
+  "id": "door",
+  "unitKind": "door",
+  "tags": ["door", "directional", "double_block_vertical"],
+  "match": {
+    "blockSuffixes": ["_door"],
+    "requiredProperties": ["facing", "half", "hinge", "open", "powered"]
+  },
+  "grouping": {
+    "mode": "vertical_pair",
+    "pairProperty": "half",
+    "anchorValues": ["lower"],
+    "counterpartValues": ["upper"]
+  }
+}

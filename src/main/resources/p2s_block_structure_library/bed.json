@@ -1,0 +1,16 @@
+{
+  "id": "bed",
+  "unitKind": "bed",
+  "tags": ["bed", "directional"],
+  "match": {
+    "blockSuffixes": ["_bed"],
+    "requiredProperties": ["part", "facing"]
+  },
+  "grouping": {
+    "mode": "facing_pair",
+    "pairProperty": "part",
+    "anchorValues": ["foot"],
+    "counterpartValues": ["head"],
+    "directionProperty": "facing"
+  }
+}

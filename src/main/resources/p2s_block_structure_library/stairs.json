@@ -1,0 +1,12 @@
+{
+  "id": "stairs",
+  "unitKind": "stairs",
+  "tags": ["stairs", "directional"],
+  "match": {
+    "blockSuffixes": ["_stairs"],
+    "requiredProperties": ["facing", "half", "shape"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

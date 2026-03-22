@@ -1,0 +1,12 @@
+{
+  "id": "trapdoor",
+  "unitKind": "trapdoor",
+  "tags": ["trapdoor", "directional"],
+  "match": {
+    "blockSuffixes": ["_trapdoor"],
+    "requiredProperties": ["facing", "half", "open", "powered"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

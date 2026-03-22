@@ -48,8 +48,9 @@ public final class WorldParseDebugReportWriter {
         );
         for (WorldStructureParser.ParsedStructureUnit unit : report.specialUnits()) {
             P2SMod.LOGGER.info(
-                    "World parse special unit [{}] rel={} world={} block={} members={} notes={}",
+                    "World parse special unit [{}] family={} rel={} world={} block={} members={} notes={}",
                     unit.kind(),
+                    unit.familyId() == null || unit.familyId().isBlank() ? "-" : unit.familyId(),
                     WorldStructureParser.formatPos(unit.anchorRelativePos()),
                     WorldStructureParser.formatPos(unit.anchorWorldPos()),
                     unit.blockId(),
@@ -88,6 +89,9 @@ public final class WorldParseDebugReportWriter {
             for (WorldStructureParser.ParsedStructureUnit unit : report.specialUnits()) {
                 sb.append('#').append(index++).append('\n');
                 sb.append("kind: ").append(unit.kind()).append('\n');
+                if (unit.familyId() != null && !unit.familyId().isBlank()) {
+                    sb.append("family: ").append(unit.familyId()).append('\n');
+                }
                 sb.append("anchor_world: ").append(WorldStructureParser.formatPos(unit.anchorWorldPos())).append('\n');
                 sb.append("anchor_relative: ").append(WorldStructureParser.formatPos(unit.anchorRelativePos())).append('\n');
                 sb.append("block: ").append(unit.blockId()).append('\n');
@@ -137,6 +141,9 @@ public final class WorldParseDebugReportWriter {
                 .append(" world=").append(WorldStructureParser.formatPos(record.worldPos()))
                 .append(" block=").append(record.blockId())
                 .append(" state=").append(record.stateString());
+        if (record.familyId() != null && !record.familyId().isBlank()) {
+            sb.append(" family=").append(record.familyId());
+        }
         if (record.tags() != null && !record.tags().isEmpty()) {
             sb.append(" tags=").append(record.tags());
         }

@@ -15,8 +15,8 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -70,16 +70,39 @@ public final class WorldStructureParser {
                         blockEntityNbt = extractBlockEntityNbt(blockEntity, world);
                     }
 
-                    List<String> tags = extractTags(blockId, properties, blockEntityType);
+                    BlockStructureLibrary.ResolvedStructureFamily resolved = BlockStructureLibrary.resolve(blockId, properties);
+                    LinkedHashSet<String> tags = new LinkedHashSet<>();
+                    String familyId = "";
+                    String unitKind = "";
+                    BlockStructureLibrary.GroupingMode groupingMode = BlockStructureLibrary.GroupingMode.SINGLE;
+                    if (resolved != null) {
+                        familyId = resolved.familyId();
+                        unitKind = resolved.unitKind();
+                        groupingMode = resolved.groupingMode();
+                        tags.addAll(resolved.tags());
+                    }
+                    if (!blockEntityType.isBlank()) {
+                        tags.add("block_entity");
+                    }
+                    if (resolved == null && hasDirectionalProperties(properties)) {
+                        tags.add("directional");
+                    }
+                    if (unitKind.isBlank()) {
+                        unitKind = fallbackUnitKind(properties, blockEntityType);
+                    }
+
                     ParsedBlockRecord record = new ParsedBlockRecord(
                             worldPos,
                             new BlockPos(x - min.getX(), y - min.getY(), z - min.getZ()),
                             blockId,
                             blockStateString,
                             properties,
-                            tags,
+                            List.copyOf(tags),
                             blockEntityType,
-                            blockEntityNbt
+                            blockEntityNbt,
+                            familyId,
+                            unitKind,
+                            groupingMode
                     );
                     rawBlocks.add(record);
                     recordsByWorldPos.put(worldPos, record);
@@ -117,24 +140,18 @@ public final class WorldStructureParser {
 
     private static List<ParsedStructureUnit> buildSpecialUnits(List<ParsedBlockRecord> rawBlocks, Map<BlockPos, ParsedBlockRecord> recordsByWorldPos) {
         List<ParsedStructureUnit> units = new ArrayList<>();
-        Set<BlockPos> consumed = new HashSet<>();
+        Set<BlockPos> consumed = new LinkedHashSet<>();
 
         for (ParsedBlockRecord record : rawBlocks) {
-            if (consumed.contains(record.worldPos())) {
+            if (consumed.contains(record.worldPos()) || record.unitKind().isBlank()) {
                 continue;
             }
 
-            String unitKind = preferredUnitKind(record);
-            if (unitKind.isBlank()) {
-                continue;
-            }
-
-            ParsedStructureUnit unit;
-            switch (unitKind) {
-                case "door", "double_block_vertical" -> unit = buildVerticalPairUnit(record, recordsByWorldPos, consumed, unitKind);
-                case "bed" -> unit = buildBedUnit(record, recordsByWorldPos, consumed);
-                default -> unit = buildSingleUnit(record, consumed, unitKind);
-            }
+            ParsedStructureUnit unit = switch (record.groupingMode()) {
+                case SINGLE -> buildSingleUnit(record, consumed);
+                case VERTICAL_PAIR -> buildVerticalPairUnit(record, recordsByWorldPos, consumed);
+                case FACING_PAIR -> buildFacingPairUnit(record, recordsByWorldPos, consumed);
+            };
             units.add(unit);
         }
 
@@ -144,102 +161,13 @@ public final class WorldStructureParser {
         return units;
     }
 
-    private static ParsedStructureUnit buildVerticalPairUnit(ParsedBlockRecord record,
-                                                             Map<BlockPos, ParsedBlockRecord> recordsByWorldPos,
-                                                             Set<BlockPos> consumed,
-                                                             String unitKind) {
-        String half = normalize(record.properties().get("half"));
-        Direction direction = "upper".equals(half) ? Direction.DOWN : Direction.UP;
-        BlockPos counterpartPos = record.worldPos().relative(direction);
-        ParsedBlockRecord counterpart = recordsByWorldPos.get(counterpartPos);
-
-        ParsedBlockRecord anchor = record;
-        List<ParsedBlockRecord> members = new ArrayList<>();
-        List<String> notes = new ArrayList<>();
-        members.add(record);
-        consumed.add(record.worldPos());
-
-        if (counterpart == null) {
-            notes.add("Counterpart not found at " + formatPos(counterpartPos) + ".");
-        } else if (!record.blockId().equals(counterpart.blockId())) {
-            notes.add("Counterpart block mismatch at " + formatPos(counterpartPos) + ": expected " + record.blockId() + ", found " + counterpart.blockId() + ".");
-        } else {
-            members.add(counterpart);
-            consumed.add(counterpart.worldPos());
-            if ("upper".equals(half)) {
-                anchor = counterpart;
-            }
-        }
-
-        members.sort(Comparator.comparingInt((ParsedBlockRecord entry) -> entry.relativePos().getY())
-                .thenComparingInt(entry -> entry.relativePos().getX())
-                .thenComparingInt(entry -> entry.relativePos().getZ()));
-
-        return new ParsedStructureUnit(
-                unitKind,
-                anchor.worldPos(),
-                anchor.relativePos(),
-                anchor.blockId(),
-                members,
-                anchor.properties(),
-                notes
-        );
-    }
-
-    private static ParsedStructureUnit buildBedUnit(ParsedBlockRecord record,
-                                                    Map<BlockPos, ParsedBlockRecord> recordsByWorldPos,
-                                                    Set<BlockPos> consumed) {
-        String part = normalize(record.properties().get("part"));
-        Direction facing = directionByName(record.properties().get("facing"));
-        BlockPos counterpartPos = null;
-        if (facing != null) {
-            counterpartPos = "head".equals(part)
-                    ? record.worldPos().relative(facing.getOpposite())
-                    : record.worldPos().relative(facing);
-        }
-
-        ParsedBlockRecord anchor = record;
-        List<ParsedBlockRecord> members = new ArrayList<>();
-        List<String> notes = new ArrayList<>();
-        members.add(record);
-        consumed.add(record.worldPos());
-
-        ParsedBlockRecord counterpart = counterpartPos == null ? null : recordsByWorldPos.get(counterpartPos);
-        if (facing == null) {
-            notes.add("Missing facing property for bed counterpart resolution.");
-        } else if (counterpart == null) {
-            notes.add("Counterpart not found at " + formatPos(counterpartPos) + ".");
-        } else if (!record.blockId().equals(counterpart.blockId())) {
-            notes.add("Counterpart block mismatch at " + formatPos(counterpartPos) + ": expected " + record.blockId() + ", found " + counterpart.blockId() + ".");
-        } else {
-            members.add(counterpart);
-            consumed.add(counterpart.worldPos());
-            if ("head".equals(part)) {
-                anchor = counterpart;
-            }
-        }
-
-        members.sort(Comparator.comparingInt((ParsedBlockRecord entry) -> entry.relativePos().getY())
-                .thenComparingInt(entry -> entry.relativePos().getX())
-                .thenComparingInt(entry -> entry.relativePos().getZ()));
-
-        return new ParsedStructureUnit(
-                "bed",
-                anchor.worldPos(),
-                anchor.relativePos(),
-                anchor.blockId(),
-                members,
-                anchor.properties(),
-                notes
-        );
-    }
-
-    private static ParsedStructureUnit buildSingleUnit(ParsedBlockRecord record, Set<BlockPos> consumed, String unitKind) {
+    private static ParsedStructureUnit buildSingleUnit(ParsedBlockRecord record, Set<BlockPos> consumed) {
         consumed.add(record.worldPos());
         return new ParsedStructureUnit(
-                unitKind,
-                record.worldPos(),
-                record.relativePos(),
+                record.familyId(),
+                record.unitKind(),
+                record.anchorWorldPos(),
+                record.anchorRelativePos(),
                 record.blockId(),
                 List.of(record),
                 record.properties(),
@@ -247,44 +175,141 @@ public final class WorldStructureParser {
         );
     }
 
-    private static String preferredUnitKind(ParsedBlockRecord record) {
-        if (record.hasTag("door")) {
-            return "door";
+    private static ParsedStructureUnit buildVerticalPairUnit(ParsedBlockRecord record,
+                                                             Map<BlockPos, ParsedBlockRecord> recordsByWorldPos,
+                                                             Set<BlockPos> consumed) {
+        BlockStructureLibrary.StructureFamilyDefinition definition = familyDefinition(record);
+        if (definition == null) {
+            return buildSingleUnit(record, consumed);
         }
-        if (record.hasTag("bed")) {
-            return "bed";
+
+        BlockStructureLibrary.GroupingRule grouping = definition.grouping();
+        String pairValue = normalize(record.properties().get(grouping.pairProperty()));
+        boolean anchorValue = grouping.isAnchorValue(pairValue);
+        boolean counterpartValue = grouping.isCounterpartValue(pairValue);
+
+        ParsedBlockRecord anchor = record;
+        List<ParsedBlockRecord> members = new ArrayList<>();
+        List<String> notes = new ArrayList<>();
+        members.add(record);
+        consumed.add(record.worldPos());
+
+        if (!anchorValue && !counterpartValue) {
+            notes.add("Unexpected vertical pair value '" + pairValue + "' for property '" + grouping.pairProperty() + "'.");
         }
-        if (record.hasTag("double_block_vertical")) {
-            return "double_block_vertical";
+
+        Direction searchDirection = counterpartValue ? Direction.DOWN : Direction.UP;
+        BlockPos counterpartPos = record.worldPos().relative(searchDirection);
+        ParsedBlockRecord counterpart = recordsByWorldPos.get(counterpartPos);
+        if (counterpart == null) {
+            notes.add("Counterpart not found at " + formatPos(counterpartPos) + ".");
+        } else if (!sameFamily(record, counterpart)) {
+            notes.add("Counterpart mismatch at " + formatPos(counterpartPos) + ": expected family '" + record.familyId() + "', found '" + counterpart.familyId() + "'.");
+        } else {
+            members.add(counterpart);
+            consumed.add(counterpart.worldPos());
+            if (counterpartValue) {
+                anchor = counterpart;
+            }
         }
-        if (record.hasTag("directional")) {
-            return "directional";
-        }
-        if (record.hasTag("block_entity")) {
-            return "block_entity";
-        }
-        return "";
+
+        members.sort(Comparator.comparingInt((ParsedBlockRecord entry) -> entry.relativePos().getY())
+                .thenComparingInt(entry -> entry.relativePos().getX())
+                .thenComparingInt(entry -> entry.relativePos().getZ()));
+
+        return new ParsedStructureUnit(
+                record.familyId(),
+                record.unitKind(),
+                anchor.anchorWorldPos(),
+                anchor.anchorRelativePos(),
+                anchor.blockId(),
+                members,
+                anchor.properties(),
+                notes
+        );
     }
 
-    private static List<String> extractTags(String blockId, Map<String, String> properties, String blockEntityType) {
-        List<String> tags = new ArrayList<>();
-        if (blockId.endsWith("_door")) {
-            tags.add("door");
+    private static ParsedStructureUnit buildFacingPairUnit(ParsedBlockRecord record,
+                                                           Map<BlockPos, ParsedBlockRecord> recordsByWorldPos,
+                                                           Set<BlockPos> consumed) {
+        BlockStructureLibrary.StructureFamilyDefinition definition = familyDefinition(record);
+        if (definition == null) {
+            return buildSingleUnit(record, consumed);
         }
-        if (blockId.endsWith("_bed")) {
-            tags.add("bed");
+
+        BlockStructureLibrary.GroupingRule grouping = definition.grouping();
+        String pairValue = normalize(record.properties().get(grouping.pairProperty()));
+        boolean anchorValue = grouping.isAnchorValue(pairValue);
+        boolean counterpartValue = grouping.isCounterpartValue(pairValue);
+        Direction facing = directionByName(record.properties().get(grouping.directionProperty()));
+
+        ParsedBlockRecord anchor = record;
+        List<ParsedBlockRecord> members = new ArrayList<>();
+        List<String> notes = new ArrayList<>();
+        members.add(record);
+        consumed.add(record.worldPos());
+
+        if (!anchorValue && !counterpartValue) {
+            notes.add("Unexpected facing pair value '" + pairValue + "' for property '" + grouping.pairProperty() + "'.");
         }
-        String half = normalize(properties.get("half"));
-        if ("upper".equals(half) || "lower".equals(half)) {
-            tags.add("double_block_vertical");
+        if (facing == null) {
+            notes.add("Missing facing value in property '" + grouping.directionProperty() + "'.");
+        } else {
+            Direction searchDirection = counterpartValue ? facing.getOpposite() : facing;
+            BlockPos counterpartPos = record.worldPos().relative(searchDirection);
+            ParsedBlockRecord counterpart = recordsByWorldPos.get(counterpartPos);
+            if (counterpart == null) {
+                notes.add("Counterpart not found at " + formatPos(counterpartPos) + ".");
+            } else if (!sameFamily(record, counterpart)) {
+                notes.add("Counterpart mismatch at " + formatPos(counterpartPos) + ": expected family '" + record.familyId() + "', found '" + counterpart.familyId() + "'.");
+            } else {
+                members.add(counterpart);
+                consumed.add(counterpart.worldPos());
+                if (counterpartValue) {
+                    anchor = counterpart;
+                }
+            }
+        }
+
+        members.sort(Comparator.comparingInt((ParsedBlockRecord entry) -> entry.relativePos().getY())
+                .thenComparingInt(entry -> entry.relativePos().getX())
+                .thenComparingInt(entry -> entry.relativePos().getZ()));
+
+        return new ParsedStructureUnit(
+                record.familyId(),
+                record.unitKind(),
+                anchor.anchorWorldPos(),
+                anchor.anchorRelativePos(),
+                anchor.blockId(),
+                members,
+                anchor.properties(),
+                notes
+        );
+    }
+
+    private static boolean sameFamily(ParsedBlockRecord left, ParsedBlockRecord right) {
+        if (left == null || right == null) {
+            return false;
+        }
+        return Objects.equals(left.blockId(), right.blockId())
+                && Objects.equals(left.familyId(), right.familyId());
+    }
+
+    private static BlockStructureLibrary.StructureFamilyDefinition familyDefinition(ParsedBlockRecord record) {
+        if (record == null || record.familyId().isBlank()) {
+            return null;
+        }
+        return BlockStructureLibrary.definition(record.familyId());
+    }
+
+    private static String fallbackUnitKind(Map<String, String> properties, String blockEntityType) {
+        if (blockEntityType != null && !blockEntityType.isBlank()) {
+            return "block_entity";
         }
         if (hasDirectionalProperties(properties)) {
-            tags.add("directional");
+            return "directional";
         }
-        if (blockEntityType != null && !blockEntityType.isBlank()) {
-            tags.add("block_entity");
-        }
-        return tags;
+        return "";
     }
 
     private static boolean hasDirectionalProperties(Map<String, String> properties) {
@@ -404,14 +429,26 @@ public final class WorldStructureParser {
             Map<String, String> properties,
             List<String> tags,
             String blockEntityType,
-            String blockEntityNbt
+            String blockEntityNbt,
+            String familyId,
+            String unitKind,
+            BlockStructureLibrary.GroupingMode groupingMode
     ) {
         public boolean hasTag(String tag) {
             return tags != null && tags.contains(tag);
         }
+
+        public BlockPos anchorWorldPos() {
+            return worldPos;
+        }
+
+        public BlockPos anchorRelativePos() {
+            return relativePos;
+        }
     }
 
     public record ParsedStructureUnit(
+            String familyId,
             String kind,
             BlockPos anchorWorldPos,
             BlockPos anchorRelativePos,
