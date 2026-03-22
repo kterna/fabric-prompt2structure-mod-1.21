@@ -1,0 +1,12 @@
+{
+  "id": "lightning_rod",
+  "unitKind": "lightning_rod",
+  "tags": ["rod", "directional", "weather"],
+  "match": {
+    "exactBlockIds": ["minecraft:lightning_rod"],
+    "requiredProperties": ["facing", "powered", "waterlogged"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

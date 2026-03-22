@@ -1,0 +1,12 @@
+{
+  "id": "end_rod",
+  "unitKind": "end_rod",
+  "tags": ["rod", "directional", "light_source"],
+  "match": {
+    "exactBlockIds": ["minecraft:end_rod"],
+    "requiredProperties": ["facing"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "anvil",
+  "unitKind": "anvil",
+  "tags": ["anvil", "directional", "gravity_affected"],
+  "match": {
+    "blockSuffixes": ["_anvil"],
+    "requiredProperties": ["facing"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

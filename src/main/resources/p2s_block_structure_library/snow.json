@@ -1,0 +1,12 @@
+{
+  "id": "snow",
+  "unitKind": "snow",
+  "tags": ["snow", "layered", "height_variant"],
+  "match": {
+    "exactBlockIds": ["minecraft:snow"],
+    "requiredProperties": ["layers"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "hopper",
+  "unitKind": "hopper",
+  "tags": ["container", "redstone", "directional"],
+  "match": {
+    "exactBlockIds": ["minecraft:hopper"],
+    "requiredProperties": ["facing", "enabled"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

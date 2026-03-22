@@ -1,0 +1,11 @@
+{
+  "id": "torch",
+  "unitKind": "torch",
+  "tags": ["torch", "light_source", "single_block"],
+  "match": {
+    "exactBlockIds": ["minecraft:torch", "minecraft:soul_torch", "minecraft:redstone_torch"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

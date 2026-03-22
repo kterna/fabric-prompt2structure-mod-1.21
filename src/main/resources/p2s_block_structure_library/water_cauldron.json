@@ -1,0 +1,12 @@
+{
+  "id": "water_cauldron",
+  "unitKind": "water_cauldron",
+  "tags": ["cauldron", "container", "level_based"],
+  "match": {
+    "exactBlockIds": ["minecraft:water_cauldron"],
+    "requiredProperties": ["level"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

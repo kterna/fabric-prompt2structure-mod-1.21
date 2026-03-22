@@ -1,0 +1,12 @@
+{
+  "id": "wall_banner",
+  "unitKind": "wall_banner",
+  "tags": ["banner", "wall_mounted", "directional"],
+  "match": {
+    "blockSuffixes": ["_wall_banner"],
+    "requiredProperties": ["facing"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

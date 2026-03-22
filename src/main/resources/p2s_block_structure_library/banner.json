@@ -1,0 +1,12 @@
+{
+  "id": "banner",
+  "unitKind": "banner",
+  "tags": ["banner", "directional", "block_entity"],
+  "match": {
+    "blockSuffixes": ["_banner"],
+    "requiredProperties": ["rotation"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

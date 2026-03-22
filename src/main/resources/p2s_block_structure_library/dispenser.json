@@ -1,0 +1,12 @@
+{
+  "id": "dispenser",
+  "unitKind": "dispenser",
+  "tags": ["container", "redstone", "directional"],
+  "match": {
+    "exactBlockIds": ["minecraft:dispenser", "minecraft:dropper"],
+    "requiredProperties": ["facing", "triggered"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

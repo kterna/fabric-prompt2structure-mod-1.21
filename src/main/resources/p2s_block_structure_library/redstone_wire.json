@@ -1,0 +1,12 @@
+{
+  "id": "redstone_wire",
+  "unitKind": "redstone_wire",
+  "tags": ["redstone", "wire", "connective"],
+  "match": {
+    "exactBlockIds": ["minecraft:redstone_wire"],
+    "requiredProperties": ["north", "east", "south", "west", "power"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

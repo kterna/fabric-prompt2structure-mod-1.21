@@ -1,0 +1,12 @@
+{
+  "id": "wall_sign",
+  "unitKind": "wall_sign",
+  "tags": ["sign", "wall_sign", "directional", "block_entity"],
+  "match": {
+    "blockSuffixes": ["_wall_sign"],
+    "requiredProperties": ["facing"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

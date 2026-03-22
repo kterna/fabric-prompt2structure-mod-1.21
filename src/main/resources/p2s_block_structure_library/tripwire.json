@@ -1,0 +1,12 @@
+{
+  "id": "tripwire",
+  "unitKind": "tripwire",
+  "tags": ["tripwire", "connective", "redstone"],
+  "match": {
+    "exactBlockIds": ["minecraft:tripwire"],
+    "requiredProperties": ["attached", "disarmed", "north", "east", "south", "west", "powered"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "bell",
+  "unitKind": "bell",
+  "tags": ["bell", "directional", "attachable"],
+  "match": {
+    "exactBlockIds": ["minecraft:bell"],
+    "requiredProperties": ["attachment", "facing", "powered"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

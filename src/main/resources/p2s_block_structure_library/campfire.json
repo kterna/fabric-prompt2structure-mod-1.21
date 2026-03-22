@@ -1,0 +1,12 @@
+{
+  "id": "campfire",
+  "unitKind": "campfire",
+  "tags": ["campfire", "directional", "light_source"],
+  "match": {
+    "exactBlockIds": ["minecraft:campfire", "minecraft:soul_campfire"],
+    "requiredProperties": ["facing", "lit", "signal_fire", "waterlogged"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

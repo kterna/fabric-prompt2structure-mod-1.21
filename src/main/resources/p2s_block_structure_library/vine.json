@@ -1,0 +1,12 @@
+{
+  "id": "vine",
+  "unitKind": "vine",
+  "tags": ["vine", "attachable", "connective"],
+  "match": {
+    "exactBlockIds": ["minecraft:vine"],
+    "requiredProperties": ["north", "east", "south", "west", "up"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

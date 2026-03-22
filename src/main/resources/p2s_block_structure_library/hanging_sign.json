@@ -1,0 +1,12 @@
+{
+  "id": "hanging_sign",
+  "unitKind": "hanging_sign",
+  "tags": ["sign", "hanging_sign", "directional", "block_entity"],
+  "match": {
+    "blockSuffixes": ["_hanging_sign"],
+    "requiredProperties": ["rotation", "attached"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "beehive",
+  "unitKind": "beehive",
+  "tags": ["beehive", "directional", "block_entity"],
+  "match": {
+    "exactBlockIds": ["minecraft:beehive", "minecraft:bee_nest"],
+    "requiredProperties": ["facing", "honey_level"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

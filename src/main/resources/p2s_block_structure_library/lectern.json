@@ -1,0 +1,12 @@
+{
+  "id": "lectern",
+  "unitKind": "lectern",
+  "tags": ["lectern", "directional", "block_entity"],
+  "match": {
+    "exactBlockIds": ["minecraft:lectern"],
+    "requiredProperties": ["facing", "has_book", "powered"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

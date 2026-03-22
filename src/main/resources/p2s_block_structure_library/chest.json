@@ -1,0 +1,12 @@
+{
+  "id": "chest",
+  "unitKind": "chest",
+  "tags": ["container", "directional", "mergeable"],
+  "match": {
+    "exactBlockIds": ["minecraft:chest", "minecraft:trapped_chest"],
+    "requiredProperties": ["facing", "type", "waterlogged"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

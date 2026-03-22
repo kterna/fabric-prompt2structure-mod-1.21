@@ -1,0 +1,12 @@
+{
+  "id": "stonecutter",
+  "unitKind": "stonecutter",
+  "tags": ["stonecutter", "directional", "single_block"],
+  "match": {
+    "exactBlockIds": ["minecraft:stonecutter"],
+    "requiredProperties": ["facing"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "sign",
+  "unitKind": "sign",
+  "tags": ["sign", "directional", "block_entity"],
+  "match": {
+    "blockSuffixes": ["_sign"],
+    "requiredProperties": ["rotation"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "tripwire_hook",
+  "unitKind": "tripwire_hook",
+  "tags": ["tripwire", "hook", "directional", "redstone"],
+  "match": {
+    "exactBlockIds": ["minecraft:tripwire_hook"],
+    "requiredProperties": ["facing", "attached", "powered"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

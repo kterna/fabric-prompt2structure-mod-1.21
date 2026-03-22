@@ -1,0 +1,12 @@
+{
+  "id": "turtle_egg",
+  "unitKind": "turtle_egg",
+  "tags": ["turtle_egg", "counted", "time_sensitive"],
+  "match": {
+    "exactBlockIds": ["minecraft:turtle_egg"],
+    "requiredProperties": ["eggs", "hatch"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

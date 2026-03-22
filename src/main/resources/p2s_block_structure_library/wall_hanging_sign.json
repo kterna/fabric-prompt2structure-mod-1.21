@@ -1,0 +1,12 @@
+{
+  "id": "wall_hanging_sign",
+  "unitKind": "wall_hanging_sign",
+  "tags": ["sign", "wall_hanging_sign", "directional", "block_entity"],
+  "match": {
+    "blockSuffixes": ["_wall_hanging_sign"],
+    "requiredProperties": ["facing"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

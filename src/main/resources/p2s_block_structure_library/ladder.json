@@ -1,0 +1,12 @@
+{
+  "id": "ladder",
+  "unitKind": "ladder",
+  "tags": ["ladder", "wall_mounted", "directional"],
+  "match": {
+    "exactBlockIds": ["minecraft:ladder"],
+    "requiredProperties": ["facing", "waterlogged"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

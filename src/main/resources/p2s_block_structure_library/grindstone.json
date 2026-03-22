@@ -1,0 +1,12 @@
+{
+  "id": "grindstone",
+  "unitKind": "grindstone",
+  "tags": ["grindstone", "directional", "attachable"],
+  "match": {
+    "exactBlockIds": ["minecraft:grindstone"],
+    "requiredProperties": ["face", "facing"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

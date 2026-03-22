@@ -1,0 +1,12 @@
+{
+  "id": "sea_pickle",
+  "unitKind": "sea_pickle",
+  "tags": ["sea_pickle", "waterloggable", "cluster_count"],
+  "match": {
+    "exactBlockIds": ["minecraft:sea_pickle"],
+    "requiredProperties": ["pickles", "waterlogged"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "pointed_dripstone",
+  "unitKind": "pointed_dripstone",
+  "tags": ["pointed_dripstone", "directional", "growth_stage"],
+  "match": {
+    "exactBlockIds": ["minecraft:pointed_dripstone"],
+    "requiredProperties": ["vertical_direction", "thickness", "waterlogged"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "farmland",
+  "unitKind": "farmland",
+  "tags": ["farmland", "moisture", "environment_sensitive"],
+  "match": {
+    "exactBlockIds": ["minecraft:farmland"],
+    "requiredProperties": ["moisture"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

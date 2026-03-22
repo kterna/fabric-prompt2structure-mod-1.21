@@ -1,0 +1,12 @@
+{
+  "id": "target",
+  "unitKind": "target",
+  "tags": ["target", "redstone", "power_level"],
+  "match": {
+    "exactBlockIds": ["minecraft:target"],
+    "requiredProperties": ["power"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

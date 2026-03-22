@@ -1,0 +1,12 @@
+{
+  "id": "wall_skull",
+  "unitKind": "wall_skull",
+  "tags": ["skull", "wall_mounted", "directional", "block_entity"],
+  "match": {
+    "blockSuffixes": ["_wall_head", "_wall_skull"],
+    "requiredProperties": ["facing"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

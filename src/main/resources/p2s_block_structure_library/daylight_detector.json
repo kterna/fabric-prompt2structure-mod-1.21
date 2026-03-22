@@ -1,0 +1,12 @@
+{
+  "id": "daylight_detector",
+  "unitKind": "daylight_detector",
+  "tags": ["daylight_detector", "redstone", "power_level"],
+  "match": {
+    "exactBlockIds": ["minecraft:daylight_detector"],
+    "requiredProperties": ["inverted", "power"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

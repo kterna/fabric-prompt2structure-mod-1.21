@@ -1,0 +1,11 @@
+{
+  "id": "cauldron",
+  "unitKind": "cauldron",
+  "tags": ["cauldron", "container", "single_block"],
+  "match": {
+    "exactBlockIds": ["minecraft:cauldron"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "furnace",
+  "unitKind": "furnace",
+  "tags": ["furnace", "directional", "machine"],
+  "match": {
+    "exactBlockIds": ["minecraft:furnace", "minecraft:smoker", "minecraft:blast_furnace"],
+    "requiredProperties": ["facing", "lit"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

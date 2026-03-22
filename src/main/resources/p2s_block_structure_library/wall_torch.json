@@ -1,0 +1,12 @@
+{
+  "id": "wall_torch",
+  "unitKind": "wall_torch",
+  "tags": ["torch", "wall_mounted", "directional"],
+  "match": {
+    "exactBlockIds": ["minecraft:wall_torch", "minecraft:soul_wall_torch", "minecraft:redstone_wall_torch"],
+    "requiredProperties": ["facing"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

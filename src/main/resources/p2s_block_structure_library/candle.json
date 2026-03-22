@@ -1,0 +1,13 @@
+{
+  "id": "candle",
+  "unitKind": "candle",
+  "tags": ["candle", "light_source", "waterloggable"],
+  "match": {
+    "exactBlockIds": ["minecraft:candle"],
+    "blockSuffixes": ["_candle"],
+    "requiredProperties": ["candles", "lit", "waterlogged"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

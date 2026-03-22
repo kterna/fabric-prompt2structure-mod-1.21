@@ -1,0 +1,12 @@
+{
+  "id": "respawn_anchor",
+  "unitKind": "respawn_anchor",
+  "tags": ["respawn_anchor", "chargeable", "nether"],
+  "match": {
+    "exactBlockIds": ["minecraft:respawn_anchor"],
+    "requiredProperties": ["charges"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

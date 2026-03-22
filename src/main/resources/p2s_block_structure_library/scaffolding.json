@@ -1,0 +1,12 @@
+{
+  "id": "scaffolding",
+  "unitKind": "scaffolding",
+  "tags": ["scaffolding", "support_dependent", "physics_sensitive"],
+  "match": {
+    "exactBlockIds": ["minecraft:scaffolding"],
+    "requiredProperties": ["bottom", "distance", "waterlogged"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

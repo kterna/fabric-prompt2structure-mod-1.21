@@ -1,0 +1,12 @@
+{
+  "id": "cake",
+  "unitKind": "cake",
+  "tags": ["cake", "consumable", "interactive"],
+  "match": {
+    "exactBlockIds": ["minecraft:cake"],
+    "requiredProperties": ["bites"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

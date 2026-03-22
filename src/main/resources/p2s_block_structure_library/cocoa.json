@@ -1,0 +1,12 @@
+{
+  "id": "cocoa",
+  "unitKind": "cocoa",
+  "tags": ["cocoa", "directional", "ageable"],
+  "match": {
+    "exactBlockIds": ["minecraft:cocoa"],
+    "requiredProperties": ["age", "facing"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

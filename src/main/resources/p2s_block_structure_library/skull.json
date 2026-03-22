@@ -1,0 +1,12 @@
+{
+  "id": "skull",
+  "unitKind": "skull",
+  "tags": ["skull", "directional", "block_entity"],
+  "match": {
+    "blockSuffixes": ["_head", "_skull"],
+    "requiredProperties": ["rotation"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "composter",
+  "unitKind": "composter",
+  "tags": ["composter", "level_based", "interactive"],
+  "match": {
+    "exactBlockIds": ["minecraft:composter"],
+    "requiredProperties": ["level"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}
