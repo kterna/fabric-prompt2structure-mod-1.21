@@ -106,6 +106,7 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
                 case "create_project" -> handleCreateProjectTool(player, arguments);
                 case "open_project" -> handleOpenProjectTool(player, arguments);
                 case "rename_project" -> handleRenameProjectTool(player, arguments);
+                case "delete_project" -> handleDeleteProjectTool(player, arguments);
                 case "get_project_state" -> handleGetProjectState(player);
                 case "read_workspace_file" -> handleReadWorkspaceFile(player, arguments);
                 case "create_workspace_file" -> handleCreateWorkspaceFileTool(player, arguments);
@@ -297,6 +298,35 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         payload.addProperty("name", project.name);
         payload.addProperty("description", project.description);
         payload.addProperty("workspace_count", project.workspaceFiles == null ? 0 : project.workspaceFiles.size());
+        return payload;
+    }
+
+    private static JsonObject handleDeleteProjectTool(ServerPlayer player, JsonElement argsElem) {
+        JsonObject args = normalizeArgsObject(argsElem);
+        String projectId = getString(args, "id");
+        if (projectId.isBlank()) {
+            return buildToolError("delete_project", "Project id is required.");
+        }
+        ProjectPersistence.ProjectRecord project = loadProject(projectId);
+        if (project == null) {
+            return buildToolErrorKey("delete_project", "message.p2s.project.not_found", projectId);
+        }
+        if (!ProjectPersistence.deleteProject(projectId)) {
+            return buildToolError("delete_project", "Failed deleting project.");
+        }
+
+        loadedProjects.remove(projectId);
+        Session session = sessions.get(player.getUUID());
+        if (session != null && projectId.equals(session.projectId)) {
+            sessions.remove(player.getUUID());
+        }
+        String currentProjectId = currentProjectIds.getOrDefault(player.getUUID(), "");
+        if (projectId.equals(currentProjectId)) {
+            currentProjectIds.remove(player.getUUID());
+        }
+
+        JsonObject payload = buildToolSuccess("delete_project");
+        payload.addProperty("id", projectId);
         return payload;
     }
 

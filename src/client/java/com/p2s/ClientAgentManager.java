@@ -102,6 +102,22 @@ public final class ClientAgentManager {
         return ClientSessionState.getSessionId();
     }
 
+    public record SessionStartResult(boolean ok, String sessionId, String error) {
+    }
+
+    public static SessionStartResult ensureSessionStartedForHttp() {
+        synchronized (LOCK) {
+            if (currentSession != null && currentSession.inFlight) {
+                return new SessionStartResult(false, "", "Agent is running.");
+            }
+            LocalSession session = ensureSessionLocked();
+            if (session == null || session.id == null || session.id.isBlank()) {
+                return new SessionStartResult(false, "", "Failed to start session.");
+            }
+            return new SessionStartResult(true, session.id, "");
+        }
+    }
+
     public static boolean selectWorkspacePath(String workspacePath) {
         String normalized = workspacePath == null ? "" : workspacePath.trim();
         if (!ClientSessionState.setSelectedWorkspacePath(normalized)) {

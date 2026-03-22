@@ -6,6 +6,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.p2s.store.SessionPersistence;
 import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
@@ -415,6 +416,50 @@ public final class ClientDebugGateway {
             handleCreateJob(exchange);
             return;
         }
+        if ((ROOT_PATH + "/projects").equals(path)) {
+            if ("GET".equals(method)) {
+                handleListProjects(exchange);
+                return;
+            }
+            sendJson(exchange, 405, errorPayload("method_not_allowed", "Use GET on /debug/agent/projects."));
+            return;
+        }
+        if ((ROOT_PATH + "/projects/create").equals(path) && "POST".equals(method)) {
+            handleCreateProject(exchange);
+            return;
+        }
+        if ((ROOT_PATH + "/projects/open").equals(path) && "POST".equals(method)) {
+            handleOpenProject(exchange);
+            return;
+        }
+        if ((ROOT_PATH + "/projects/update").equals(path) && "POST".equals(method)) {
+            handleUpdateProject(exchange);
+            return;
+        }
+        if ((ROOT_PATH + "/projects/delete").equals(path) && "POST".equals(method)) {
+            handleDeleteProject(exchange);
+            return;
+        }
+        if ((ROOT_PATH + "/sessions").equals(path)) {
+            if ("GET".equals(method)) {
+                handleListSessions(exchange);
+                return;
+            }
+            sendJson(exchange, 405, errorPayload("method_not_allowed", "Use GET on /debug/agent/sessions."));
+            return;
+        }
+        if ((ROOT_PATH + "/sessions/create").equals(path) && "POST".equals(method)) {
+            handleCreateSession(exchange);
+            return;
+        }
+        if ((ROOT_PATH + "/sessions/update").equals(path) && "POST".equals(method)) {
+            handleUpdateSession(exchange);
+            return;
+        }
+        if ((ROOT_PATH + "/sessions/switch").equals(path) && "POST".equals(method)) {
+            handleSwitchSession(exchange);
+            return;
+        }
         if (!path.startsWith(ROOT_PATH + "/jobs/")) {
             sendJson(exchange, 404, errorPayload("not_found", "Unknown debug gateway endpoint."));
             return;
@@ -456,6 +501,325 @@ public final class ClientDebugGateway {
     private static void handleState(HttpExchange exchange) throws Exception {
         GatewaySnapshot snapshot = callOnClientThread(ClientDebugGateway::captureSnapshotOnClient);
         sendJson(exchange, 200, buildStatePayload(snapshot));
+    }
+
+    private static void handleListProjects(HttpExchange exchange) throws Exception {
+        JsonObject result = callToolBridge("list_projects", new JsonObject());
+        if (!isToolOk(result)) {
+            sendJson(exchange, 422, result);
+            return;
+        }
+        sendJson(exchange, 200, result);
+    }
+
+    private static void handleCreateProject(HttpExchange exchange) throws Exception {
+        requireNoActiveExternalJob();
+        JsonObject body = parseBodyObject(exchange);
+        JsonObject args = new JsonObject();
+        String name = getString(body, "name");
+        String description = getString(body, "description");
+        if (!name.isBlank()) {
+            args.addProperty("name", name);
+        }
+        if (!description.isBlank()) {
+            args.addProperty("description", description);
+        }
+
+        JsonObject result = callToolBridge("create_project", args);
+        if (!isToolOk(result)) {
+            sendJson(exchange, 422, result);
+            return;
+        }
+
+        callOnClientThread(() -> {
+            ClientAgentManager.onProjectChanged();
+            return null;
+        });
+        GatewaySnapshot snapshot = callOnClientThread(ClientDebugGateway::captureSnapshotOnClient);
+        JsonObject payload = new JsonObject();
+        payload.addProperty("ok", true);
+        payload.addProperty("action", "create_project");
+        payload.add("result", result);
+        payload.add("state", buildStatePayload(snapshot));
+        sendJson(exchange, 200, payload);
+    }
+
+    private static void handleOpenProject(HttpExchange exchange) throws Exception {
+        requireNoActiveExternalJob();
+        JsonObject body = parseBodyObject(exchange);
+        String projectId = getString(body, "id");
+        if (projectId.isBlank()) {
+            sendJson(exchange, 400, errorPayload("invalid_request", "id is required."));
+            return;
+        }
+
+        JsonObject result = openProjectById(projectId);
+        if (!isToolOk(result)) {
+            sendJson(exchange, 422, result);
+            return;
+        }
+        GatewaySnapshot snapshot = callOnClientThread(ClientDebugGateway::captureSnapshotOnClient);
+        JsonObject payload = new JsonObject();
+        payload.addProperty("ok", true);
+        payload.addProperty("action", "open_project");
+        payload.add("result", result);
+        payload.add("state", buildStatePayload(snapshot));
+        sendJson(exchange, 200, payload);
+    }
+
+    private static void handleUpdateProject(HttpExchange exchange) throws Exception {
+        requireNoActiveExternalJob();
+        JsonObject body = parseBodyObject(exchange);
+        String projectId = getString(body, "id");
+        if (projectId.isBlank()) {
+            sendJson(exchange, 400, errorPayload("invalid_request", "id is required."));
+            return;
+        }
+
+        JsonObject args = new JsonObject();
+        args.addProperty("id", projectId);
+        if (body.has("name")) {
+            args.addProperty("name", getString(body, "name"));
+        }
+        if (body.has("description")) {
+            args.addProperty("description", getString(body, "description"));
+        }
+
+        JsonObject result = callToolBridge("rename_project", args);
+        if (!isToolOk(result)) {
+            sendJson(exchange, 422, result);
+            return;
+        }
+
+        JsonObject payload = new JsonObject();
+        payload.addProperty("ok", true);
+        payload.addProperty("action", "update_project");
+        payload.add("result", result);
+        sendJson(exchange, 200, payload);
+    }
+
+    private static void handleDeleteProject(HttpExchange exchange) throws Exception {
+        requireNoActiveExternalJob();
+        JsonObject body = parseBodyObject(exchange);
+        String projectId = getString(body, "id");
+        if (projectId.isBlank()) {
+            sendJson(exchange, 400, errorPayload("invalid_request", "id is required."));
+            return;
+        }
+
+        GatewaySnapshot before = callOnClientThread(ClientDebugGateway::captureSnapshotOnClient);
+        JsonObject args = new JsonObject();
+        args.addProperty("id", projectId);
+        JsonObject result = callToolBridge("delete_project", args);
+        if (!isToolOk(result)) {
+            sendJson(exchange, 422, result);
+            return;
+        }
+
+        if (projectId.equals(safe(before.session().projectId()))) {
+            callOnClientThread(() -> {
+                ClientAgentManager.onProjectChanged();
+                return null;
+            });
+        }
+        GatewaySnapshot snapshot = callOnClientThread(ClientDebugGateway::captureSnapshotOnClient);
+        JsonObject payload = new JsonObject();
+        payload.addProperty("ok", true);
+        payload.addProperty("action", "delete_project");
+        payload.add("result", result);
+        payload.add("state", buildStatePayload(snapshot));
+        sendJson(exchange, 200, payload);
+    }
+
+    private static void handleListSessions(HttpExchange exchange) throws Exception {
+        GatewaySnapshot snapshot = callOnClientThread(ClientDebugGateway::captureSnapshotOnClient);
+        String projectId = safe(snapshot.session().projectId());
+        List<SessionPersistence.SessionIndexEntry> sessions = projectId.isBlank()
+                ? SessionPersistence.listSessions()
+                : SessionPersistence.listSessions(projectId);
+
+        JsonObject payload = new JsonObject();
+        payload.addProperty("ok", true);
+        payload.addProperty("project_id", projectId);
+        payload.addProperty("active_session_id", safe(snapshot.effectiveSessionId()));
+        JsonArray items = new JsonArray();
+        for (SessionPersistence.SessionIndexEntry entry : sessions) {
+            if (entry == null) {
+                continue;
+            }
+            JsonObject item = new JsonObject();
+            item.addProperty("id", safe(entry.id()));
+            item.addProperty("project_id", safe(entry.projectId()));
+            item.addProperty("title", safe(entry.title()));
+            item.addProperty("created_at", entry.createdAt());
+            item.addProperty("updated_at", entry.updatedAt());
+            item.addProperty("message_count", entry.messageCount());
+            item.addProperty("active", safe(snapshot.effectiveSessionId()).equals(safe(entry.id())));
+            items.add(item);
+        }
+        payload.add("sessions", items);
+        sendJson(exchange, 200, payload);
+    }
+
+    private static void handleCreateSession(HttpExchange exchange) throws Exception {
+        requireNoActiveExternalJob();
+        JsonObject body = parseBodyObject(exchange);
+        String requestedProjectId = getString(body, "project_id");
+        String selectedWorkspacePath = getString(body, "selected_workspace_path");
+        boolean startNow = getBoolean(body, "start_now", true);
+
+        GatewaySnapshot before = callOnClientThread(ClientDebugGateway::captureSnapshotOnClient);
+        if (!requestedProjectId.isBlank() && !requestedProjectId.equals(safe(before.session().projectId()))) {
+            JsonObject openResult = openProjectById(requestedProjectId);
+            if (!isToolOk(openResult)) {
+                sendJson(exchange, 422, openResult);
+                return;
+            }
+        }
+
+        callOnClientThread(() -> {
+            ClientAgentManager.newSession();
+            return null;
+        });
+        if (!selectedWorkspacePath.isBlank()) {
+            boolean selected = callOnClientThread(() -> ClientAgentManager.selectWorkspacePath(selectedWorkspacePath));
+            if (!selected) {
+                sendJson(exchange, 422, errorPayload("invalid_workspace", "selected_workspace_path is invalid for current project."));
+                return;
+            }
+        }
+
+        String sessionId = "";
+        if (startNow) {
+            ClientAgentManager.SessionStartResult start = callOnClientThread(ClientAgentManager::ensureSessionStartedForHttp);
+            if (!start.ok()) {
+                sendJson(exchange, 409, errorPayload("session_create_failed", safe(start.error())));
+                return;
+            }
+            sessionId = safe(start.sessionId());
+        }
+
+        GatewaySnapshot snapshot = callOnClientThread(ClientDebugGateway::captureSnapshotOnClient);
+        JsonObject payload = new JsonObject();
+        payload.addProperty("ok", true);
+        payload.addProperty("action", "create_session");
+        payload.addProperty("session_id", sessionId.isBlank() ? safe(snapshot.effectiveSessionId()) : sessionId);
+        payload.add("state", buildStatePayload(snapshot));
+        sendJson(exchange, 200, payload);
+    }
+
+    private static void handleUpdateSession(HttpExchange exchange) throws Exception {
+        requireNoActiveExternalJob();
+        JsonObject body = parseBodyObject(exchange);
+        String sessionId = getString(body, "id");
+        if (sessionId.isBlank()) {
+            sendJson(exchange, 400, errorPayload("invalid_request", "id is required."));
+            return;
+        }
+
+        String title = getOptionalString(body, "title");
+        String projectId = getOptionalString(body, "project_id");
+        String selectedWorkspacePath = getOptionalString(body, "selected_workspace_path");
+        if (title == null && projectId == null && selectedWorkspacePath == null) {
+            sendJson(exchange, 400, errorPayload("invalid_request", "At least one of title, project_id, selected_workspace_path is required."));
+            return;
+        }
+
+        SessionPersistence.SavedSession saved = SessionPersistence.loadSession(sessionId);
+        if (saved == null) {
+            sendJson(exchange, 404, errorPayload("not_found", "Unknown session id."));
+            return;
+        }
+
+        String activeSessionId = callOnClientThread(ClientAgentManager::debugCurrentSessionId);
+        boolean active = sessionId.equals(safe(activeSessionId));
+        if (active && projectId != null && !projectId.equals(safe(saved.projectId()))) {
+            sendJson(exchange, 409, errorPayload("invalid_request", "Cannot change project_id of active session."));
+            return;
+        }
+
+        SessionPersistence.SavedSession updated = new SessionPersistence.SavedSession(
+                saved.id(),
+                projectId == null ? safe(saved.projectId()) : projectId,
+                title == null ? safe(saved.title()) : title,
+                saved.createdAt(),
+                System.currentTimeMillis(),
+                saved.messageCount(),
+                saved.llmHistory(),
+                saved.chatLog(),
+                saved.planItems(),
+                saved.planExplanation(),
+                selectedWorkspacePath == null ? safe(saved.selectedWorkspacePath()) : selectedWorkspacePath,
+                saved.pendingChoice()
+        );
+        SessionPersistence.saveSession(updated);
+
+        if (active && selectedWorkspacePath != null) {
+            boolean switched = callOnClientThread(() -> ClientAgentManager.selectWorkspacePath(selectedWorkspacePath));
+            if (!switched) {
+                sendJson(exchange, 422, errorPayload("invalid_workspace", "selected_workspace_path is invalid for current project."));
+                return;
+            }
+        }
+
+        JsonObject payload = new JsonObject();
+        payload.addProperty("ok", true);
+        payload.addProperty("action", "update_session");
+        payload.addProperty("id", safe(updated.id()));
+        payload.addProperty("project_id", safe(updated.projectId()));
+        payload.addProperty("title", safe(updated.title()));
+        payload.addProperty("selected_workspace_path", safe(updated.selectedWorkspacePath()));
+        payload.addProperty("updated_at", updated.updatedAt());
+        payload.addProperty("active", active);
+        sendJson(exchange, 200, payload);
+    }
+
+    private static void handleSwitchSession(HttpExchange exchange) throws Exception {
+        requireNoActiveExternalJob();
+        JsonObject body = parseBodyObject(exchange);
+        String sessionId = getString(body, "id");
+        if (sessionId.isBlank()) {
+            sendJson(exchange, 400, errorPayload("invalid_request", "id is required."));
+            return;
+        }
+
+        SessionPersistence.SavedSession saved = SessionPersistence.loadSession(sessionId);
+        if (saved == null) {
+            sendJson(exchange, 404, errorPayload("not_found", "Unknown session id."));
+            return;
+        }
+
+        GatewaySnapshot before = callOnClientThread(ClientDebugGateway::captureSnapshotOnClient);
+        String targetProjectId = getString(body, "project_id");
+        if (targetProjectId.isBlank()) {
+            targetProjectId = safe(saved.projectId());
+        }
+        if (!targetProjectId.isBlank() && !targetProjectId.equals(safe(before.session().projectId()))) {
+            JsonObject openResult = openProjectById(targetProjectId);
+            if (!isToolOk(openResult)) {
+                sendJson(exchange, 422, openResult);
+                return;
+            }
+        }
+
+        callOnClientThread(() -> {
+            ClientAgentManager.restoreSession(sessionId);
+            return null;
+        });
+
+        String activeSessionId = callOnClientThread(ClientAgentManager::debugCurrentSessionId);
+        if (!sessionId.equals(safe(activeSessionId))) {
+            sendJson(exchange, 409, errorPayload("switch_failed", "Session switch was not applied."));
+            return;
+        }
+
+        GatewaySnapshot snapshot = callOnClientThread(ClientDebugGateway::captureSnapshotOnClient);
+        JsonObject payload = new JsonObject();
+        payload.addProperty("ok", true);
+        payload.addProperty("action", "switch_session");
+        payload.addProperty("session_id", safe(snapshot.effectiveSessionId()));
+        payload.add("state", buildStatePayload(snapshot));
+        sendJson(exchange, 200, payload);
     }
 
     private static void handleCreateJob(HttpExchange exchange) throws Exception {
@@ -806,6 +1170,60 @@ public final class ClientDebugGateway {
         }
     }
 
+    private static void requireNoActiveExternalJob() throws RequestFailure {
+        DebugJob running = currentJob;
+        if (running != null && !running.isTerminal()) {
+            throw new RequestFailure(409, "busy", "An external debug job is already active.");
+        }
+        if (ClientAgentManager.isBusy()) {
+            throw new RequestFailure(409, "busy", "Agent is running.");
+        }
+        if (ClientSessionState.hasPendingPatch()) {
+            throw new RequestFailure(409, "pending_patch", "Pending patch awaiting decision.");
+        }
+        if (ClientSessionState.hasPendingChoice()) {
+            throw new RequestFailure(409, "pending_choice", "Pending choice awaiting selection.");
+        }
+    }
+
+    private static JsonObject openProjectById(String projectId) throws Exception {
+        JsonObject args = new JsonObject();
+        args.addProperty("id", projectId);
+        JsonObject result = callToolBridge("open_project", args);
+        if (isToolOk(result)) {
+            callOnClientThread(() -> {
+                ClientAgentManager.onProjectChanged();
+                return null;
+            });
+        }
+        return result;
+    }
+
+    private static JsonObject callToolBridge(String toolName, JsonObject args) throws RequestFailure {
+        if (!ClientServerBridge.canUseToolBridge()) {
+            throw new RequestFailure(409, "server_unavailable", "Compatible P2S client/server bridge is not available.");
+        }
+        try {
+            JsonObject result = ClientToolBridge.call(toolName, args == null ? new JsonObject() : args).get(20, TimeUnit.SECONDS);
+            return result == null ? new JsonObject() : result;
+        } catch (TimeoutException e) {
+            throw new RequestFailure(504, "tool_timeout", "Tool call timed out.");
+        } catch (Exception e) {
+            throw new RequestFailure(500, "tool_failed", "Tool call failed: " + safeMessage(e));
+        }
+    }
+
+    private static boolean isToolOk(JsonObject payload) {
+        if (payload == null || !payload.has("ok")) {
+            return false;
+        }
+        try {
+            return payload.get("ok").getAsBoolean();
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
     private static byte[] readBody(InputStream body) throws IOException, RequestFailure {
         if (body == null) {
             return new byte[0];
@@ -825,6 +1243,28 @@ public final class ClientDebugGateway {
             return obj.get(key).getAsString().trim();
         } catch (Exception ignored) {
             return "";
+        }
+    }
+
+    private static String getOptionalString(JsonObject obj, String key) {
+        if (obj == null || key == null || !obj.has(key) || !obj.get(key).isJsonPrimitive()) {
+            return null;
+        }
+        try {
+            return obj.get(key).getAsString().trim();
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private static boolean getBoolean(JsonObject obj, String key, boolean defaultValue) {
+        if (obj == null || key == null || !obj.has(key) || !obj.get(key).isJsonPrimitive()) {
+            return defaultValue;
+        }
+        try {
+            return obj.get(key).getAsBoolean();
+        } catch (Exception ignored) {
+            return defaultValue;
         }
     }
 
