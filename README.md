@@ -56,8 +56,11 @@ P2S Workspace 是一个把 Minecraft 结构编辑做成“聊天式工作流”�
 - 修改选区物品
 - 调整 patch 预览限制、确认阈值、会话超时等运行参数
 - 控制流式输出、自动应用、上下文压缩等客户端行为
+- 在调试构建里控制本地外部调试网关：`debugGatewayEnabled`、`debugGatewayHost`、`debugGatewayPort`、`debugGatewayExposeSse`
 
 当前已经没有单独的服务端配置文件；用户可编辑的配置项都归到客户端配置中。
+
+如果你在本地做自动化调试，调试构建会按 `p2s_client.json` 中的 debug gateway 配置，在 `127.0.0.1` 上启动一个本地 HTTP 调试入口，并通过 SSE 推送长任务事件。这个入口只用于本机调试，不是联机服务端 API。
 
 ## 数据与备份
 

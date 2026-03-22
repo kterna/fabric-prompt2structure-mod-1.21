@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 2026-03-22 本地 Debug 外部控制网关
+- 客户端新增仅在 `DEBUG` 模式下启用的本地 debug gateway，可在 `127.0.0.1` 上通过 HTTP 提交 agent job，并通过 SSE 订阅长任务事件。
+- 外部调试接口支持查看当前状态、提交 prompt、读取 job 状态，以及处理 pending patch / pending choice。
+- `config/p2s_client.json` 新增 `debugGatewayEnabled`、`debugGatewayHost`、`debugGatewayPort`、`debugGatewayExposeSse` 配置项。
+
 ## 2026-03-09 Patch 工具语义对齐
 - 关闭中间编辑区后不再切到 gameplay input，避免界面保持收起态时无法重新操作。
 - 让聊天界面在重新打开时保留左目录 / 中编辑区 / 右会话栏的开启或关闭状态。
@@ -88,4 +93,3 @@
 - 聊天编辑区支持在游戏内折叠停靠，减轻大面板对视野的遮挡。
 - 计划跟踪逻辑统一收束到 `update_plan`，替换早期 todo 口径。
 - 移除服务端配置残留：删除 `/p2sreload` 与 `p2s.json` 路径，把 patch/超时等运行参数并回 `p2s_client.json`。
-

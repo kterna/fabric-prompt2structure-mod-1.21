@@ -585,6 +585,36 @@ public final class ClientSessionState {
         return List.copyOf(workspaceFiles);
     }
 
+    public static synchronized DebugSnapshot debugSnapshot() {
+        return new DebugSnapshot(
+                hasProject,
+                sessionActive,
+                sessionId,
+                projectId,
+                projectName,
+                projectDescription,
+                status,
+                runtimeState,
+                revision,
+                selectedWorkspacePath,
+                hasPendingPatch,
+                pendingPath,
+                pendingSummary,
+                pendingRisk,
+                pendingChangedBlocks,
+                previewSummary,
+                previewDetail,
+                previewRisk,
+                previewChangedBlocks,
+                planExplanation,
+                List.copyOf(planItems),
+                pendingChoice,
+                List.copyOf(messages),
+                streaming,
+                streamingBuffer.toString()
+        );
+    }
+
     public static synchronized String getWorkspaceFileToml(String workspacePath) {
         String normalized = normalizeWorkspacePath(workspacePath);
         if (normalized.isBlank()) {
@@ -869,6 +899,35 @@ public final class ClientSessionState {
             int sizeY,
             int sizeZ,
             int pendingChangedBlocks
+    ) {
+    }
+
+    public record DebugSnapshot(
+            boolean hasProject,
+            boolean sessionActive,
+            String sessionId,
+            String projectId,
+            String projectName,
+            String projectDescription,
+            String status,
+            String runtimeState,
+            String revision,
+            String selectedWorkspacePath,
+            boolean hasPendingPatch,
+            String pendingPath,
+            String pendingSummary,
+            String pendingRisk,
+            int pendingChangedBlocks,
+            String previewSummary,
+            String previewDetail,
+            String previewRisk,
+            int previewChangedBlocks,
+            String planExplanation,
+            List<PlanItem> planItems,
+            ChoiceRequest pendingChoice,
+            List<ChatMessage> messages,
+            boolean streaming,
+            String streamingText
     ) {
     }
 }

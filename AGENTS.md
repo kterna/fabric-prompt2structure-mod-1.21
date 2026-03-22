@@ -4,7 +4,7 @@
 这个仓库是一个支持多版本的 Fabric 模组，当前目标版本由 `settings.json` 与 `versions/1.21`、`versions/1.21.1` 中各自的 `gradle.properties` 定义。
 
 - `src/main/java/com/p2s`：共享服务端 / 运行时代码，例如网络桥接、项目/工作区持久化、会话编排、Patch 校验与 LLM schema。
-- `src/client/java/com/p2s`：共享客户端代码，包含聊天 UI、选区、客户端 agent、工具桥接、屏幕组件与本地持久化。
+- `src/client/java/com/p2s`：共享客户端代码，包含聊天 UI、选区、客户端 agent、工具桥接、本地 debug gateway、屏幕组件与本地持久化。
 - `src/main/resources`：模组元数据、服务端 mixin、语言文件与 `assets/prompt2structure` 资源。
 - `src/client/resources`：客户端 mixin、默认 skills、默认 subagent profiles。
 - `src/client/resources/p2s_default_skills/<skill-id>/`：默认 `SKILL.md` 与可选 `subdocs/`。
@@ -36,6 +36,7 @@ Gradle 当前没有强制格式化器。较新的 Java 文件大多使用 4 空�
 - 聊天面板、补丁预览、Apply / Discard
 - 会话恢复、检查点、Undo / Redo
 - 技能 / subagent / choice / plan / compaction 相关 UI
+- Debug gateway：`GET /debug/agent/state`、`POST /debug/agent/jobs`、SSE 事件流，以及 patch / choice 外部闭环
 
 如果一次编译或构建尝试失败，应立即停止继续重复尝试，并直接告知用户失败原因；不要在未获得用户明确要求的情况下自行连续重试。
 
@@ -92,5 +93,7 @@ Pull Request 应包含：
 
 ## 配置与密钥
 运行时配置位于 `config/p2s_client.json`。项目 / 工作区 / 会话 / skills / profiles 还会写入 `config/p2s_projects_v2/`、`config/p2s_sessions_v2/`、`config/p2s_skills/` 等目录。
+
+本地 debug gateway 的配置也在 `config/p2s_client.json`，并且只应在 `P2SMod.DEBUG` 为 true 的调试环境里使用。
 
 不要提交 API Key、本地配置，或自动生成的世界/项目数据。

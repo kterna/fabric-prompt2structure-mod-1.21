@@ -39,6 +39,10 @@ public final class P2SClientConfig {
     private static final int DEFAULT_MAX_BLOCKS_PER_COMMIT = P2SDefaults.DEFAULT_MAX_BLOCKS_PER_COMMIT;
     private static final boolean DEFAULT_CONFIRM_REQUIRED = P2SDefaults.DEFAULT_CONFIRM_REQUIRED;
     private static final int DEFAULT_RISK_AUTO_APPLY_THRESHOLD = P2SDefaults.DEFAULT_RISK_AUTO_APPLY_THRESHOLD;
+    private static final boolean DEFAULT_DEBUG_GATEWAY_ENABLED = P2SMod.DEBUG;
+    private static final String DEFAULT_DEBUG_GATEWAY_HOST = "127.0.0.1";
+    private static final int DEFAULT_DEBUG_GATEWAY_PORT = 17862;
+    private static final boolean DEFAULT_DEBUG_GATEWAY_EXPOSE_SSE = true;
     private static final String DEFAULT_SYSTEM_PROMPT = P2SDefaults.DEFAULT_SYSTEM_PROMPT;
     private static final String DEFAULT_COMPACT_PROMPT = """
             You are performing a CONTEXT CHECKPOINT COMPACTION for a Prompt2Structure client session.
@@ -72,6 +76,10 @@ public final class P2SClientConfig {
     private static int maxBlocksPerCommit = DEFAULT_MAX_BLOCKS_PER_COMMIT;
     private static boolean confirmRequired = DEFAULT_CONFIRM_REQUIRED;
     private static int riskAutoApplyThreshold = DEFAULT_RISK_AUTO_APPLY_THRESHOLD;
+    private static boolean debugGatewayEnabled = DEFAULT_DEBUG_GATEWAY_ENABLED;
+    private static String debugGatewayHost = DEFAULT_DEBUG_GATEWAY_HOST;
+    private static int debugGatewayPort = DEFAULT_DEBUG_GATEWAY_PORT;
+    private static boolean debugGatewayExposeSse = DEFAULT_DEBUG_GATEWAY_EXPOSE_SSE;
     private static final Map<String, List<String>> workspaceFoldersByProject = new LinkedHashMap<>();
 
     private P2SClientConfig() {
@@ -167,6 +175,22 @@ public final class P2SClientConfig {
 
     public static synchronized int getRiskAutoApplyThreshold() {
         return riskAutoApplyThreshold;
+    }
+
+    public static synchronized boolean isDebugGatewayEnabled() {
+        return debugGatewayEnabled;
+    }
+
+    public static synchronized String getDebugGatewayHost() {
+        return debugGatewayHost;
+    }
+
+    public static synchronized int getDebugGatewayPort() {
+        return debugGatewayPort;
+    }
+
+    public static synchronized boolean getDebugGatewayExposeSse() {
+        return debugGatewayExposeSse;
     }
 
     public static synchronized JsonObject patchRuntimeSettingsPayload() {
@@ -340,6 +364,10 @@ public final class P2SClientConfig {
         maxBlocksPerCommit = DEFAULT_MAX_BLOCKS_PER_COMMIT;
         confirmRequired = DEFAULT_CONFIRM_REQUIRED;
         riskAutoApplyThreshold = DEFAULT_RISK_AUTO_APPLY_THRESHOLD;
+        debugGatewayEnabled = DEFAULT_DEBUG_GATEWAY_ENABLED;
+        debugGatewayHost = DEFAULT_DEBUG_GATEWAY_HOST;
+        debugGatewayPort = DEFAULT_DEBUG_GATEWAY_PORT;
+        debugGatewayExposeSse = DEFAULT_DEBUG_GATEWAY_EXPOSE_SSE;
         if (persist) {
             save();
         }
@@ -388,6 +416,10 @@ public final class P2SClientConfig {
         Integer loadedMaxBlocksPerCommit = null;
         Boolean loadedConfirmRequired = null;
         Integer loadedRiskAutoApplyThreshold = null;
+        Boolean loadedDebugGatewayEnabled = null;
+        String loadedDebugGatewayHost = null;
+        Integer loadedDebugGatewayPort = null;
+        Boolean loadedDebugGatewayExposeSse = null;
         String loadedSystemPrompt = null;
         String loadedCompactPrompt = null;
         Map<String, List<String>> loadedFolders = new LinkedHashMap<>();
@@ -411,6 +443,10 @@ public final class P2SClientConfig {
                 loadedMaxBlocksPerCommit = root.has("maxBlocksPerCommit") ? root.get("maxBlocksPerCommit").getAsInt() : null;
                 loadedConfirmRequired = root.has("confirmRequired") ? root.get("confirmRequired").getAsBoolean() : null;
                 loadedRiskAutoApplyThreshold = root.has("riskAutoApplyThreshold") ? root.get("riskAutoApplyThreshold").getAsInt() : null;
+                loadedDebugGatewayEnabled = root.has("debugGatewayEnabled") ? root.get("debugGatewayEnabled").getAsBoolean() : null;
+                loadedDebugGatewayHost = root.has("debugGatewayHost") ? root.get("debugGatewayHost").getAsString() : null;
+                loadedDebugGatewayPort = root.has("debugGatewayPort") ? root.get("debugGatewayPort").getAsInt() : null;
+                loadedDebugGatewayExposeSse = root.has("debugGatewayExposeSse") ? root.get("debugGatewayExposeSse").getAsBoolean() : null;
                 loadedCompactPrompt = root.has("compactPrompt") ? root.get("compactPrompt").getAsString() : null;
                 if (root.has("workspaceFoldersByProject") && root.get("workspaceFoldersByProject").isJsonObject()) {
                     JsonObject foldersRoot = root.getAsJsonObject("workspaceFoldersByProject");
@@ -478,6 +514,12 @@ public final class P2SClientConfig {
         confirmRequired = loadedConfirmRequired == null ? DEFAULT_CONFIRM_REQUIRED : loadedConfirmRequired;
         Integer riskThreshold = normalizeThreshold(loadedRiskAutoApplyThreshold);
         riskAutoApplyThreshold = riskThreshold == null ? DEFAULT_RISK_AUTO_APPLY_THRESHOLD : riskThreshold;
+        debugGatewayEnabled = loadedDebugGatewayEnabled == null ? DEFAULT_DEBUG_GATEWAY_ENABLED : loadedDebugGatewayEnabled;
+        String normalizedGatewayHost = normalizeNonBlank(loadedDebugGatewayHost);
+        debugGatewayHost = normalizedGatewayHost == null ? DEFAULT_DEBUG_GATEWAY_HOST : normalizedGatewayHost;
+        Integer gatewayPort = normalizePort(loadedDebugGatewayPort);
+        debugGatewayPort = gatewayPort == null ? DEFAULT_DEBUG_GATEWAY_PORT : gatewayPort;
+        debugGatewayExposeSse = loadedDebugGatewayExposeSse == null ? DEFAULT_DEBUG_GATEWAY_EXPOSE_SSE : loadedDebugGatewayExposeSse;
         String loadedCompact = loadedCompactPrompt == null ? "" : loadedCompactPrompt.trim();
         compactPrompt = loadedCompact.isBlank() ? DEFAULT_COMPACT_PROMPT : loadedCompact;
         workspaceFoldersByProject.clear();
@@ -510,6 +552,10 @@ public final class P2SClientConfig {
             root.addProperty("maxBlocksPerCommit", maxBlocksPerCommit);
             root.addProperty("confirmRequired", confirmRequired);
             root.addProperty("riskAutoApplyThreshold", riskAutoApplyThreshold);
+            root.addProperty("debugGatewayEnabled", debugGatewayEnabled);
+            root.addProperty("debugGatewayHost", debugGatewayHost);
+            root.addProperty("debugGatewayPort", debugGatewayPort);
+            root.addProperty("debugGatewayExposeSse", debugGatewayExposeSse);
 
             JsonObject foldersRoot = new JsonObject();
             for (Map.Entry<String, List<String>> entry : workspaceFoldersByProject.entrySet()) {
@@ -567,6 +613,13 @@ public final class P2SClientConfig {
 
     private static Integer normalizeThreshold(Integer value) {
         if (value == null || value < -1) {
+            return null;
+        }
+        return value;
+    }
+
+    private static Integer normalizePort(Integer value) {
+        if (value == null || value < 1 || value > 65535) {
             return null;
         }
         return value;

@@ -87,6 +87,41 @@ public final class ClientAgentManager {
         }
     }
 
+    public static boolean isBusy() {
+        synchronized (LOCK) {
+            return currentSession != null && currentSession.inFlight;
+        }
+    }
+
+    public static String debugCurrentSessionId() {
+        synchronized (LOCK) {
+            if (currentSession != null && currentSession.id != null && !currentSession.id.isBlank()) {
+                return currentSession.id;
+            }
+        }
+        return ClientSessionState.getSessionId();
+    }
+
+    public static boolean selectWorkspacePath(String workspacePath) {
+        String normalized = workspacePath == null ? "" : workspacePath.trim();
+        if (!ClientSessionState.setSelectedWorkspacePath(normalized)) {
+            return false;
+        }
+
+        synchronized (LOCK) {
+            if (currentSession != null) {
+                currentSession.selectedWorkspacePath = ClientSessionState.getSelectedWorkspacePath();
+            }
+        }
+
+        if (ClientSessionState.isActive()) {
+            JsonObject payload = new JsonObject();
+            payload.addProperty("path", ClientSessionState.getSelectedWorkspacePath());
+            return ClientServerBridge.sendSessionAction("session_select_workspace", payload.toString());
+        }
+        return true;
+    }
+
     public static void submitManualCompact() {
         LocalSession session;
         synchronized (LOCK) {
