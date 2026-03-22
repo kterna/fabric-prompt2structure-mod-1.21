@@ -780,6 +780,92 @@ public final class LLMService {
             tools.add(searchTool);
         }
 
+        if (P2SMod.DEBUG && allowsTool(allowedTools, "debug_stage_blocks")) {
+            JsonObject debugStageTool = new JsonObject();
+            debugStageTool.addProperty("type", "function");
+            JsonObject debugStageFn = new JsonObject();
+            debugStageFn.addProperty("name", "debug_stage_blocks");
+            debugStageFn.addProperty("description",
+                    "DEBUG only. Stage block-state experiments inside the current player selection using relative coordinates from selection min. " +
+                    "Use inspect_only=true to read the current selection bounds without placing blocks. " +
+                    "Each placement becomes a setblock command on the server.");
+
+            JsonObject debugStageParams = new JsonObject();
+            debugStageParams.addProperty("type", "object");
+            JsonObject debugStageProps = new JsonObject();
+
+            JsonObject debugStageLabel = new JsonObject();
+            debugStageLabel.addProperty("type", "string");
+            debugStageLabel.addProperty("description", "Optional label for this staging batch.");
+            debugStageProps.add("label", debugStageLabel);
+
+            JsonObject debugStageInspectOnly = new JsonObject();
+            debugStageInspectOnly.addProperty("type", "boolean");
+            debugStageInspectOnly.addProperty("description", "When true, return selection bounds only and do not place blocks.");
+            debugStageProps.add("inspect_only", debugStageInspectOnly);
+
+            JsonObject debugStageStopOnError = new JsonObject();
+            debugStageStopOnError.addProperty("type", "boolean");
+            debugStageStopOnError.addProperty("description", "Defaults to true. Stop after the first failed placement.");
+            debugStageProps.add("stop_on_error", debugStageStopOnError);
+
+            JsonObject placementsProp = new JsonObject();
+            placementsProp.addProperty("type", "array");
+            placementsProp.addProperty("description",
+                    "Block placements relative to selection min. Required unless inspect_only=true. " +
+                    "Use full block_state strings such as minecraft:oak_button[face=wall,facing=north,powered=false].");
+            JsonObject placementItem = new JsonObject();
+            placementItem.addProperty("type", "object");
+            JsonObject placementProps = new JsonObject();
+
+            JsonObject dxProp = new JsonObject();
+            dxProp.addProperty("type", "integer");
+            dxProp.addProperty("description", "Relative X offset from selection min.");
+            placementProps.add("dx", dxProp);
+
+            JsonObject dyProp = new JsonObject();
+            dyProp.addProperty("type", "integer");
+            dyProp.addProperty("description", "Relative Y offset from selection min.");
+            placementProps.add("dy", dyProp);
+
+            JsonObject dzProp = new JsonObject();
+            dzProp.addProperty("type", "integer");
+            dzProp.addProperty("description", "Relative Z offset from selection min.");
+            placementProps.add("dz", dzProp);
+
+            JsonObject blockStateProp = new JsonObject();
+            blockStateProp.addProperty("type", "string");
+            blockStateProp.addProperty("description", "Complete block state string used in setblock, for example minecraft:oak_slab[type=top].");
+            placementProps.add("block_state", blockStateProp);
+
+            JsonObject modeProp = new JsonObject();
+            modeProp.addProperty("type", "string");
+            JsonArray modeEnum = new JsonArray();
+            modeEnum.add("replace");
+            modeEnum.add("keep");
+            modeEnum.add("destroy");
+            modeProp.add("enum", modeEnum);
+            modeProp.addProperty("description", "Optional setblock mode. Defaults to replace.");
+            placementProps.add("mode", modeProp);
+
+            placementItem.add("properties", placementProps);
+            JsonArray placementRequired = new JsonArray();
+            placementRequired.add("dx");
+            placementRequired.add("dy");
+            placementRequired.add("dz");
+            placementRequired.add("block_state");
+            placementItem.add("required", placementRequired);
+            placementItem.addProperty("additionalProperties", false);
+            placementsProp.add("items", placementItem);
+            debugStageProps.add("placements", placementsProp);
+
+            debugStageParams.add("properties", debugStageProps);
+            debugStageParams.addProperty("additionalProperties", false);
+            debugStageFn.add("parameters", debugStageParams);
+            debugStageTool.add("function", debugStageFn);
+            tools.add(debugStageTool);
+        }
+
         if (allowsTool(allowedTools, "propose_patch")) {
             JsonObject patchTool = new JsonObject();
             patchTool.addProperty("type", "function");

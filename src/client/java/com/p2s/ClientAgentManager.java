@@ -52,6 +52,9 @@ public final class ClientAgentManager {
             - Use create_workspace_file / rename_workspace_file / delete_workspace_file for file management.
             - Propose edits with propose_patch and wait for user apply/discard decision.
             - Use search_block_ids when unsure about block id names.
+            - When DEBUG mode exposes debug_stage_blocks, use it to stage block-state experiments inside the current selection.
+            - debug_stage_blocks uses relative coordinates from selection min; call it with inspect_only=true first if bounds are unknown.
+            - After using debug_stage_blocks, ask the user to visually verify the generated variants before parsing logs.
             - Use list_profiles/get_profile before creating subagents when profile choice matters.
             - Use create_subagent for delegated tasks, then poll with get_subagent.
             - Use continue_subagent to continue a failed/completed/cancelled subagent with new instructions.
@@ -720,7 +723,7 @@ public final class ClientAgentManager {
             case "get_profile" -> getProfilePayload(call.arguments());
             case "get_project_state", "read_workspace_file",
                     "create_workspace_file", "rename_workspace_file", "delete_workspace_file",
-                    "propose_patch", "search_block_ids" ->
+                    "propose_patch", "search_block_ids", "debug_stage_blocks" ->
                     callServerTool(toolName, normalizeArgsObject(call.arguments()));
             default -> toolError(toolName, "Unknown tool");
         };
@@ -1181,6 +1184,7 @@ public final class ClientAgentManager {
             case "delete_workspace_file" -> "message.p2s.agent.tool.summary.delete_workspace_file";
             case "propose_patch" -> "message.p2s.agent.tool.summary.propose_patch";
             case "search_block_ids" -> "message.p2s.agent.tool.summary.search_block_ids";
+            case "debug_stage_blocks" -> "message.p2s.agent.tool.summary.debug_stage_blocks";
             default -> "";
         };
     }

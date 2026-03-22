@@ -9,6 +9,7 @@ import com.p2s.network.S2CChatResponsePayload;
 import com.p2s.network.S2CPatchPreviewPayload;
 import com.p2s.network.S2CSessionSyncPayload;
 import com.p2s.network.S2CToolBridgePayload;
+import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
 import net.minecraft.network.chat.Component;
@@ -18,6 +19,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -37,6 +39,9 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
     private static final int MAX_PREVIEW_WARNING_LINES = 20;
     private static final int MAX_CHECKPOINTS = 24;
     private static final int MAX_WORKSPACE_FILES = 128;
+    private static final int MAX_DEBUG_STAGE_BLOCKS = 256;
+    private static final int MAX_DEBUG_STAGE_SAMPLES = 16;
+    private static final int MAX_DEBUG_STAGE_FAILURES = 12;
     private static final String DEFAULT_PROJECT_NAME = "Current Project";
 
     private SessionManager() {
@@ -109,6 +114,7 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
                 case "delete_workspace_file" -> handleDeleteWorkspaceFileTool(player, arguments);
                 case "propose_patch" -> handleProposePatchTool(player, arguments);
                 case "search_block_ids" -> handleSearchBlockIds(arguments);
+                case "debug_stage_blocks" -> handleDebugStageBlocksTool(player, arguments);
                 default -> buildToolErrorKey(normalizedTool, "message.p2s.tool.unknown_tool");
             };
             sendSessionSync(player, sessions.get(player.getUUID()));
@@ -641,6 +647,216 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
             addToolWarning(payload, "message.p2s.search.no_matches");
         }
         return payload;
+    }
+
+    private static JsonObject handleDebugStageBlocksTool(ServerPlayer player, JsonElement argsElem) {
+        if (!P2SMod.DEBUG) {
+            return buildToolError("debug_stage_blocks", "Debug mode is disabled.");
+        }
+        if (player == null) {
+            return buildToolError("debug_stage_blocks", "Player context is required.");
+        }
+
+        SelectionManager.Selection selection = SelectionManager.get(player.getUUID());
+        if (selection == null || !selection.isComplete()) {
+            return buildToolError("debug_stage_blocks", "Selection is incomplete. Set both points before staging debug blocks.");
+        }
+
+        JsonObject args = normalizeArgsObject(argsElem);
+        boolean inspectOnly = Boolean.TRUE.equals(getBoolean(args, "inspect_only"));
+        boolean stopOnError = !Boolean.FALSE.equals(getBoolean(args, "stop_on_error"));
+        String label = getString(args, "label");
+
+        BlockPos min = selection.min();
+        BlockPos max = selection.max();
+        Vec3i size = selection.size();
+
+        JsonObject payload = buildToolSuccess("debug_stage_blocks");
+        if (!label.isBlank()) {
+            payload.addProperty("label", label);
+        }
+        payload.addProperty("inspect_only", inspectOnly);
+        payload.addProperty("stop_on_error", stopOnError);
+        payload.addProperty("max_placements", MAX_DEBUG_STAGE_BLOCKS);
+        payload.add("origin", buildVec3Payload(min.getX(), min.getY(), min.getZ()));
+        payload.add("selection_min", buildVec3Payload(min.getX(), min.getY(), min.getZ()));
+        payload.add("selection_max", buildVec3Payload(max.getX(), max.getY(), max.getZ()));
+        payload.add("selection_size", buildVec3Payload(size.getX(), size.getY(), size.getZ()));
+
+        if (inspectOnly) {
+            payload.addProperty("requested_count", 0);
+            payload.addProperty("executed_count", 0);
+            payload.addProperty("failed_count", 0);
+            payload.addProperty("summary", "Selection ready for debug staging.");
+            return payload;
+        }
+
+        if (!args.has("placements") || !args.get("placements").isJsonArray()) {
+            return buildToolError("debug_stage_blocks", "Missing placements array.");
+        }
+
+        JsonArray placements = args.getAsJsonArray("placements");
+        if (placements.size() == 0) {
+            return buildToolError("debug_stage_blocks", "placements must contain at least one item.");
+        }
+        if (placements.size() > MAX_DEBUG_STAGE_BLOCKS) {
+            return buildToolError("debug_stage_blocks", "Too many placements (" + placements.size() + " > " + MAX_DEBUG_STAGE_BLOCKS + ").");
+        }
+
+        JsonArray placementsSample = new JsonArray();
+        JsonArray commandSample = new JsonArray();
+        JsonArray failures = new JsonArray();
+        int executedCount = 0;
+        int failedCount = 0;
+        boolean stoppedEarly = false;
+
+        for (int index = 0; index < placements.size(); index++) {
+            JsonElement element = placements.get(index);
+            JsonObject placement = element != null && element.isJsonObject() ? element.getAsJsonObject() : null;
+            Integer dx = getInt(placement, "dx");
+            Integer dy = getInt(placement, "dy");
+            Integer dz = getInt(placement, "dz");
+            String blockState = getString(placement, "block_state").trim();
+            String mode = normalizeSetblockMode(getString(placement, "mode"));
+
+            String validationError = "";
+            if (placement == null) {
+                validationError = "Placement must be an object.";
+            } else if (dx == null || dy == null || dz == null) {
+                validationError = "Placement requires integer dx, dy, dz.";
+            } else if (blockState.isBlank()) {
+                validationError = "Placement requires non-empty block_state.";
+            } else if (mode.isBlank()) {
+                validationError = "Placement mode must be replace, keep, or destroy.";
+            }
+
+            BlockPos worldPos = validationError.isBlank()
+                    ? new BlockPos(min.getX() + dx, min.getY() + dy, min.getZ() + dz)
+                    : null;
+            if (validationError.isBlank() && !isWithinSelection(selection, worldPos)) {
+                validationError = "Placement falls outside the current selection.";
+            }
+
+            String command = validationError.isBlank() ? buildSetblockCommand(worldPos, blockState, mode) : "";
+            if (!validationError.isBlank()) {
+                failedCount += 1;
+                addDebugStageFailure(failures, index, validationError, placement, command);
+                if (stopOnError) {
+                    stoppedEarly = true;
+                    break;
+                }
+                continue;
+            }
+
+            try {
+                executeDebugSetblock(player, command);
+                executedCount += 1;
+                if (placementsSample.size() < MAX_DEBUG_STAGE_SAMPLES) {
+                    JsonObject item = new JsonObject();
+                    item.addProperty("index", index);
+                    item.add("relative", buildVec3Payload(dx, dy, dz));
+                    item.add("world", buildVec3Payload(worldPos.getX(), worldPos.getY(), worldPos.getZ()));
+                    item.addProperty("block_state", blockState);
+                    item.addProperty("mode", mode);
+                    placementsSample.add(item);
+                }
+                if (commandSample.size() < MAX_DEBUG_STAGE_SAMPLES) {
+                    commandSample.add(command);
+                }
+            } catch (Exception e) {
+                failedCount += 1;
+                addDebugStageFailure(failures, index, e.getMessage(), placement, command);
+                if (stopOnError) {
+                    stoppedEarly = true;
+                    break;
+                }
+            }
+        }
+
+        payload.addProperty("requested_count", placements.size());
+        payload.addProperty("executed_count", executedCount);
+        payload.addProperty("failed_count", failedCount);
+        payload.addProperty("stopped_early", stoppedEarly);
+        payload.add("placements_sample", placementsSample);
+        payload.add("commands_sample", commandSample);
+        if (failures.size() > 0) {
+            payload.add("failures", failures);
+        }
+        payload.addProperty(
+                "summary",
+                "Staged " + executedCount + " placement(s)"
+                        + (failedCount > 0 ? ", failed " + failedCount : "")
+                        + (stoppedEarly ? ", stopped early" : "") + "."
+        );
+        return payload;
+    }
+
+    private static JsonObject buildVec3Payload(int x, int y, int z) {
+        JsonObject obj = new JsonObject();
+        obj.addProperty("x", x);
+        obj.addProperty("y", y);
+        obj.addProperty("z", z);
+        return obj;
+    }
+
+    private static boolean isWithinSelection(SelectionManager.Selection selection, BlockPos pos) {
+        if (selection == null || pos == null || !selection.isComplete()) {
+            return false;
+        }
+        BlockPos min = selection.min();
+        BlockPos max = selection.max();
+        return pos.getX() >= min.getX() && pos.getX() <= max.getX()
+                && pos.getY() >= min.getY() && pos.getY() <= max.getY()
+                && pos.getZ() >= min.getZ() && pos.getZ() <= max.getZ();
+    }
+
+    private static String normalizeSetblockMode(String raw) {
+        String value = raw == null || raw.isBlank() ? "replace" : raw.trim().toLowerCase(Locale.ROOT);
+        return switch (value) {
+            case "replace", "keep", "destroy" -> value;
+            default -> "";
+        };
+    }
+
+    private static String buildSetblockCommand(BlockPos pos, String blockState, String mode) {
+        String actualMode = normalizeSetblockMode(mode);
+        String suffix = "replace".equals(actualMode) ? "" : " " + actualMode;
+        return "setblock "
+                + pos.getX() + " " + pos.getY() + " " + pos.getZ() + " "
+                + blockState + suffix;
+    }
+
+    private static void executeDebugSetblock(ServerPlayer player, String command) {
+        if (player == null) {
+            throw new IllegalStateException("Player context is required.");
+        }
+        if (command == null || command.isBlank()) {
+            throw new IllegalArgumentException("Command is blank.");
+        }
+        var server = player.getServer();
+        if (server == null) {
+            throw new IllegalStateException("Server is unavailable.");
+        }
+        CommandSourceStack source = player.createCommandSourceStack()
+                .withPermission(2)
+                .withSuppressedOutput();
+        server.getCommands().performPrefixedCommand(source, command);
+    }
+
+    private static void addDebugStageFailure(JsonArray failures, int index, String error, JsonObject placement, String command) {
+        if (failures == null || failures.size() >= MAX_DEBUG_STAGE_FAILURES) {
+            return;
+        }
+        JsonObject item = new JsonObject();
+        item.addProperty("index", index);
+        item.addProperty("error", error == null ? "Execution failed." : error);
+        if (placement != null) {
+            item.add("placement", placement.deepCopy());
+        }
+        if (command != null && !command.isBlank()) {
+            item.addProperty("command", command);
+        }
+        failures.add(item);
     }
 
     private static void createWorkspaceFileAction(ServerPlayer player, String payload, boolean fromSelection) {

@@ -361,5 +361,6 @@
   "message.p2s.agent.tool.summary.rename_workspace_file": "Rename file",
   "message.p2s.agent.tool.summary.delete_workspace_file": "Delete file",
   "message.p2s.agent.tool.summary.propose_patch": "Propose patch",
-  "message.p2s.agent.tool.summary.search_block_ids": "Search block IDs"
+  "message.p2s.agent.tool.summary.search_block_ids": "Search block IDs",
+  "message.p2s.agent.tool.summary.debug_stage_blocks": "Stage debug blocks"
 }
