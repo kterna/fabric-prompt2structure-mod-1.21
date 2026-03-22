@@ -91,6 +91,6 @@ Pull Request 应包含：
 - 相关 issue 链接，或后续待处理说明（如果有）。
 
 ## 配置与密钥
-运行时配置位于 `config/p2s_client.json`。项目 / 工作区 / 会话 / skills / profiles 还会写入 `config/p2s_projects_v2/`、`config/p2s_sessions_v2/`、`config/p2s_skills/` 等目录。
+运行时配置位于 `config/p2s_client.json`。项目 / 工作区 / 会话 / 长期记忆 / skills / profiles 还会写入 `config/p2s_projects_v2/`、`config/p2s_sessions_v2/`、`config/p2s_memories_v1/`、`config/p2s_skills/` 等目录。
 
 不要提交 API Key、本地配置，或自动生成的世界/项目数据。

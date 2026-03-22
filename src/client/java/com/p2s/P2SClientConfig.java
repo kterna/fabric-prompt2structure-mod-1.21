@@ -34,6 +34,9 @@ public final class P2SClientConfig {
     private static final boolean DEFAULT_AUTO_COMPACT_ENABLED = true;
     private static final int DEFAULT_AUTO_COMPACT_TOKEN_LIMIT = 24_000;
     private static final int DEFAULT_COMPACT_RETAIN_USER_TOKEN_BUDGET = 20_000;
+    private static final boolean DEFAULT_PERSISTENT_MEMORY_ENABLED = true;
+    private static final int DEFAULT_PERSISTENT_MEMORY_MAX_GLOBAL_ENTRIES = 8;
+    private static final int DEFAULT_PERSISTENT_MEMORY_MAX_PROJECT_ENTRIES = 16;
     private static final int DEFAULT_SESSION_JOB_TIMEOUT_SECONDS = P2SDefaults.DEFAULT_SESSION_JOB_TIMEOUT_SECONDS;
     private static final int DEFAULT_MAX_PATCH_OPS = P2SDefaults.DEFAULT_MAX_PATCH_OPS;
     private static final int DEFAULT_MAX_BLOCKS_PER_COMMIT = P2SDefaults.DEFAULT_MAX_BLOCKS_PER_COMMIT;
@@ -66,6 +69,9 @@ public final class P2SClientConfig {
     private static boolean autoCompactEnabled = DEFAULT_AUTO_COMPACT_ENABLED;
     private static int autoCompactTokenLimit = DEFAULT_AUTO_COMPACT_TOKEN_LIMIT;
     private static int compactRetainUserTokenBudget = DEFAULT_COMPACT_RETAIN_USER_TOKEN_BUDGET;
+    private static boolean persistentMemoryEnabled = DEFAULT_PERSISTENT_MEMORY_ENABLED;
+    private static int persistentMemoryMaxGlobalEntries = DEFAULT_PERSISTENT_MEMORY_MAX_GLOBAL_ENTRIES;
+    private static int persistentMemoryMaxProjectEntries = DEFAULT_PERSISTENT_MEMORY_MAX_PROJECT_ENTRIES;
     private static String compactPrompt = DEFAULT_COMPACT_PROMPT;
     private static int sessionJobTimeoutSeconds = DEFAULT_SESSION_JOB_TIMEOUT_SECONDS;
     private static int maxPatchOps = DEFAULT_MAX_PATCH_OPS;
@@ -145,6 +151,18 @@ public final class P2SClientConfig {
         return compactRetainUserTokenBudget;
     }
 
+    public static synchronized boolean isPersistentMemoryEnabled() {
+        return persistentMemoryEnabled;
+    }
+
+    public static synchronized int getPersistentMemoryMaxGlobalEntries() {
+        return persistentMemoryMaxGlobalEntries;
+    }
+
+    public static synchronized int getPersistentMemoryMaxProjectEntries() {
+        return persistentMemoryMaxProjectEntries;
+    }
+
     public static synchronized String getCompactPrompt() {
         return compactPrompt;
     }
@@ -187,6 +205,13 @@ public final class P2SClientConfig {
 
     public static synchronized void setUseStreaming(boolean value, boolean persist) {
         useStreaming = value;
+        if (persist) {
+            save();
+        }
+    }
+
+    public static synchronized void setPersistentMemoryEnabled(boolean value, boolean persist) {
+        persistentMemoryEnabled = value;
         if (persist) {
             save();
         }
@@ -268,6 +293,8 @@ public final class P2SClientConfig {
             Integer rawRiskAutoApplyThreshold,
             Integer rawAutoCompactTokenLimit,
             Integer rawCompactRetainUserTokenBudget,
+            Integer rawPersistentMemoryMaxGlobalEntries,
+            Integer rawPersistentMemoryMaxProjectEntries,
             String rawSystemPrompt,
             boolean persist
     ) {
@@ -283,6 +310,8 @@ public final class P2SClientConfig {
         Integer nextRiskAutoApplyThreshold = normalizeThreshold(rawRiskAutoApplyThreshold);
         Integer nextAutoCompactTokenLimit = normalizePositiveInt(rawAutoCompactTokenLimit);
         Integer nextCompactRetainUserTokenBudget = normalizePositiveInt(rawCompactRetainUserTokenBudget);
+        Integer nextPersistentMemoryMaxGlobalEntries = normalizePositiveInt(rawPersistentMemoryMaxGlobalEntries);
+        Integer nextPersistentMemoryMaxProjectEntries = normalizePositiveInt(rawPersistentMemoryMaxProjectEntries);
         String nextSystemPrompt = rawSystemPrompt == null ? null : rawSystemPrompt.trim();
 
         if (nextApiUrl == null
@@ -296,7 +325,9 @@ public final class P2SClientConfig {
                 || nextConfirmRequired == null
                 || nextRiskAutoApplyThreshold == null
                 || nextAutoCompactTokenLimit == null
-                || nextCompactRetainUserTokenBudget == null) {
+                || nextCompactRetainUserTokenBudget == null
+                || nextPersistentMemoryMaxGlobalEntries == null
+                || nextPersistentMemoryMaxProjectEntries == null) {
             return false;
         }
         if (nextSystemPrompt == null || nextSystemPrompt.isBlank()) {
@@ -315,6 +346,8 @@ public final class P2SClientConfig {
         riskAutoApplyThreshold = nextRiskAutoApplyThreshold;
         autoCompactTokenLimit = nextAutoCompactTokenLimit;
         compactRetainUserTokenBudget = nextCompactRetainUserTokenBudget;
+        persistentMemoryMaxGlobalEntries = nextPersistentMemoryMaxGlobalEntries;
+        persistentMemoryMaxProjectEntries = nextPersistentMemoryMaxProjectEntries;
         systemPrompt = nextSystemPrompt;
         if (persist) {
             save();
@@ -334,6 +367,9 @@ public final class P2SClientConfig {
         autoCompactEnabled = DEFAULT_AUTO_COMPACT_ENABLED;
         autoCompactTokenLimit = DEFAULT_AUTO_COMPACT_TOKEN_LIMIT;
         compactRetainUserTokenBudget = DEFAULT_COMPACT_RETAIN_USER_TOKEN_BUDGET;
+        persistentMemoryEnabled = DEFAULT_PERSISTENT_MEMORY_ENABLED;
+        persistentMemoryMaxGlobalEntries = DEFAULT_PERSISTENT_MEMORY_MAX_GLOBAL_ENTRIES;
+        persistentMemoryMaxProjectEntries = DEFAULT_PERSISTENT_MEMORY_MAX_PROJECT_ENTRIES;
         compactPrompt = DEFAULT_COMPACT_PROMPT;
         sessionJobTimeoutSeconds = DEFAULT_SESSION_JOB_TIMEOUT_SECONDS;
         maxPatchOps = DEFAULT_MAX_PATCH_OPS;
@@ -383,6 +419,9 @@ public final class P2SClientConfig {
         Boolean loadedAutoCompactEnabled = null;
         Integer loadedAutoCompactTokenLimit = null;
         Integer loadedCompactRetainUserTokenBudget = null;
+        Boolean loadedPersistentMemoryEnabled = null;
+        Integer loadedPersistentMemoryMaxGlobalEntries = null;
+        Integer loadedPersistentMemoryMaxProjectEntries = null;
         Integer loadedSessionJobTimeoutSeconds = null;
         Integer loadedMaxPatchOps = null;
         Integer loadedMaxBlocksPerCommit = null;
@@ -406,6 +445,9 @@ public final class P2SClientConfig {
                 loadedAutoCompactEnabled = root.has("autoCompactEnabled") ? root.get("autoCompactEnabled").getAsBoolean() : null;
                 loadedAutoCompactTokenLimit = root.has("autoCompactTokenLimit") ? root.get("autoCompactTokenLimit").getAsInt() : null;
                 loadedCompactRetainUserTokenBudget = root.has("compactRetainUserTokenBudget") ? root.get("compactRetainUserTokenBudget").getAsInt() : null;
+                loadedPersistentMemoryEnabled = root.has("persistentMemoryEnabled") ? root.get("persistentMemoryEnabled").getAsBoolean() : null;
+                loadedPersistentMemoryMaxGlobalEntries = root.has("persistentMemoryMaxGlobalEntries") ? root.get("persistentMemoryMaxGlobalEntries").getAsInt() : null;
+                loadedPersistentMemoryMaxProjectEntries = root.has("persistentMemoryMaxProjectEntries") ? root.get("persistentMemoryMaxProjectEntries").getAsInt() : null;
                 loadedSessionJobTimeoutSeconds = root.has("sessionJobTimeoutSeconds") ? root.get("sessionJobTimeoutSeconds").getAsInt() : null;
                 loadedMaxPatchOps = root.has("maxPatchOps") ? root.get("maxPatchOps").getAsInt() : null;
                 loadedMaxBlocksPerCommit = root.has("maxBlocksPerCommit") ? root.get("maxBlocksPerCommit").getAsInt() : null;
@@ -469,6 +511,11 @@ public final class P2SClientConfig {
         autoCompactTokenLimit = compactLimit == null ? DEFAULT_AUTO_COMPACT_TOKEN_LIMIT : compactLimit;
         Integer retainBudget = normalizePositiveInt(loadedCompactRetainUserTokenBudget);
         compactRetainUserTokenBudget = retainBudget == null ? DEFAULT_COMPACT_RETAIN_USER_TOKEN_BUDGET : retainBudget;
+        persistentMemoryEnabled = loadedPersistentMemoryEnabled == null ? DEFAULT_PERSISTENT_MEMORY_ENABLED : loadedPersistentMemoryEnabled;
+        Integer maxGlobalMemories = normalizePositiveInt(loadedPersistentMemoryMaxGlobalEntries);
+        persistentMemoryMaxGlobalEntries = maxGlobalMemories == null ? DEFAULT_PERSISTENT_MEMORY_MAX_GLOBAL_ENTRIES : maxGlobalMemories;
+        Integer maxProjectMemories = normalizePositiveInt(loadedPersistentMemoryMaxProjectEntries);
+        persistentMemoryMaxProjectEntries = maxProjectMemories == null ? DEFAULT_PERSISTENT_MEMORY_MAX_PROJECT_ENTRIES : maxProjectMemories;
         Integer sessionTimeout = normalizePositiveInt(loadedSessionJobTimeoutSeconds);
         sessionJobTimeoutSeconds = sessionTimeout == null ? DEFAULT_SESSION_JOB_TIMEOUT_SECONDS : sessionTimeout;
         Integer patchOps = normalizePositiveInt(loadedMaxPatchOps);
@@ -504,6 +551,9 @@ public final class P2SClientConfig {
             root.addProperty("autoCompactEnabled", autoCompactEnabled);
             root.addProperty("autoCompactTokenLimit", autoCompactTokenLimit);
             root.addProperty("compactRetainUserTokenBudget", compactRetainUserTokenBudget);
+            root.addProperty("persistentMemoryEnabled", persistentMemoryEnabled);
+            root.addProperty("persistentMemoryMaxGlobalEntries", persistentMemoryMaxGlobalEntries);
+            root.addProperty("persistentMemoryMaxProjectEntries", persistentMemoryMaxProjectEntries);
             root.addProperty("compactPrompt", compactPrompt);
             root.addProperty("sessionJobTimeoutSeconds", sessionJobTimeoutSeconds);
             root.addProperty("maxPatchOps", maxPatchOps);

@@ -39,15 +39,19 @@ public class P2SConfigScreen extends Screen {
     private EditBox riskAutoApplyThresholdInput;
     private EditBox autoCompactTokenLimitInput;
     private EditBox compactRetainUserTokenBudgetInput;
+    private EditBox persistentMemoryMaxGlobalEntriesInput;
+    private EditBox persistentMemoryMaxProjectEntriesInput;
     private P2SMultiLineTextEditor systemPromptEditor;
     private Button toolCallButton;
     private Button streamingButton;
     private Button autoApplyButton;
     private Button confirmRequiredButton;
+    private Button persistentMemoryButton;
     private boolean useToolCall;
     private boolean useStreaming;
     private boolean autoApplyPatch;
     private boolean confirmRequired;
+    private boolean persistentMemoryEnabled;
 
     // Skills tab
     private final List<Button> skillRowButtons = new ArrayList<>();
@@ -249,6 +253,23 @@ public class P2SConfigScreen extends Screen {
         addRenderableWidget(compactRetainUserTokenBudgetInput);
         y += 50 + compactHintHeight(panelWidth);
 
+        persistentMemoryEnabled = P2SClientConfig.isPersistentMemoryEnabled();
+        persistentMemoryButton = addRenderableWidget(Button.builder(persistentMemoryLabel(), btn -> {
+            persistentMemoryEnabled = !persistentMemoryEnabled;
+            btn.setMessage(persistentMemoryLabel());
+        }).bounds(left + 10, y + 14, 220, 20).build());
+
+        persistentMemoryMaxGlobalEntriesInput = new EditBox(this.font, left + 250, y + 14, 170, 20, P2SI18n.tr("screen.p2s.config.llm.max_global_memories"));
+        persistentMemoryMaxGlobalEntriesInput.setMaxLength(8);
+        persistentMemoryMaxGlobalEntriesInput.setValue(Integer.toString(P2SClientConfig.getPersistentMemoryMaxGlobalEntries()));
+        addRenderableWidget(persistentMemoryMaxGlobalEntriesInput);
+
+        persistentMemoryMaxProjectEntriesInput = new EditBox(this.font, left + 440, y + 14, 170, 20, P2SI18n.tr("screen.p2s.config.llm.max_project_memories"));
+        persistentMemoryMaxProjectEntriesInput.setMaxLength(8);
+        persistentMemoryMaxProjectEntriesInput.setValue(Integer.toString(P2SClientConfig.getPersistentMemoryMaxProjectEntries()));
+        addRenderableWidget(persistentMemoryMaxProjectEntriesInput);
+        y += 50 + persistentMemoryHintHeight(panelWidth);
+
         int promptY = y + 14;
         systemPromptEditor = new P2SMultiLineTextEditor(this.font);
         systemPromptEditor.setMaxLength(2048);
@@ -284,6 +305,11 @@ public class P2SConfigScreen extends Screen {
                 P2SI18n.tr(confirmRequired ? "screen.p2s.common.on" : "screen.p2s.common.off"));
     }
 
+    private Component persistentMemoryLabel() {
+        return P2SI18n.tr("screen.p2s.config.toggle.persistent_memory",
+                P2SI18n.tr(persistentMemoryEnabled ? "screen.p2s.common.on" : "screen.p2s.common.off"));
+    }
+
     private int llmPromptHeight(int promptY) {
         int available = this.height - promptY - 60;
         if (available <= 0) {
@@ -296,6 +322,10 @@ public class P2SConfigScreen extends Screen {
         return Math.max(this.font.lineHeight, this.font.split(P2SI18n.tr("screen.p2s.config.llm.compact_threshold_hint"), panelWidth - 20).size() * (this.font.lineHeight + 1));
     }
 
+    private int persistentMemoryHintHeight(int panelWidth) {
+        return Math.max(this.font.lineHeight, this.font.split(P2SI18n.tr("screen.p2s.config.llm.persistent_memory_hint"), panelWidth - 20).size() * (this.font.lineHeight + 1));
+    }
+
     private void saveLlmConfig() {
         Integer timeout = parsePositiveInt(timeoutInput == null ? "" : timeoutInput.getValue());
         Integer sessionTimeout = parsePositiveInt(sessionTimeoutInput == null ? "" : sessionTimeoutInput.getValue());
@@ -304,6 +334,8 @@ public class P2SConfigScreen extends Screen {
         Integer riskAutoApplyThreshold = parseInteger(riskAutoApplyThresholdInput == null ? "" : riskAutoApplyThresholdInput.getValue());
         Integer autoCompactTokenLimit = parsePositiveInt(autoCompactTokenLimitInput == null ? "" : autoCompactTokenLimitInput.getValue());
         Integer compactRetainUserTokenBudget = parsePositiveInt(compactRetainUserTokenBudgetInput == null ? "" : compactRetainUserTokenBudgetInput.getValue());
+        Integer persistentMemoryMaxGlobalEntries = parsePositiveInt(persistentMemoryMaxGlobalEntriesInput == null ? "" : persistentMemoryMaxGlobalEntriesInput.getValue());
+        Integer persistentMemoryMaxProjectEntries = parsePositiveInt(persistentMemoryMaxProjectEntriesInput == null ? "" : persistentMemoryMaxProjectEntriesInput.getValue());
         boolean ok = P2SClientConfig.setLlmConfig(
                 apiUrlInput == null ? "" : apiUrlInput.getValue(),
                 apiKeyInput == null ? "" : apiKeyInput.getValue(),
@@ -317,12 +349,15 @@ public class P2SConfigScreen extends Screen {
                 riskAutoApplyThreshold,
                 autoCompactTokenLimit,
                 compactRetainUserTokenBudget,
+                persistentMemoryMaxGlobalEntries,
+                persistentMemoryMaxProjectEntries,
                 systemPromptEditor == null ? "" : systemPromptEditor.getText(),
                 false
         );
         if (ok) {
             P2SClientConfig.setUseStreaming(useStreaming, false);
             P2SClientConfig.setAutoApplyPatch(autoApplyPatch, true);
+            P2SClientConfig.setPersistentMemoryEnabled(persistentMemoryEnabled, true);
             statusText = P2SI18n.tr("screen.p2s.status.saved");
             statusColor = 0x55FF55;
         } else {
@@ -343,6 +378,8 @@ public class P2SConfigScreen extends Screen {
         if (riskAutoApplyThresholdInput != null) riskAutoApplyThresholdInput.setValue(Integer.toString(P2SClientConfig.getRiskAutoApplyThreshold()));
         if (autoCompactTokenLimitInput != null) autoCompactTokenLimitInput.setValue(Integer.toString(P2SClientConfig.getAutoCompactTokenLimit()));
         if (compactRetainUserTokenBudgetInput != null) compactRetainUserTokenBudgetInput.setValue(Integer.toString(P2SClientConfig.getCompactRetainUserTokenBudget()));
+        if (persistentMemoryMaxGlobalEntriesInput != null) persistentMemoryMaxGlobalEntriesInput.setValue(Integer.toString(P2SClientConfig.getPersistentMemoryMaxGlobalEntries()));
+        if (persistentMemoryMaxProjectEntriesInput != null) persistentMemoryMaxProjectEntriesInput.setValue(Integer.toString(P2SClientConfig.getPersistentMemoryMaxProjectEntries()));
         if (systemPromptEditor != null) systemPromptEditor.setText(P2SClientConfig.getSystemPrompt());
         useToolCall = P2SClientConfig.isUseToolCall();
         if (toolCallButton != null) toolCallButton.setMessage(toolCallLabel());
@@ -352,6 +389,8 @@ public class P2SConfigScreen extends Screen {
         if (autoApplyButton != null) autoApplyButton.setMessage(autoApplyLabel());
         confirmRequired = P2SClientConfig.getConfirmRequired();
         if (confirmRequiredButton != null) confirmRequiredButton.setMessage(confirmRequiredLabel());
+        persistentMemoryEnabled = P2SClientConfig.isPersistentMemoryEnabled();
+        if (persistentMemoryButton != null) persistentMemoryButton.setMessage(persistentMemoryLabel());
         statusText = P2SI18n.tr("screen.p2s.status.reset_to_defaults");
         statusColor = 0x55FF55;
     }
@@ -597,6 +636,8 @@ public class P2SConfigScreen extends Screen {
             if (riskAutoApplyThresholdInput != null) riskAutoApplyThresholdInput.setFocused(false);
             if (autoCompactTokenLimitInput != null) autoCompactTokenLimitInput.setFocused(false);
             if (compactRetainUserTokenBudgetInput != null) compactRetainUserTokenBudgetInput.setFocused(false);
+            if (persistentMemoryMaxGlobalEntriesInput != null) persistentMemoryMaxGlobalEntriesInput.setFocused(false);
+            if (persistentMemoryMaxProjectEntriesInput != null) persistentMemoryMaxProjectEntriesInput.setFocused(false);
             return true;
         }
         if (button == 0 && systemPromptEditor != null) {
@@ -632,7 +673,7 @@ public class P2SConfigScreen extends Screen {
     private List<EditBox> collectEditBoxes() {
         return switch (currentTab) {
             case GENERAL -> selectionItemInput == null ? List.of() : List.of(selectionItemInput);
-            case LLM -> List.of(apiUrlInput, apiKeyInput, modelInput, timeoutInput, sessionTimeoutInput, maxPatchOpsInput, maxBlocksPerCommitInput, riskAutoApplyThresholdInput, autoCompactTokenLimitInput, compactRetainUserTokenBudgetInput);
+            case LLM -> List.of(apiUrlInput, apiKeyInput, modelInput, timeoutInput, sessionTimeoutInput, maxPatchOpsInput, maxBlocksPerCommitInput, riskAutoApplyThresholdInput, autoCompactTokenLimitInput, compactRetainUserTokenBudgetInput, persistentMemoryMaxGlobalEntriesInput, persistentMemoryMaxProjectEntriesInput);
             case SKILLS -> List.of();
         };
     }
@@ -698,6 +739,14 @@ public class P2SConfigScreen extends Screen {
             hintY += this.font.lineHeight + 1;
         }
         y += 50 + compactHintHeight(panelWidth);
+        gfx.drawString(this.font, P2SI18n.tr("screen.p2s.config.llm.max_global_memories"), left + 250, y, 0xBBBBBB, false);
+        gfx.drawString(this.font, P2SI18n.tr("screen.p2s.config.llm.max_project_memories"), left + 440, y, 0xBBBBBB, false);
+        hintY = y + 38;
+        for (var line : this.font.split(P2SI18n.tr("screen.p2s.config.llm.persistent_memory_hint"), panelWidth - 20)) {
+            gfx.drawString(this.font, line, left + 10, hintY, 0x888888, false);
+            hintY += this.font.lineHeight + 1;
+        }
+        y += 50 + persistentMemoryHintHeight(panelWidth);
         gfx.drawString(this.font, P2SI18n.tr("screen.p2s.config.llm.system_prompt"), left + 10, y, 0xBBBBBB, false);
         if (systemPromptEditor != null) {
             systemPromptEditor.render(gfx);

@@ -28,6 +28,11 @@ public final class ClientAgentManager {
         t.setDaemon(true);
         return t;
     });
+    private static final ExecutorService MEMORY_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "p2s-memory-agent");
+        t.setDaemon(true);
+        return t;
+    });
     private static final int MAX_HISTORY = 40;
     private static final int SAFETY_LOOP_LIMIT = 50;
     private static final int MAX_PLAN_ITEMS = 40;
@@ -369,6 +374,7 @@ public final class ClientAgentManager {
                     if (session != currentSession) {
                         return;
                     }
+                    refreshPersistentMemoryPromptLocked(session);
                     snapshot = deepCopyMessages(session.history);
                 }
 
@@ -425,6 +431,7 @@ public final class ClientAgentManager {
             String error = formatAgentError(ex);
             postToClient(() -> ClientSessionState.onChatResponse("Request failed: " + error, false, "error"));
         } finally {
+            schedulePersistentMemoryUpdate(session);
             synchronized (LOCK) {
                 if (session == currentSession) {
                     session.inFlight = false;
@@ -513,6 +520,7 @@ public final class ClientAgentManager {
     private static void runUserTurn(LocalSession session, String message) {
         boolean delegated = false;
         try {
+            waitForPendingPersistentMemoryUpdate(session);
             maybeRunAutomaticCompaction(session, ClientHistoryCompactor.CompactTrigger.AUTO_PRE_TURN);
             synchronized (LOCK) {
                 if (session != currentSession) {
@@ -539,11 +547,13 @@ public final class ClientAgentManager {
 
     private static void runManualCompact(LocalSession session) {
         try {
+            waitForPendingPersistentMemoryUpdate(session);
             List<JsonObject> snapshot;
             synchronized (LOCK) {
                 if (session != currentSession) {
                     return;
                 }
+                refreshPersistentMemoryPromptLocked(session);
                 snapshot = deepCopyMessages(session.history);
             }
             if (!ClientHistoryCompactor.hasCompactableHistory(snapshot)) {
@@ -1293,22 +1303,28 @@ public final class ClientAgentManager {
     }
 
     private static void trimHistoryLocked(LocalSession session) {
+        if (session == null || session.history == null || session.history.size() <= 1) {
+            return;
+        }
         while (session.history.size() > MAX_HISTORY && session.history.size() > 1) {
-            int end = findTurnGroupEnd(session.history);
-            if (end <= 0) break;
-            session.history.subList(1, end + 1).clear();
+            int firstTurnIndex = countLeadingSystemMessages(session.history);
+            int end = findTurnGroupEnd(session.history, firstTurnIndex);
+            if (firstTurnIndex >= session.history.size() || end < firstTurnIndex) {
+                break;
+            }
+            session.history.subList(firstTurnIndex, end + 1).clear();
         }
     }
 
     /**
-     * Find the end index (inclusive) of the first complete turn group starting at index 1.
+     * Find the end index (inclusive) of the first complete turn group after the leading system messages.
      * Returns -1 if no complete group can be safely removed.
      */
-    private static int findTurnGroupEnd(List<JsonObject> history) {
+    private static int findTurnGroupEnd(List<JsonObject> history, int startIndex) {
         int size = history.size();
-        if (size <= 2) return -1;
+        if (size <= startIndex + 1) return -1;
 
-        int i = 1;
+        int i = Math.max(0, startIndex);
 
         // 1) Skip orphan tool messages (compat with corrupted old history)
         if ("tool".equals(role(history, i))) {
@@ -1321,7 +1337,7 @@ public final class ClientAgentManager {
 
         // 3) Expect assistant message
         if (i >= size || !"assistant".equals(role(history, i))) {
-            return (i > 1 && i < size) ? i - 1 : -1;
+            return (i > startIndex && i < size) ? i - 1 : -1;
         }
 
         // 4) Check if assistant has tool_calls
@@ -1348,6 +1364,17 @@ public final class ClientAgentManager {
     private static String role(List<JsonObject> history, int index) {
         JsonObject msg = history.get(index);
         return msg != null && msg.has("role") ? msg.get("role").getAsString() : "";
+    }
+
+    private static int countLeadingSystemMessages(List<JsonObject> history) {
+        int count = 0;
+        if (history == null) {
+            return 0;
+        }
+        while (count < history.size() && "system".equals(role(history, count))) {
+            count++;
+        }
+        return count;
     }
 
     private static List<JsonObject> deepCopyMessages(List<JsonObject> source) {
@@ -1476,6 +1503,7 @@ public final class ClientAgentManager {
             autoRestoreAttempted = false;
         }
         if (previous != null) {
+            waitForPendingPersistentMemoryUpdate(previous);
             autoSaveSession(previous);
         }
         postToClient(() -> {
@@ -1568,6 +1596,7 @@ public final class ClientAgentManager {
         session.selectedWorkspacePath = saved.selectedWorkspacePath() == null ? "" : saved.selectedWorkspacePath();
 
         synchronized (LOCK) {
+            refreshPersistentMemoryPromptLocked(session);
             currentSession = session;
         }
 
@@ -1666,6 +1695,7 @@ public final class ClientAgentManager {
             currentSession = null;
         }
         if (previous != null) {
+            waitForPendingPersistentMemoryUpdate(previous);
             autoSaveSession(previous);
             if (previous.serverSessionStarted) {
                 ClientServerBridge.sendSessionAction("end", "");
@@ -1740,6 +1770,7 @@ public final class ClientAgentManager {
         system.addProperty("role", "system");
         system.addProperty("content", P2SClientConfig.getSystemPrompt() + "\n\n" + CLIENT_TOOL_CONTRACT);
         session.history.add(system);
+        refreshPersistentMemoryPromptLocked(session);
 
         currentSession = session;
         String payload = buildStartPayload(session);
@@ -1759,6 +1790,184 @@ public final class ClientAgentManager {
         mc.execute(action);
     }
 
+    private static void schedulePersistentMemoryUpdate(LocalSession session) {
+        if (session == null || !P2SClientConfig.isPersistentMemoryEnabled()) {
+            return;
+        }
+        ClientPersistentMemoryManager.UpdateInput input = collectPersistentMemoryUpdateInput(session);
+        if (input == null) {
+            return;
+        }
+
+        long timeoutSeconds = Math.max(1L, Math.max(
+                P2SClientConfig.getSessionJobTimeoutSeconds(),
+                P2SClientConfig.getHttpTimeoutSeconds() + 5L
+        ));
+
+        CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
+            try {
+                ClientPersistentMemoryManager.UpdateResult result = ClientPersistentMemoryManager.updateFromTurn(
+                        input,
+                        P2SClientConfig.llmRequestConfig(),
+                        timeoutSeconds
+                );
+                if (result.changed()) {
+                    P2SMod.LOGGER.info("Updated persistent memories for session {} ({})", session.id, input.projectId());
+                }
+            } catch (Exception e) {
+                P2SMod.LOGGER.warn("Persistent memory update failed for session {}: {}", session.id, formatAgentError(e));
+            } finally {
+                synchronized (LOCK) {
+                    refreshPersistentMemoryPromptLocked(session);
+                }
+            }
+        }, MEMORY_EXECUTOR);
+
+        synchronized (LOCK) {
+            session.pendingMemoryFuture = future;
+        }
+    }
+
+    private static void waitForPendingPersistentMemoryUpdate(LocalSession session) {
+        CompletableFuture<Void> future;
+        synchronized (LOCK) {
+            future = session == null ? null : session.pendingMemoryFuture;
+        }
+        if (future == null) {
+            return;
+        }
+        try {
+            future.join();
+        } catch (Exception e) {
+            P2SMod.LOGGER.warn("Pending persistent memory update join failed for session {}: {}", session == null ? "" : session.id, formatAgentError(e));
+        } finally {
+            synchronized (LOCK) {
+                if (session != null && session.pendingMemoryFuture == future) {
+                    session.pendingMemoryFuture = null;
+                }
+                if (session != null) {
+                    refreshPersistentMemoryPromptLocked(session);
+                }
+            }
+        }
+    }
+
+    private static ClientPersistentMemoryManager.UpdateInput collectPersistentMemoryUpdateInput(LocalSession session) {
+        if (session == null || ClientSessionState.hasPendingPatch() || ClientSessionState.hasPendingChoice()) {
+            return null;
+        }
+
+        List<JsonObject> historyCopy;
+        synchronized (LOCK) {
+            historyCopy = deepCopyMessages(session.history);
+        }
+
+        int lastUserIndex = -1;
+        for (int i = historyCopy.size() - 1; i >= 0; i--) {
+            if ("user".equals(role(historyCopy, i))
+                    && !ClientHistoryCompactor.isSummaryMessage(historyCopy.get(i))) {
+                lastUserIndex = i;
+                break;
+            }
+        }
+        if (lastUserIndex < 0) {
+            return null;
+        }
+
+        String userText = normalizeMemoryTurnText(content(historyCopy.get(lastUserIndex)));
+        if (userText.isBlank()) {
+            return null;
+        }
+
+        StringBuilder assistantText = new StringBuilder();
+        for (int i = lastUserIndex + 1; i < historyCopy.size(); i++) {
+            JsonObject message = historyCopy.get(i);
+            if (!"assistant".equals(role(historyCopy, i))) {
+                continue;
+            }
+            String normalized = normalizeMemoryTurnText(content(message));
+            if (normalized.isBlank()) {
+                continue;
+            }
+            if (assistantText.length() > 0) {
+                assistantText.append("\n\n");
+            }
+            assistantText.append(normalized);
+        }
+        if (assistantText.isEmpty()) {
+            return null;
+        }
+
+        String projectId = session.projectId == null || session.projectId.isBlank()
+                ? ClientSessionState.getProjectId()
+                : session.projectId;
+        return new ClientPersistentMemoryManager.UpdateInput(
+                projectId == null ? "" : projectId,
+                ClientSessionState.getProjectName(),
+                ClientSessionState.getProjectDescription(),
+                ClientSessionState.getSelectedWorkspacePath(),
+                userText,
+                assistantText.toString()
+        );
+    }
+
+    private static String normalizeMemoryTurnText(String text) {
+        if (text == null) {
+            return "";
+        }
+        String normalized = text.replace("\r\n", "\n").replace('\r', '\n').trim();
+        if (normalized.length() > 4_000) {
+            normalized = normalized.substring(0, 3_997).trim() + "...";
+        }
+        return normalized;
+    }
+
+    private static String content(JsonObject message) {
+        if (message == null || !message.has("content") || !message.get("content").isJsonPrimitive()) {
+            return "";
+        }
+        try {
+            return message.get("content").getAsString();
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
+    private static void refreshPersistentMemoryPromptLocked(LocalSession session) {
+        if (session == null) {
+            return;
+        }
+        if (session.history == null) {
+            session.history = new ArrayList<>();
+        }
+        removePersistentMemoryMessagesLocked(session.history);
+        if (!P2SClientConfig.isPersistentMemoryEnabled()) {
+            return;
+        }
+
+        String projectId = session.projectId == null || session.projectId.isBlank()
+                ? ClientSessionState.getProjectId()
+                : session.projectId;
+        ClientPersistentMemoryManager.PromptSnapshot prompt = ClientPersistentMemoryManager.loadPromptSnapshot(projectId);
+        if (!prompt.hasContent() || prompt.systemMessage() == null || prompt.systemMessage().isBlank()) {
+            return;
+        }
+
+        JsonObject memoryMessage = new JsonObject();
+        memoryMessage.addProperty("role", "system");
+        memoryMessage.addProperty("content", prompt.systemMessage());
+        int insertIndex = countLeadingSystemMessages(session.history);
+        session.history.add(Math.max(0, Math.min(insertIndex, session.history.size())), memoryMessage);
+        trimHistoryLocked(session);
+    }
+
+    private static void removePersistentMemoryMessagesLocked(List<JsonObject> history) {
+        if (history == null || history.isEmpty()) {
+            return;
+        }
+        history.removeIf(ClientPersistentMemoryManager::isMemorySystemMessage);
+    }
+
     private static final class LocalSession {
         String id;
         boolean inFlight;
@@ -1767,5 +1976,6 @@ public final class ClientAgentManager {
         List<JsonObject> history;
         String projectId = "";
         String selectedWorkspacePath = "";
+        CompletableFuture<Void> pendingMemoryFuture;
     }
 }

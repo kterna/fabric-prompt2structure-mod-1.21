@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 2026-03-21 长期记忆层与多 system 上下文保留
+- 在现有会话压缩（compaction）之外，新增独立的客户端持久化记忆层：把稳定的用户偏好与项目事实写入 `config/p2s_memories_v1/`，并在后续会话中作为前置 system prompt 注入。
+- 持久化记忆与会话历史解耦，压缩当前 session history 时不再等同于“忘掉长期记忆”；会话恢复后也会重新装载这层 durable memory。
+- 修正本地历史裁剪逻辑，只保留第一条 system message 的旧假设已被移除，新的多条前置 system message（含长期记忆提示）不会再被 fallback trim 误删。
+- 配置界面新增长期记忆开关与全局 / 项目记忆条数上限，便于控制 durable memory 的规模。
+
 ## 2026-03-09 Patch 工具语义对齐
 - 关闭中间编辑区后不再切到 gameplay input，避免界面保持收起态时无法重新操作。
 - 让聊天界面在重新打开时保留左目录 / 中编辑区 / 右会话栏的开启或关闭状态。
@@ -88,4 +94,3 @@
 - 聊天编辑区支持在游戏内折叠停靠，减轻大面板对视野的遮挡。
 - 计划跟踪逻辑统一收束到 `update_plan`，替换早期 todo 口径。
 - 移除服务端配置残留：删除 `/p2sreload` 与 `p2s.json` 路径，把 patch/超时等运行参数并回 `p2s_client.json`。
-

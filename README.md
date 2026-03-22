@@ -20,6 +20,7 @@ P2S Workspace 是一个把 Minecraft 结构编辑做成“聊天式工作流”�
 5. 选择一个工作区文件，向 AI 描述你要建造或修改的内容。
 6. 查看 patch 预览，决定 `Apply` 或 `Discard`。
 7. 需要回退时，可使用 `Undo`、`Redo`、`Checkpoint` 和会话恢复功能继续迭代。
+8. 如果对话变长，客户端会继续使用上下文压缩；同时长期偏好和项目事实会单独沉淀为持久化记忆，不会因为压缩或会话恢复而丢失。
 
 ## 日常使用流程
 
@@ -55,7 +56,7 @@ P2S Workspace 是一个把 Minecraft 结构编辑做成“聊天式工作流”�
 - 配置客户端 LLM 接口
 - 修改选区物品
 - 调整 patch 预览限制、确认阈值、会话超时等运行参数
-- 控制流式输出、自动应用、上下文压缩等客户端行为
+- 控制流式输出、自动应用、上下文压缩、持久化记忆等客户端行为
 
 当前已经没有单独的服务端配置文件；用户可编辑的配置项都归到客户端配置中。
 
@@ -66,6 +67,7 @@ P2S Workspace 是一个把 Minecraft 结构编辑做成“聊天式工作流”�
 - `config/p2s_client.json`
 - `config/p2s_projects_v2/`
 - `config/p2s_sessions_v2/`
+- `config/p2s_memories_v1/`
 - `config/p2s_skills/`
 - `config/p2s_storage/`
 
