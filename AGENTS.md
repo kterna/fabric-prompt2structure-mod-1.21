@@ -94,6 +94,6 @@ Pull Request 应包含：
 ## 配置与密钥
 运行时配置位于 `config/p2s_client.json`。项目 / 工作区 / 会话 / skills / profiles 还会写入 `config/p2s_projects_v2/`、`config/p2s_sessions_v2/`、`config/p2s_skills/` 等目录。
 
-本地 debug gateway 的配置也在 `config/p2s_client.json`，并且只应在 `P2SMod.DEBUG` 为 true 的调试环境里使用。
+本地 debug gateway 的配置也在 `config/p2s_client.json`，并且只应在 `P2SMod.DEBUG` 为 true 的调试环境里使用。当前默认 host 是 `0.0.0.0`，方便 WSL / 外部本机脚本调试；如果只想回环访问，需要手动改回 `127.0.0.1`。
 
 不要提交 API Key、本地配置，或自动生成的世界/项目数据。

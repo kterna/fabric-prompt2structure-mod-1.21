@@ -1,9 +1,10 @@
 # CHANGELOG
 
 ## 2026-03-22 本地 Debug 外部控制网关
-- 客户端新增仅在 `DEBUG` 模式下启用的本地 debug gateway，可在 `127.0.0.1` 上通过 HTTP 提交 agent job，并通过 SSE 订阅长任务事件。
+- 客户端新增仅在 `DEBUG` 模式下启用的本地 debug gateway，可通过 HTTP 提交 agent job，并通过 SSE 订阅长任务事件。
 - 外部调试接口支持查看当前状态、提交 prompt、读取 job 状态，以及处理 pending patch / pending choice。
 - `config/p2s_client.json` 新增 `debugGatewayEnabled`、`debugGatewayHost`、`debugGatewayPort`、`debugGatewayExposeSse` 配置项。
+- 将 debug gateway 默认绑定调整为 `0.0.0.0`，便于从 WSL 或其他本机网络命名空间访问；需要仅回环时可手动改回 `127.0.0.1`。
 
 ## 2026-03-09 Patch 工具语义对齐
 - 关闭中间编辑区后不再切到 gameplay input，避免界面保持收起态时无法重新操作。

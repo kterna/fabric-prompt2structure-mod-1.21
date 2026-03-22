@@ -63,10 +63,9 @@ public final class ClientDebugGateway {
                 return;
             }
             try {
-                InetSocketAddress address = new InetSocketAddress(
-                        P2SClientConfig.getDebugGatewayHost(),
-                        P2SClientConfig.getDebugGatewayPort()
-                );
+                String configuredHost = P2SClientConfig.getDebugGatewayHost();
+                int port = P2SClientConfig.getDebugGatewayPort();
+                InetSocketAddress address = createBindAddress(configuredHost, port);
                 HttpServer created = HttpServer.create(address, 0);
                 created.createContext(ROOT_PATH, new RootHandler());
                 created.setExecutor(Executors.newCachedThreadPool(namedFactory("p2s-debug-http")));
@@ -85,15 +84,40 @@ public final class ClientDebugGateway {
                 server = created;
                 monitorExecutor = createdMonitor;
                 P2SMod.LOGGER.info(
-                        "P2S debug gateway listening on http://{}:{}{}",
-                        P2SClientConfig.getDebugGatewayHost(),
-                        P2SClientConfig.getDebugGatewayPort(),
-                        ROOT_PATH
+                        "P2S debug gateway listening on {}{} (configured host={})",
+                        bindDisplayHost(configuredHost, port),
+                        ROOT_PATH,
+                        configuredHost
                 );
             } catch (Exception e) {
                 P2SMod.LOGGER.warn("Failed to start P2S debug gateway: {}", e.getMessage());
             }
         }
+    }
+
+    private static InetSocketAddress createBindAddress(String configuredHost, int port) {
+        if (isWildcardHost(configuredHost)) {
+            return new InetSocketAddress(port);
+        }
+        return new InetSocketAddress(configuredHost, port);
+    }
+
+    private static boolean isWildcardHost(String configuredHost) {
+        if (configuredHost == null || configuredHost.isBlank()) {
+            return true;
+        }
+        String normalized = configuredHost.trim();
+        return "*".equals(normalized)
+                || "0.0.0.0".equals(normalized)
+                || "::".equals(normalized)
+                || "[::]".equals(normalized);
+    }
+
+    private static String bindDisplayHost(String configuredHost, int port) {
+        if (isWildcardHost(configuredHost)) {
+            return "http://0.0.0.0:" + port;
+        }
+        return "http://" + configuredHost + ":" + port;
     }
 
     private static ThreadFactory namedFactory(String baseName) {
@@ -1110,6 +1134,8 @@ public final class ClientDebugGateway {
         JsonObject payload = new JsonObject();
         payload.addProperty("debug_enabled", P2SMod.DEBUG);
         payload.addProperty("gateway_running", server != null);
+        payload.addProperty("bind_host", P2SClientConfig.getDebugGatewayHost());
+        payload.addProperty("bind_port", P2SClientConfig.getDebugGatewayPort());
         payload.addProperty("server_bridge_ready", snapshot.serverBridgeReady());
         payload.addProperty("has_project", snapshot.session().hasProject());
         payload.addProperty("project_id", safe(snapshot.session().projectId()));

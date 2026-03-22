@@ -40,7 +40,7 @@ public final class P2SClientConfig {
     private static final boolean DEFAULT_CONFIRM_REQUIRED = P2SDefaults.DEFAULT_CONFIRM_REQUIRED;
     private static final int DEFAULT_RISK_AUTO_APPLY_THRESHOLD = P2SDefaults.DEFAULT_RISK_AUTO_APPLY_THRESHOLD;
     private static final boolean DEFAULT_DEBUG_GATEWAY_ENABLED = P2SMod.DEBUG;
-    private static final String DEFAULT_DEBUG_GATEWAY_HOST = "127.0.0.1";
+    private static final String DEFAULT_DEBUG_GATEWAY_HOST = "0.0.0.0";
     private static final int DEFAULT_DEBUG_GATEWAY_PORT = 17862;
     private static final boolean DEFAULT_DEBUG_GATEWAY_EXPOSE_SSE = true;
     private static final String DEFAULT_SYSTEM_PROMPT = P2SDefaults.DEFAULT_SYSTEM_PROMPT;
