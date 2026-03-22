@@ -21,6 +21,7 @@ public class P2SMod implements ModInitializer {
 	public void onInitialize() {
 		P2SNetworkPayloads.register();
 		ServerNetworkHandler.register();
+		P2SDebugCommands.register();
 		LOGGER.info("Prompt-to-Structure module loaded.");
 	}
 }
