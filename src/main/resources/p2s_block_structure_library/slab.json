@@ -1,0 +1,12 @@
+{
+  "id": "slab",
+  "unitKind": "slab",
+  "tags": ["slab"],
+  "match": {
+    "blockSuffixes": ["_slab"],
+    "requiredProperties": ["type"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

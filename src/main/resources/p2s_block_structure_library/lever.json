@@ -1,0 +1,12 @@
+{
+  "id": "lever",
+  "unitKind": "lever",
+  "tags": ["lever", "directional"],
+  "match": {
+    "exactBlockIds": ["minecraft:lever"],
+    "requiredProperties": ["face", "facing", "powered"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

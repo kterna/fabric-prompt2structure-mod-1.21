@@ -1,0 +1,12 @@
+{
+  "id": "button",
+  "unitKind": "button",
+  "tags": ["button", "directional"],
+  "match": {
+    "blockSuffixes": ["_button"],
+    "requiredProperties": ["face", "facing", "powered"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

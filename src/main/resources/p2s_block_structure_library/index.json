@@ -2,5 +2,9 @@
   "/p2s_block_structure_library/door.json",
   "/p2s_block_structure_library/trapdoor.json",
   "/p2s_block_structure_library/stairs.json",
-  "/p2s_block_structure_library/bed.json"
+  "/p2s_block_structure_library/bed.json",
+  "/p2s_block_structure_library/slab.json",
+  "/p2s_block_structure_library/fence_gate.json",
+  "/p2s_block_structure_library/button.json",
+  "/p2s_block_structure_library/lever.json"
 ]

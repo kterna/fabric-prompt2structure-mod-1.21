@@ -1,0 +1,12 @@
+{
+  "id": "fence_gate",
+  "unitKind": "fence_gate",
+  "tags": ["fence_gate", "directional"],
+  "match": {
+    "blockSuffixes": ["_fence_gate"],
+    "requiredProperties": ["facing", "open", "powered", "in_wall"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}
