@@ -1,9 +1,9 @@
 # 方块实体 NBT 安全模板
 
-本页只描述可给 agent 开放的安全方块实体模板和值域。方向、墙上/地上/顶上、旋转等属于 block state，见 `subdocs/block-state-capabilities.md`，不要写成 NBT。不要直接输出原始 NBT；只有补丁工具 schema 明确提供方块实体模板字段时，才使用这些模板。
+本页只描述可给 agent 开放的安全方块实体模板和值域。方向、墙上/地上/顶上、旋转等属于 block state，见 `subdocs/block-state-capabilities.md`，不要写成 NBT。不要直接输出原始 NBT；写入前优先调用 `describe_block_entity_template(block_id)` 查询当前方块支持的模板和字段。
 
 ## 通用规则
-- 模板必须绑定到已有放置动作的坐标，先放置方块状态，再应用方块实体模板。
+- 模板绑定在 action 上，先放置方块状态，再应用方块实体模板。
 - 方块 ID 和方块状态属性仍由 `palette` / action `block` 决定；模板只写方块实体数据。
 - 所有枚举必须按本页白名单校验，不能让模型生成任意字符串。
 - 不认识的模板、字段、枚举值、物品 ID、注册表 ID 必须拒绝或忽略，不能透传为 NBT。
@@ -33,57 +33,52 @@ black
 ## 告示牌文字
 适用方块：`*_sign`、`*_wall_sign`、`*_hanging_sign`、`*_wall_hanging_sign`。
 
-可开放模板：
+TOML 写法：
 
-```json
-{
-  "type": "sign_text",
-  "front": {
-    "lines": ["Line 1", "Line 2", "", ""],
-    "color": "black",
-    "glowing": false
-  },
-  "back": {
-    "lines": ["", "", "", ""],
-    "color": "black",
-    "glowing": false
-  },
-  "waxed": false
-}
+```toml
+[[operation.actions_add]]
+type = "points"
+block = "oak_wall_sign_north"
+at = [[2, 3, 0]]
+block_entity = "sign_text"
+sign_front = ["Line 1", "Line 2", "", ""]
+sign_back = ["", "", "", ""]
+sign_color = "black"
+sign_glowing = false
+sign_waxed = false
 ```
 
 校验规则：
-- `front` 和 `back` 分别对应 NBT 的 `front_text` / `back_text`。
-- `lines` 固定最多 4 行；每行必须是纯文本，由执行器转换为文本组件。
-- `color` 必须是 `dye_color`。
-- `glowing` 对应 `has_glowing_text`，只能是布尔值。
-- `waxed` 对应 `is_waxed`，只能是布尔值。
+- `sign_front` 和 `sign_back` 分别对应前后文字。
+- 每组文字最多 4 行；每行必须是纯文本，由执行器转换为文本组件。
+- `sign_color` 必须是 `dye_color`，默认 `black`。
+- `sign_glowing` 只能是布尔值，默认 `false`。
+- `sign_waxed` 只能是布尔值，默认 `false`。
 - 不开放 `filtered_messages`，不开放任意 JSON text component。
 
 ## 旗帜图案
 适用方块：`*_banner`、`*_wall_banner`。
 
-可开放模板：
+TOML 写法：
 
-```json
-{
-  "type": "banner_patterns",
-  "layers": [
-    { "pattern": "stripe_bottom", "color": "red" }
-  ]
-}
+```toml
+[[operation.actions_add]]
+type = "points"
+block = "red_wall_banner_north"
+at = [[4, 3, 0]]
+block_entity = "banner_patterns"
+banner_patterns = ["stripe_bottom:white", "border:black"]
 ```
 
 校验规则：
-- `layers` 最多 6 层。
+- `banner_patterns` 最多 6 层；每层写成 `pattern:color`。
 - `color` 必须是 `dye_color`。
 - `pattern` 必须是下列枚举之一。
-- 执行器应默认拒绝 `base` 出现在 `layers` 中；底色应由 `white_banner` / `red_wall_banner` 等方块 ID 决定。
+- 执行器会拒绝 `base` 出现在 `banner_patterns` 中；底色应由 `white_banner` / `red_wall_banner` 等方块 ID 决定。
 - 不开放原始 `patterns` NBT，不开放任意 pattern 字符串。
 - 暂不开放 `CustomName`；如果后续需要，只能走纯文本 `custom_name` 模板。
 
 ```text
-base
 square_bottom_left
 square_bottom_right
 square_top_left

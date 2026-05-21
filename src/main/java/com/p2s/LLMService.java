@@ -808,6 +808,33 @@ public final class LLMService {
             tools.add(describeTool);
         }
 
+        if (allowsTool(allowedTools, "describe_block_entity_template")) {
+            JsonObject describeEntityTool = new JsonObject();
+            describeEntityTool.addProperty("type", "function");
+            JsonObject describeEntityFn = new JsonObject();
+            describeEntityFn.addProperty("name", "describe_block_entity_template");
+            describeEntityFn.addProperty("description",
+                    "Describe safe action-level block_entity templates available for a block id or block state. " +
+                    "Use this before writing sign text or banner pattern fields. Does not expose raw NBT.");
+            JsonObject describeEntityParams = new JsonObject();
+            describeEntityParams.addProperty("type", "object");
+            JsonObject describeEntityProps = new JsonObject();
+
+            JsonObject blockIdProp = new JsonObject();
+            blockIdProp.addProperty("type", "string");
+            blockIdProp.addProperty("description", "Block id or full block state string, for example minecraft:oak_wall_sign or minecraft:red_banner[rotation=0].");
+            describeEntityProps.add("block_id", blockIdProp);
+
+            describeEntityParams.add("properties", describeEntityProps);
+            JsonArray describeEntityRequired = new JsonArray();
+            describeEntityRequired.add("block_id");
+            describeEntityParams.add("required", describeEntityRequired);
+            describeEntityParams.addProperty("additionalProperties", false);
+            describeEntityFn.add("parameters", describeEntityParams);
+            describeEntityTool.add("function", describeEntityFn);
+            tools.add(describeEntityTool);
+        }
+
         if (P2SMod.DEBUG && allowsTool(allowedTools, "debug_stage_blocks")) {
             JsonObject debugStageTool = new JsonObject();
             debugStageTool.addProperty("type", "function");
@@ -922,7 +949,8 @@ public final class LLMService {
                     "Use insert_part for a brand-new part, and reserve insert_actions for appending to an existing part. " +
                     "For actions, use nested [[operation.actions_add]], [[operation.old_actions]], [[operation.new_actions]]. " +
                     "For palette updates, use [[operation.entry]] where omitting old_value means add-new and omitting new_value means delete. " +
-                    "Palette values may be block ids or full block state strings such as minecraft:oak_wall_sign[facing=north,waterlogged=false].");
+                    "Palette values may be block ids or full block state strings such as minecraft:oak_wall_sign[facing=north,waterlogged=false]. " +
+                    "Action-level safe block entity templates are allowed only through block_entity=sign_text or block_entity=banner_patterns fields described by describe_block_entity_template.");
             properties.add("patch_toml", patchToml);
 
             params.add("properties", properties);

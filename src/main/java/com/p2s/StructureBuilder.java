@@ -3,13 +3,28 @@ package com.p2s;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonSyntaxException;
+import com.google.gson.annotations.SerializedName;
+import net.minecraft.core.Registry;
+import net.minecraft.core.component.DataComponentMap;
+import net.minecraft.core.component.DataComponentPatch;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.item.DyeColor;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.entity.BannerBlockEntity;
+import net.minecraft.world.level.block.entity.BannerPattern;
+import net.minecraft.world.level.block.entity.BannerPatternLayers;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.SignBlockEntity;
+import net.minecraft.world.level.block.entity.SignText;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.DirectionProperty;
 import net.minecraft.world.level.block.state.properties.Property;
@@ -19,6 +34,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -27,6 +43,27 @@ import java.util.Set;
 
 public final class StructureBuilder {
     private static final Gson GSON = new GsonBuilder().create();
+    private static final int MAX_SIGN_LINES = 4;
+    private static final int MAX_SIGN_LINE_CHARS = 80;
+    private static final int MAX_BANNER_PATTERN_LAYERS = 6;
+    private static final Set<String> SUPPORTED_DYE_COLORS = new LinkedHashSet<>(List.of(
+            "white", "orange", "magenta", "light_blue",
+            "yellow", "lime", "pink", "gray",
+            "light_gray", "cyan", "purple", "blue",
+            "brown", "green", "red", "black"
+    ));
+    private static final Set<String> SUPPORTED_BANNER_PATTERNS = new LinkedHashSet<>(List.of(
+            "base",
+            "square_bottom_left", "square_bottom_right", "square_top_left", "square_top_right",
+            "stripe_bottom", "stripe_top", "stripe_left", "stripe_right", "stripe_center", "stripe_middle",
+            "stripe_downright", "stripe_downleft", "small_stripes",
+            "cross", "straight_cross", "triangle_bottom", "triangle_top", "triangles_bottom", "triangles_top",
+            "diagonal_left", "diagonal_up_right", "diagonal_up_left", "diagonal_right",
+            "circle", "rhombus", "half_vertical", "half_horizontal", "half_vertical_right", "half_horizontal_bottom",
+            "border", "curly_border", "gradient", "gradient_up", "bricks",
+            "globe", "creeper", "skull", "flower", "mojang", "piglin", "flow", "guster"
+    ));
+    private static final Set<String> SUPPORTED_BANNER_LAYER_PATTERNS = supportedBannerLayerPatternSet();
 
     private StructureBuilder() {
     }
@@ -236,6 +273,125 @@ public final class StructureBuilder {
         return applyFacing(state, facing);
     }
 
+    public static Set<String> supportedDyeColors() {
+        return SUPPORTED_DYE_COLORS;
+    }
+
+    public static Set<String> supportedBannerPatterns() {
+        return SUPPORTED_BANNER_PATTERNS;
+    }
+
+    public static Set<String> supportedBannerLayerPatterns() {
+        return SUPPORTED_BANNER_LAYER_PATTERNS;
+    }
+
+    public static int maxSignLines() {
+        return MAX_SIGN_LINES;
+    }
+
+    public static int maxSignLineChars() {
+        return MAX_SIGN_LINE_CHARS;
+    }
+
+    public static int maxBannerPatternLayers() {
+        return MAX_BANNER_PATTERN_LAYERS;
+    }
+
+    public static boolean isSignBlockState(BlockState state) {
+        String path = blockPath(state);
+        return path.endsWith("_sign");
+    }
+
+    public static boolean isBannerBlockState(BlockState state) {
+        String path = blockPath(state);
+        return path.endsWith("_banner");
+    }
+
+    public static boolean supportsSignTextTemplate(BlockState state) {
+        return isSignBlockState(state);
+    }
+
+    public static boolean supportsBannerPatternsTemplate(BlockState state) {
+        return isBannerBlockState(state);
+    }
+
+    public static List<String> supportedBlockEntityTemplates(BlockState state) {
+        List<String> templates = new ArrayList<>();
+        if (supportsSignTextTemplate(state)) {
+            templates.add("sign_text");
+        }
+        if (supportsBannerPatternsTemplate(state)) {
+            templates.add("banner_patterns");
+        }
+        return templates;
+    }
+
+    public static BlockState resolveActionBlockState(Map<String, BlockState> palette, VbsAction action) {
+        return getState(palette == null ? Map.of() : palette, new HashSet<>(), action == null ? null : action.block, action == null ? null : action.facing);
+    }
+
+    public static List<PlacementState> expandedPlacementStates(BlockState state) {
+        if (state == null) {
+            return List.of();
+        }
+        if (isDoorState(state)) {
+            return List.of(
+                    new PlacementState(0, 0, 0, setPropertyByName(state, "half", "lower")),
+                    new PlacementState(0, 1, 0, setPropertyByName(state, "half", "upper"))
+            );
+        }
+        if (isBedState(state)) {
+            Direction facing = directionPropertyValue(state, "facing");
+            if (facing != null && facing != Direction.UP && facing != Direction.DOWN) {
+                return List.of(
+                        new PlacementState(0, 0, 0, setPropertyByName(state, "part", "foot")),
+                        new PlacementState(facing.getStepX(), 0, facing.getStepZ(), setPropertyByName(state, "part", "head"))
+                );
+            }
+        }
+        return List.of(new PlacementState(0, 0, 0, state));
+    }
+
+    public static boolean hasBlockEntityTemplate(VbsAction action) {
+        return action != null && action.blockEntity != null && !action.blockEntity.isBlank();
+    }
+
+    public static List<String> validateBlockEntityTemplate(VbsAction action, BlockState state) {
+        if (!hasBlockEntityTemplate(action)) {
+            return List.of();
+        }
+        List<String> errors = new ArrayList<>();
+        String template = normalize(action.blockEntity);
+        switch (template) {
+            case "sign_text" -> {
+                if (!supportsSignTextTemplate(state)) {
+                    errors.add("block_entity=sign_text requires a sign or hanging sign block state");
+                }
+                if (action.bannerPatterns != null) {
+                    errors.add("banner_patterns requires block_entity=banner_patterns");
+                }
+                validateSignLines(action.signFront, "sign_front", errors);
+                validateSignLines(action.signBack, "sign_back", errors);
+                validateDyeColor(action.signColor, "sign_color", "black", errors);
+            }
+            case "banner_patterns" -> {
+                if (!supportsBannerPatternsTemplate(state)) {
+                    errors.add("block_entity=banner_patterns requires a banner or wall banner block state");
+                }
+                if (action.signFront != null
+                        || action.signBack != null
+                        || (action.signColor != null && !action.signColor.isBlank())
+                        || action.signGlowing != null
+                        || action.signWaxed != null) {
+                    errors.add("sign_* fields require block_entity=sign_text");
+                }
+                validateBannerPatterns(action.bannerPatterns, errors);
+            }
+            default -> errors.add("unsupported block_entity template '" + action.blockEntity + "'");
+        }
+        return errors;
+    }
+
     private static Map<String, BlockState> resolvePalette(Map<String, String> paletteDef) {
         Map<String, BlockState> palette = new HashMap<>();
         if (paletteDef != null) {
@@ -286,7 +442,7 @@ public final class StructureBuilder {
                 for (int x = minX; x <= maxX; x++) {
                     for (int y = minY; y <= maxY; y++) {
                         for (int z = minZ; z <= maxZ; z++) {
-                            place(world, origin, mutable, state, x, y, z);
+                            place(world, origin, mutable, state, action, x, y, z);
                         }
                     }
                 }
@@ -299,7 +455,7 @@ public final class StructureBuilder {
                             if (!boundary) {
                                 continue;
                             }
-                            place(world, origin, mutable, state, x, y, z);
+                            place(world, origin, mutable, state, action, x, y, z);
                         }
                     }
                 }
@@ -312,7 +468,7 @@ public final class StructureBuilder {
                             if (!boundary) {
                                 continue;
                             }
-                            place(world, origin, mutable, state, x, y, z);
+                            place(world, origin, mutable, state, action, x, y, z);
                         }
                     }
                 }
@@ -369,7 +525,7 @@ public final class StructureBuilder {
                     } else if (!"solid".equals(mode)) {
                         throw new IllegalArgumentException("Unsupported plane mode: " + action.mode);
                     }
-                    place(world, origin, mutable, state, x, y, z);
+                    place(world, origin, mutable, state, action, x, y, z);
                 }
             }
         }
@@ -382,7 +538,7 @@ public final class StructureBuilder {
         if (from == null || to == null) {
             throw new IllegalArgumentException("line action requires from/to");
         }
-        drawLine(from[0], from[1], from[2], to[0], to[1], to[2], (x, y, z) -> place(world, origin, mutable, state, x, y, z));
+        drawLine(from[0], from[1], from[2], to[0], to[1], to[2], (x, y, z) -> place(world, origin, mutable, state, action, x, y, z));
     }
 
     private static void handlePoints(ServerLevel world, BlockPos origin, BlockPos.MutableBlockPos mutable,
@@ -395,7 +551,7 @@ public final class StructureBuilder {
             if (c == null) {
                 continue;
             }
-            place(world, origin, mutable, state, c[0], c[1], c[2]);
+            place(world, origin, mutable, state, action, c[0], c[1], c[2]);
         }
     }
 
@@ -430,47 +586,85 @@ public final class StructureBuilder {
     }
 
     private static void place(ServerLevel world, BlockPos origin, BlockPos.MutableBlockPos mutable,
-                              BlockState state, int x, int y, int z) {
-        if (placeDoorPair(world, origin, mutable, state, x, y, z)) {
-            return;
+                              BlockState state, VbsAction action, int x, int y, int z) {
+        for (PlacementState placement : expandedPlacementStates(state)) {
+            mutable.set(origin.getX() + x + placement.dx(), origin.getY() + y + placement.dy(), origin.getZ() + z + placement.dz());
+            world.setBlockAndUpdate(mutable, placement.state());
+            if (placement.dx() == 0 && placement.dy() == 0 && placement.dz() == 0) {
+                applyBlockEntityTemplate(world, mutable.immutable(), placement.state(), action);
+            }
         }
-        if (placeBedPair(world, origin, mutable, state, x, y, z)) {
-            return;
-        }
-        mutable.set(origin.getX() + x, origin.getY() + y, origin.getZ() + z);
-        world.setBlockAndUpdate(mutable, state);
     }
 
-    private static boolean placeDoorPair(ServerLevel world, BlockPos origin, BlockPos.MutableBlockPos mutable,
-                                         BlockState state, int x, int y, int z) {
-        if (!isDoorState(state)) {
-            return false;
+    private static void applyBlockEntityTemplate(ServerLevel world, BlockPos pos, BlockState state, VbsAction action) {
+        if (!hasBlockEntityTemplate(action)) {
+            return;
         }
-        BlockState lower = setPropertyByName(state, "half", "lower");
-        BlockState upper = setPropertyByName(state, "half", "upper");
-        mutable.set(origin.getX() + x, origin.getY() + y, origin.getZ() + z);
-        world.setBlockAndUpdate(mutable, lower);
-        mutable.set(origin.getX() + x, origin.getY() + y + 1, origin.getZ() + z);
-        world.setBlockAndUpdate(mutable, upper);
-        return true;
+        List<String> errors = validateBlockEntityTemplate(action, state);
+        if (!errors.isEmpty()) {
+            throw new IllegalArgumentException(String.join("; ", errors));
+        }
+        String template = normalize(action.blockEntity);
+        BlockEntity blockEntity = world.getBlockEntity(pos);
+        if (blockEntity == null) {
+            throw new IllegalArgumentException("Block entity template '" + template + "' has no block entity at " + pos);
+        }
+        switch (template) {
+            case "sign_text" -> applySignTextTemplate(world, pos, state, blockEntity, action);
+            case "banner_patterns" -> applyBannerPatternsTemplate(world, pos, state, blockEntity, action);
+            default -> throw new IllegalArgumentException("Unsupported block_entity template: " + action.blockEntity);
+        }
     }
 
-    private static boolean placeBedPair(ServerLevel world, BlockPos origin, BlockPos.MutableBlockPos mutable,
-                                        BlockState state, int x, int y, int z) {
-        if (!isBedState(state)) {
-            return false;
+    private static void applySignTextTemplate(ServerLevel world, BlockPos pos, BlockState state, BlockEntity blockEntity, VbsAction action) {
+        if (!(blockEntity instanceof SignBlockEntity sign)) {
+            throw new IllegalArgumentException("block_entity=sign_text target is not a sign block entity");
         }
-        Direction facing = directionPropertyValue(state, "facing");
-        if (facing == null || facing == Direction.UP || facing == Direction.DOWN) {
-            return false;
+        DyeColor color = dyeColor(action.signColor, DyeColor.BLACK);
+        boolean glowing = Boolean.TRUE.equals(action.signGlowing);
+        sign.setText(signText(action.signFront, color, glowing), true);
+        if (action.signBack != null) {
+            sign.setText(signText(action.signBack, color, glowing), false);
         }
-        BlockState foot = setPropertyByName(state, "part", "foot");
-        BlockState head = setPropertyByName(state, "part", "head");
-        mutable.set(origin.getX() + x, origin.getY() + y, origin.getZ() + z);
-        world.setBlockAndUpdate(mutable, foot);
-        mutable.set(origin.getX() + x + facing.getStepX(), origin.getY() + y, origin.getZ() + z + facing.getStepZ());
-        world.setBlockAndUpdate(mutable, head);
-        return true;
+        sign.setWaxed(Boolean.TRUE.equals(action.signWaxed));
+        sign.setChanged();
+        world.sendBlockUpdated(pos, state, state, 3);
+    }
+
+    private static SignText signText(List<String> lines, DyeColor color, boolean glowing) {
+        Component[] messages = new Component[MAX_SIGN_LINES];
+        for (int i = 0; i < MAX_SIGN_LINES; i++) {
+            String line = lines != null && i < lines.size() && lines.get(i) != null ? lines.get(i) : "";
+            messages[i] = Component.literal(truncate(line, MAX_SIGN_LINE_CHARS));
+        }
+        return new SignText(messages, messages, color, glowing);
+    }
+
+    private static void applyBannerPatternsTemplate(ServerLevel world, BlockPos pos, BlockState state, BlockEntity blockEntity, VbsAction action) {
+        if (!(blockEntity instanceof BannerBlockEntity banner)) {
+            throw new IllegalArgumentException("block_entity=banner_patterns target is not a banner block entity");
+        }
+        Registry<BannerPattern> registry = world.registryAccess().registryOrThrow(Registries.BANNER_PATTERN);
+        List<BannerPatternLayers.Layer> layers = new ArrayList<>();
+        if (action.bannerPatterns != null) {
+            for (String rawLayer : action.bannerPatterns) {
+                BannerLayerSpec spec = parseBannerLayer(rawLayer);
+                if (spec == null) {
+                    continue;
+                }
+                ResourceKey<BannerPattern> key = ResourceKey.create(
+                        Registries.BANNER_PATTERN,
+                        ResourceLocation.fromNamespaceAndPath("minecraft", spec.pattern())
+                );
+                layers.add(new BannerPatternLayers.Layer(registry.getHolderOrThrow(key), dyeColor(spec.color(), DyeColor.WHITE)));
+            }
+        }
+        DataComponentPatch patch = DataComponentPatch.builder()
+                .set(DataComponents.BANNER_PATTERNS, new BannerPatternLayers(layers))
+                .build();
+        banner.applyComponents(DataComponentMap.EMPTY, patch);
+        banner.setChanged();
+        world.sendBlockUpdated(pos, state, state, 3);
     }
 
     private interface PointVisitor {
@@ -704,6 +898,86 @@ public final class StructureBuilder {
         return id == null ? "" : id.getPath();
     }
 
+    private static void validateSignLines(List<String> lines, String field, List<String> errors) {
+        if (lines == null) {
+            return;
+        }
+        if (lines.size() > MAX_SIGN_LINES) {
+            errors.add(field + " must contain at most " + MAX_SIGN_LINES + " lines");
+            return;
+        }
+        for (int i = 0; i < lines.size(); i++) {
+            String line = lines.get(i);
+            if (line == null) {
+                errors.add(field + "[" + i + "] must be a string");
+            } else if (line.length() > MAX_SIGN_LINE_CHARS) {
+                errors.add(field + "[" + i + "] exceeds " + MAX_SIGN_LINE_CHARS + " chars");
+            }
+        }
+    }
+
+    private static void validateDyeColor(String value, String field, String fallback, List<String> errors) {
+        String color = value == null || value.isBlank() ? fallback : normalize(value);
+        if (!SUPPORTED_DYE_COLORS.contains(color)) {
+            errors.add(field + " must be one of: " + String.join(", ", SUPPORTED_DYE_COLORS));
+        }
+    }
+
+    private static void validateBannerPatterns(List<String> layers, List<String> errors) {
+        if (layers == null || layers.isEmpty()) {
+            errors.add("banner_patterns requires at least one pattern:color layer");
+            return;
+        }
+        if (layers.size() > MAX_BANNER_PATTERN_LAYERS) {
+            errors.add("banner_patterns must contain at most " + MAX_BANNER_PATTERN_LAYERS + " layers");
+            return;
+        }
+        for (int i = 0; i < layers.size(); i++) {
+            BannerLayerSpec layer = parseBannerLayer(layers.get(i));
+            if (layer == null) {
+                errors.add("banner_patterns[" + i + "] must use pattern:color");
+                continue;
+            }
+            if ("base".equals(layer.pattern())) {
+                errors.add("banner_patterns[" + i + "] must not use base; choose the banner block color instead");
+            } else if (!SUPPORTED_BANNER_LAYER_PATTERNS.contains(layer.pattern())) {
+                errors.add("banner_patterns[" + i + "] has unsupported pattern '" + layer.pattern() + "'");
+            }
+            if (!SUPPORTED_DYE_COLORS.contains(layer.color())) {
+                errors.add("banner_patterns[" + i + "] has unsupported color '" + layer.color() + "'");
+            }
+        }
+    }
+
+    private static BannerLayerSpec parseBannerLayer(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        String[] parts = raw.trim().toLowerCase(Locale.ROOT).split(":", 2);
+        if (parts.length != 2 || parts[0].isBlank() || parts[1].isBlank()) {
+            return null;
+        }
+        return new BannerLayerSpec(parts[0].trim(), parts[1].trim());
+    }
+
+    private static DyeColor dyeColor(String raw, DyeColor fallback) {
+        String value = raw == null || raw.isBlank() ? "" : normalize(raw);
+        return DyeColor.byName(value, fallback);
+    }
+
+    private static String truncate(String value, int maxChars) {
+        if (value == null || maxChars < 0 || value.length() <= maxChars) {
+            return value == null ? "" : value;
+        }
+        return value.substring(0, maxChars);
+    }
+
+    private static Set<String> supportedBannerLayerPatternSet() {
+        Set<String> patterns = new LinkedHashSet<>(SUPPORTED_BANNER_PATTERNS);
+        patterns.remove("base");
+        return patterns;
+    }
+
     private static boolean hasPropertyValue(BlockState state, String name, String value) {
         Property<?> property = findProperty(state, name);
         return property != null && property.getValue(value).isPresent();
@@ -852,6 +1126,12 @@ public final class StructureBuilder {
         return state;
     }
 
+    public record PlacementState(int dx, int dy, int dz, BlockState state) {
+    }
+
+    private record BannerLayerSpec(String pattern, String color) {
+    }
+
     public static class VbsScript {
         public Map<String, String> palette = new HashMap<>();
         public List<VbsLayer> structure = new ArrayList<>();
@@ -881,5 +1161,26 @@ public final class StructureBuilder {
         public String mode;
         public String axis;
         public String facing;
+
+        @SerializedName("block_entity")
+        public String blockEntity;
+
+        @SerializedName("sign_front")
+        public List<String> signFront;
+
+        @SerializedName("sign_back")
+        public List<String> signBack;
+
+        @SerializedName("sign_color")
+        public String signColor;
+
+        @SerializedName("sign_glowing")
+        public Boolean signGlowing;
+
+        @SerializedName("sign_waxed")
+        public Boolean signWaxed;
+
+        @SerializedName("banner_patterns")
+        public List<String> bannerPatterns;
     }
 }

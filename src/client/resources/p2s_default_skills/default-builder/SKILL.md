@@ -56,6 +56,7 @@ description: "建筑总控规则：定义动作协议、补丁策略，并在细
 - 创建全新 `part` 必须使用 `insert_part`；`insert_actions` 只用于给已存在的 `part` 追加动作。
 - 纯平移使用 `move_actions` + `offset = [dx, dy, dz]`。
 - palette 调整使用 `update_palette` + `[[operation.entry]]`；`new_value` 可为方块 ID 或完整 block state，例如 `minecraft:oak_wall_sign[facing=north,waterlogged=false]`。
+- 方块实体只允许 action 级安全模板；写入前调用 `describe_block_entity_template(block_id)`，不要输出原始 NBT。当前可用模板包括 `block_entity = "sign_text"` 和 `block_entity = "banner_patterns"`。
 
 ## Patch 策略
 - 优先最小改动，尽量保留现有有效结构。

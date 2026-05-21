@@ -117,6 +117,13 @@ public final class StructurePatchEngine {
         if (!Objects.equals(normalize(a.mode), normalize(b.mode))) return false;
         if (!Objects.equals(normalize(a.axis), normalize(b.axis))) return false;
         if (!Objects.equals(normalize(a.facing), normalize(b.facing))) return false;
+        if (!Objects.equals(normalize(a.blockEntity), normalize(b.blockEntity))) return false;
+        if (!Objects.equals(a.signFront, b.signFront)) return false;
+        if (!Objects.equals(a.signBack, b.signBack)) return false;
+        if (!Objects.equals(normalize(a.signColor), normalize(b.signColor))) return false;
+        if (!Objects.equals(a.signGlowing, b.signGlowing)) return false;
+        if (!Objects.equals(a.signWaxed, b.signWaxed)) return false;
+        if (!Objects.equals(a.bannerPatterns, b.bannerPatterns)) return false;
         if (!Objects.equals(a.from, b.from)) return false;
         if (!Objects.equals(a.to, b.to)) return false;
         if (!Objects.equals(a.at, b.at)) return false;
@@ -184,6 +191,9 @@ public final class StructurePatchEngine {
         }
         if (a.axis != null && !a.axis.isBlank()) {
             sb.append(" axis=").append(a.axis);
+        }
+        if (a.blockEntity != null && !a.blockEntity.isBlank()) {
+            sb.append(" block_entity=").append(a.blockEntity);
         }
         sb.append(" ").append(a.block == null ? "?" : a.block);
         if (a.from != null) sb.append(" ").append(a.from);
@@ -667,6 +677,13 @@ public final class StructurePatchEngine {
         copy.mode = action.mode;
         copy.axis = action.axis;
         copy.facing = action.facing;
+        copy.blockEntity = action.blockEntity;
+        copy.signFront = action.signFront == null ? null : new ArrayList<>(action.signFront);
+        copy.signBack = action.signBack == null ? null : new ArrayList<>(action.signBack);
+        copy.signColor = action.signColor;
+        copy.signGlowing = action.signGlowing;
+        copy.signWaxed = action.signWaxed;
+        copy.bannerPatterns = action.bannerPatterns == null ? null : new ArrayList<>(action.bannerPatterns);
         return copy;
     }
 
@@ -821,7 +838,7 @@ public final class StructurePatchEngine {
                     if (!place) {
                         continue;
                     }
-                    map.put(new Int3(x, y, z), state);
+                    writeExpanded(map, x, y, z, state);
                 }
             }
         }
@@ -870,7 +887,7 @@ public final class StructurePatchEngine {
                     } else if (!"solid".equals(mode)) {
                         continue;
                     }
-                    map.put(new Int3(x, y, z), state);
+                    writeExpanded(map, x, y, z, state);
                 }
             }
         }
@@ -882,7 +899,7 @@ public final class StructurePatchEngine {
         if (from == null || to == null) {
             return;
         }
-        drawLine(from[0], from[1], from[2], to[0], to[1], to[2], (x, y, z) -> map.put(new Int3(x, y, z), state));
+        drawLine(from[0], from[1], from[2], to[0], to[1], to[2], (x, y, z) -> writeExpanded(map, x, y, z, state));
     }
 
     private static void writePoints(Map<Int3, BlockState> map, StructureBuilder.VbsAction action, BlockState state) {
@@ -894,7 +911,13 @@ public final class StructurePatchEngine {
             if (c == null) {
                 continue;
             }
-            map.put(new Int3(c[0], c[1], c[2]), state);
+            writeExpanded(map, c[0], c[1], c[2], state);
+        }
+    }
+
+    private static void writeExpanded(Map<Int3, BlockState> map, int x, int y, int z, BlockState state) {
+        for (StructureBuilder.PlacementState placement : StructureBuilder.expandedPlacementStates(state)) {
+            map.put(new Int3(x + placement.dx(), y + placement.dy(), z + placement.dz()), placement.state());
         }
     }
 

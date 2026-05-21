@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 2026-05-21 方块状态与方块实体模板
+- Agent 工具链新增 `describe_block_state` / `describe_block_entity_template` 查询能力，用于在写 patch 前确认真实 block state 属性和值域，以及当前方块支持的安全方块实体模板。
+- 工作区 TOML 与 patch TOML 支持 action 级安全方块实体字段，初期开放告示牌文字 `sign_text` 与旗帜图案 `banner_patterns`，并拒绝原始 NBT 与未列入白名单的枚举值。
+- 结构放置、预览与校验统一处理门 / 床的成对方块展开，避免 agent 需要手写上半门或床头方块。
+- `p2s_block_structure_library` 扩展常见建筑 block state 家族覆盖，包括玻璃板 / 铁栏杆、栅栏、墙、地毯、链条、灯笼、铁轨和压力板。
+- 默认 skills / subagent profiles 同步更新，要求生成方向、墙上/地上形态等通过 block state 表达，方块实体数据只能通过安全模板表达。
+
 ## 2026-03-22 本地 Debug 外部控制网关
 - 客户端新增仅在 `DEBUG` 模式下启用的本地 debug gateway，可通过 HTTP 提交 agent job，并通过 SSE 订阅长任务事件。
 - 外部调试接口支持查看当前状态、提交 prompt、读取 job 状态，以及处理 pending patch / pending choice。

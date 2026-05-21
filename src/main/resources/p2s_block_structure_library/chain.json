@@ -1,0 +1,12 @@
+{
+  "id": "chain",
+  "unitKind": "chain",
+  "tags": ["chain", "axis", "waterloggable"],
+  "match": {
+    "exactBlockIds": ["minecraft:chain"],
+    "requiredProperties": ["axis", "waterlogged"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

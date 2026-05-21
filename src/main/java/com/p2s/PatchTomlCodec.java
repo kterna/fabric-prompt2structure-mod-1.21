@@ -161,6 +161,13 @@ public final class PatchTomlCodec {
                 case "mode" -> currentAction.mode = requireString(value, lineNumber, "action.mode");
                 case "axis" -> currentAction.axis = requireString(value, lineNumber, "action.axis");
                 case "facing" -> currentAction.facing = requireString(value, lineNumber, "action.facing");
+                case "block_entity" -> currentAction.blockEntity = requireString(value, lineNumber, "action.block_entity");
+                case "sign_front" -> currentAction.signFront = requireStringArray(value, lineNumber, "action.sign_front");
+                case "sign_back" -> currentAction.signBack = requireStringArray(value, lineNumber, "action.sign_back");
+                case "sign_color" -> currentAction.signColor = requireString(value, lineNumber, "action.sign_color");
+                case "sign_glowing" -> currentAction.signGlowing = requireBoolean(value, lineNumber, "action.sign_glowing");
+                case "sign_waxed" -> currentAction.signWaxed = requireBoolean(value, lineNumber, "action.sign_waxed");
+                case "banner_patterns" -> currentAction.bannerPatterns = requireStringArray(value, lineNumber, "action.banner_patterns");
                 default -> throw error(lineNumber, "Unknown action key: " + key);
             }
         }
@@ -229,6 +236,27 @@ public final class PatchTomlCodec {
                 result.add(requireIntArray(entry, lineNumber, label));
             }
             return result;
+        }
+
+        private List<String> requireStringArray(Object value, int lineNumber, String label) {
+            if (!(value instanceof List<?> listValue)) {
+                throw error(lineNumber, label + " must be a string array");
+            }
+            List<String> result = new ArrayList<>();
+            for (Object entry : listValue) {
+                if (!(entry instanceof String stringValue)) {
+                    throw error(lineNumber, label + " must contain only strings");
+                }
+                result.add(stringValue);
+            }
+            return result;
+        }
+
+        private Boolean requireBoolean(Object value, int lineNumber, String label) {
+            if (value instanceof Boolean booleanValue) {
+                return booleanValue;
+            }
+            throw error(lineNumber, label + " must be a boolean");
         }
 
         private Object parseValue(String rawValue, int lineNumber) {
@@ -325,6 +353,9 @@ public final class PatchTomlCodec {
             if (ch == '-' || Character.isDigit(ch)) {
                 return parseInteger();
             }
+            if (startsWith("true") || startsWith("false")) {
+                return parseBoolean();
+            }
             throw error("Unsupported value syntax");
         }
 
@@ -395,6 +426,18 @@ public final class PatchTomlCodec {
             }
         }
 
+        private Boolean parseBoolean() {
+            if (startsWith("true")) {
+                index += 4;
+                return Boolean.TRUE;
+            }
+            if (startsWith("false")) {
+                index += 5;
+                return Boolean.FALSE;
+            }
+            throw error("Invalid boolean");
+        }
+
         private void expect(char expected) {
             if (isEof() || text.charAt(index) != expected) {
                 throw error("Expected '" + expected + "'");
@@ -404,6 +447,10 @@ public final class PatchTomlCodec {
 
         private boolean peek(char ch) {
             return !isEof() && text.charAt(index) == ch;
+        }
+
+        private boolean startsWith(String value) {
+            return text.startsWith(value, index);
         }
 
         private void skipWhitespace() {

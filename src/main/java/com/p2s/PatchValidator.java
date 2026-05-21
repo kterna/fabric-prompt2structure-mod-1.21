@@ -1,6 +1,7 @@
 package com.p2s;
 
 import net.minecraft.core.Vec3i;
+import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -259,6 +260,7 @@ public final class PatchValidator {
         Map<String, String> palette = candidateScript == null || candidateScript.palette == null
                 ? Map.of()
                 : candidateScript.palette;
+        Map<String, BlockState> paletteStates = StructureBuilder.resolvePaletteStates(palette);
 
         for (int i = 0; i < patch.operations.size(); i++) {
             PatchModels.PatchOperation op = patch.operations.get(i);
@@ -268,9 +270,9 @@ public final class PatchValidator {
             String prefix = "Operation[" + i + "]";
 
             // Check actions_add block references
-            checkActionsBlockRefs(op.actionsAdd, prefix + ".actions_add", palette, result);
+            checkActionsBlockRefs(op.actionsAdd, prefix + ".actions_add", palette, paletteStates, result);
             // Check new_actions block references
-            checkActionsBlockRefs(op.newActions, prefix + ".new_actions", palette, result);
+            checkActionsBlockRefs(op.newActions, prefix + ".new_actions", palette, paletteStates, result);
 
             // Check palette entries new_value block references
             if (op.entries != null) {
@@ -286,17 +288,31 @@ public final class PatchValidator {
     }
 
     private static void checkActionsBlockRefs(List<StructureBuilder.VbsAction> actions, String prefix,
-                                              Map<String, String> palette, PatchModels.ValidationResult result) {
+                                              Map<String, String> palette, Map<String, BlockState> paletteStates,
+                                              PatchModels.ValidationResult result) {
         if (actions == null) return;
         for (int j = 0; j < actions.size(); j++) {
             StructureBuilder.VbsAction action = actions.get(j);
             if (action == null) continue;
             String block = action.block;
             String path = prefix + "[" + j + "]";
-            if (isBlank(block)) continue;
-            if (palette.containsKey(block)) continue;
-            if (StructureBuilder.resolveDirectBlockState(block) != null) continue;
-            result.addError(path + " block '" + block + "' not in palette and not a valid block id or block state");
+            BlockState state = null;
+            if (!isBlank(block)) {
+                if (palette.containsKey(block)) {
+                    state = paletteStates == null ? null : paletteStates.get(block);
+                } else {
+                    state = StructureBuilder.resolveDirectBlockState(block);
+                    if (state == null) {
+                        result.addError(path + " block '" + block + "' not in palette and not a valid block id or block state");
+                    }
+                }
+            }
+            if (state == null && !isBlank(block)) {
+                state = StructureBuilder.resolveActionBlockState(paletteStates, action);
+            }
+            for (String error : StructureBuilder.validateBlockEntityTemplate(action, state)) {
+                result.addError(path + " " + error);
+            }
         }
     }
 
@@ -333,6 +349,13 @@ public final class PatchValidator {
         }
         if (!isBlank(action.facing) && !SUPPORTED_FACING.contains(normalize(action.facing))) {
             result.addError(path + " invalid facing '" + action.facing + "'");
+        }
+        if (hasBlockEntityFields(action) && isBlank(action.blockEntity)) {
+            result.addError(path + " block entity fields require block_entity=sign_text|banner_patterns");
+        }
+        String blockEntity = normalize(action.blockEntity);
+        if (!blockEntity.isBlank() && !blockEntity.equals("sign_text") && !blockEntity.equals("banner_patterns")) {
+            result.addError(path + " unsupported block_entity '" + action.blockEntity + "'");
         }
 
         switch (type) {
@@ -409,6 +432,18 @@ public final class PatchValidator {
                 && vec.get(2) != null;
     }
 
+    private static boolean hasBlockEntityFields(StructureBuilder.VbsAction action) {
+        if (action == null) {
+            return false;
+        }
+        return action.signFront != null
+                || action.signBack != null
+                || !isBlank(action.signColor)
+                || action.signGlowing != null
+                || action.signWaxed != null
+                || action.bannerPatterns != null;
+    }
+
     private static boolean isBlank(String value) {
         return value == null || value.isBlank();
     }
@@ -443,6 +478,7 @@ public final class PatchValidator {
         int maxX = size.getX() - 1;
         int maxY = size.getY() - 1;
         int maxZ = size.getZ() - 1;
+        Map<String, BlockState> palette = StructureBuilder.resolvePaletteStates(script.palette);
 
         for (StructureBuilder.StructurePart part : script.structures) {
             if (part == null || part.actions == null) {
@@ -466,8 +502,86 @@ public final class PatchValidator {
                         }
                     }
                 }
+                BlockState state = StructureBuilder.resolveActionBlockState(palette, action);
+                validateExpandedPlacementBounds(action, state, maxX, maxY, maxZ, part.name, result);
             }
         }
+    }
+
+    private static void validateExpandedPlacementBounds(
+            StructureBuilder.VbsAction action,
+            BlockState state,
+            int maxX,
+            int maxY,
+            int maxZ,
+            String partName,
+            PatchModels.ValidationResult result
+    ) {
+        ActionBounds bounds = actionBounds(action);
+        if (bounds == null) {
+            return;
+        }
+        List<StructureBuilder.PlacementState> placements = StructureBuilder.expandedPlacementStates(state);
+        if (placements.size() <= 1) {
+            return;
+        }
+        for (StructureBuilder.PlacementState placement : placements) {
+            int minX = bounds.minX + placement.dx();
+            int minY = bounds.minY + placement.dy();
+            int minZ = bounds.minZ + placement.dz();
+            int shiftedMaxX = bounds.maxX + placement.dx();
+            int shiftedMaxY = bounds.maxY + placement.dy();
+            int shiftedMaxZ = bounds.maxZ + placement.dz();
+            if (minX < 0 || minY < 0 || minZ < 0 || shiftedMaxX > maxX || shiftedMaxY > maxY || shiftedMaxZ > maxZ) {
+                result.addError("Expanded paired block placement out-of-bounds in part '" + partName + "'");
+                return;
+            }
+        }
+    }
+
+    private static ActionBounds actionBounds(StructureBuilder.VbsAction action) {
+        if (action == null) {
+            return null;
+        }
+        String type = normalize(action.type);
+        if ("points".equals(type)) {
+            if (action.at == null || action.at.isEmpty()) {
+                return null;
+            }
+            ActionBounds bounds = null;
+            for (List<Integer> point : action.at) {
+                if (!isVec3(point)) {
+                    continue;
+                }
+                bounds = merge(bounds, point.get(0), point.get(1), point.get(2));
+            }
+            return bounds;
+        }
+        if (!isVec3(action.from) || !isVec3(action.to)) {
+            return null;
+        }
+        return new ActionBounds(
+                Math.min(action.from.get(0), action.to.get(0)),
+                Math.min(action.from.get(1), action.to.get(1)),
+                Math.min(action.from.get(2), action.to.get(2)),
+                Math.max(action.from.get(0), action.to.get(0)),
+                Math.max(action.from.get(1), action.to.get(1)),
+                Math.max(action.from.get(2), action.to.get(2))
+        );
+    }
+
+    private static ActionBounds merge(ActionBounds bounds, int x, int y, int z) {
+        if (bounds == null) {
+            return new ActionBounds(x, y, z, x, y, z);
+        }
+        return new ActionBounds(
+                Math.min(bounds.minX, x),
+                Math.min(bounds.minY, y),
+                Math.min(bounds.minZ, z),
+                Math.max(bounds.maxX, x),
+                Math.max(bounds.maxY, y),
+                Math.max(bounds.maxZ, z)
+        );
     }
 
     private static int axisIndex(String axis) {
@@ -490,6 +604,9 @@ public final class PatchValidator {
         int y = vec.get(1);
         int z = vec.get(2);
         return x >= 0 && y >= 0 && z >= 0 && x <= maxX && y <= maxY && z <= maxZ;
+    }
+
+    private record ActionBounds(int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
     }
 
     private static String computeRisk(int changed, List<String> warnings, List<String> errors) {

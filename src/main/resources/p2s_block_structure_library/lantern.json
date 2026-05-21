@@ -1,0 +1,12 @@
+{
+  "id": "lantern",
+  "unitKind": "lantern",
+  "tags": ["lantern", "attachable", "waterloggable"],
+  "match": {
+    "exactBlockIds": ["minecraft:lantern", "minecraft:soul_lantern"],
+    "requiredProperties": ["hanging", "waterlogged"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

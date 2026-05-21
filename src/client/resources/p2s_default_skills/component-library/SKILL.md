@@ -40,4 +40,4 @@ description: "移植并改写的组件模板库。通过 read_subdoc 按需读�
 - 示例坐标均为局部坐标，使用时请整体平移到目标位置。
 - 提交补丁时使用 `patch_toml` 的 TOML 格式，不使用旧 JSON `operations` 数组。
 - 方向、墙上/地上/顶上等形态属于 block state；优先调用 `describe_block_state` 查询目标方块的真实属性和值域，再读取 `subdocs/block-state-capabilities.md` 做通用规则参考，不要把它们写成 NBT。
-- 只有工具 schema 明确支持方块实体模板时，才使用 `subdocs/block-entity-templates.md`；否则不要输出原始 NBT 或自造字段。
+- 方块实体模板写入前调用 `describe_block_entity_template` 查询字段和值域；再参考 `subdocs/block-entity-templates.md`。不要输出原始 NBT 或自造字段。

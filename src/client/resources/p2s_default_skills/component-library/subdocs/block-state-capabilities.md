@@ -147,6 +147,33 @@ Banner：
 - 墙上：`minecraft:<color>_wall_banner[facing=north|east|south|west]`
 - 图案不在 block state；图案属于方块实体模板 `banner_patterns`。
 
+Stairs / slab：
+- 楼梯：`minecraft:<material>_stairs[facing=north|east|south|west,half=bottom|top,shape=straight|inner_left|inner_right|outer_left|outer_right,waterlogged=false]`
+- 台阶：`minecraft:<material>_slab[type=bottom|top|double,waterlogged=false]`
+- `shape` 通常由相邻楼梯连接决定；如果只是生成基础台阶/楼梯，默认用 `shape=straight`。
+
+Glass pane / iron bars：
+- 玻璃板：`minecraft:<color>_stained_glass_pane[north=true|false,east=true|false,south=true|false,west=true|false,waterlogged=false]`
+- 普通玻璃板：`minecraft:glass_pane[north=true|false,east=true|false,south=true|false,west=true|false,waterlogged=false]`
+- 铁栏杆：`minecraft:iron_bars[north=true|false,east=true|false,south=true|false,west=true|false,waterlogged=false]`
+- 四向布尔值表示是否连接到对应方向；生成连续窗格时要按相邻连接写状态，或先用默认状态再通过实际测试修正。
+
+Fence / wall / fence gate：
+- 栅栏：`minecraft:<wood>_fence[north=true|false,east=true|false,south=true|false,west=true|false,waterlogged=false]`
+- 墙：`minecraft:<material>_wall[up=true|false,north=none|low|tall,east=none|low|tall,south=none|low|tall,west=none|low|tall,waterlogged=false]`
+- 栅栏门：`minecraft:<wood>_fence_gate[facing=north|east|south|west,open=false,powered=false,in_wall=false]`
+
+Carpet / chain / lantern：
+- 地毯：`minecraft:<color>_carpet`，通常无额外状态。
+- 链条：`minecraft:chain[axis=x|y|z,waterlogged=false]`。
+- 灯笼：`minecraft:lantern[hanging=true|false,waterlogged=false]` 或 `minecraft:soul_lantern[hanging=true|false,waterlogged=false]`。
+
+Rail / pressure plate：
+- 铁轨：`minecraft:rail[shape=north_south|east_west|ascending_east|ascending_west|ascending_north|ascending_south|south_east|south_west|north_west|north_east,waterlogged=false]`
+- powered/detector/activator rail：同样有 `shape`，另有 `powered=true|false`，具体值以 `describe_block_state` 返回为准。
+- 普通压力板：`minecraft:<material>_pressure_plate[powered=true|false]`。
+- 轻/重质测重压力板：`minecraft:light_weighted_pressure_plate[power=0..15]`、`minecraft:heavy_weighted_pressure_plate[power=0..15]`。
+
 Skull/head：
 - 地面：`minecraft:<mob>_head[rotation=0..15]` 或 `minecraft:<mob>_skull[rotation=0..15]`
 - 墙上：`minecraft:<mob>_wall_head[facing=north|east|south|west]` 或 `minecraft:<mob>_wall_skull[facing=north|east|south|west]`

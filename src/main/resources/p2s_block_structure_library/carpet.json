@@ -1,0 +1,11 @@
+{
+  "id": "carpet",
+  "unitKind": "carpet",
+  "tags": ["carpet", "thin_decoration"],
+  "match": {
+    "blockSuffixes": ["_carpet"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

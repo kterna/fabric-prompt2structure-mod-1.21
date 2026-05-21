@@ -1,0 +1,12 @@
+{
+  "id": "weighted_pressure_plate",
+  "unitKind": "weighted_pressure_plate",
+  "tags": ["pressure_plate", "weighted_pressure_plate", "redstone"],
+  "match": {
+    "exactBlockIds": ["minecraft:light_weighted_pressure_plate", "minecraft:heavy_weighted_pressure_plate"],
+    "requiredProperties": ["power"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

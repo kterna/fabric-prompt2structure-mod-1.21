@@ -107,6 +107,27 @@ public final class WorkspaceTomlCodec {
                 if (action.facing != null && !action.facing.isBlank()) {
                     sb.append("facing = ").append(stringValue(action.facing)).append('\n');
                 }
+                if (action.blockEntity != null && !action.blockEntity.isBlank()) {
+                    sb.append("block_entity = ").append(stringValue(action.blockEntity)).append('\n');
+                }
+                if (action.signFront != null) {
+                    sb.append("sign_front = ").append(stringArray(action.signFront)).append('\n');
+                }
+                if (action.signBack != null) {
+                    sb.append("sign_back = ").append(stringArray(action.signBack)).append('\n');
+                }
+                if (action.signColor != null && !action.signColor.isBlank()) {
+                    sb.append("sign_color = ").append(stringValue(action.signColor)).append('\n');
+                }
+                if (action.signGlowing != null) {
+                    sb.append("sign_glowing = ").append(action.signGlowing).append('\n');
+                }
+                if (action.signWaxed != null) {
+                    sb.append("sign_waxed = ").append(action.signWaxed).append('\n');
+                }
+                if (action.bannerPatterns != null) {
+                    sb.append("banner_patterns = ").append(stringArray(action.bannerPatterns)).append('\n');
+                }
             }
         }
 
@@ -152,6 +173,13 @@ public final class WorkspaceTomlCodec {
                         targetAction.mode = blankToEmpty(sourceAction.mode);
                         targetAction.axis = blankToEmpty(sourceAction.axis);
                         targetAction.facing = blankToEmpty(sourceAction.facing);
+                        targetAction.blockEntity = blankToEmpty(sourceAction.blockEntity);
+                        targetAction.signFront = copyStrings(sourceAction.signFront);
+                        targetAction.signBack = copyStrings(sourceAction.signBack);
+                        targetAction.signColor = blankToEmpty(sourceAction.signColor);
+                        targetAction.signGlowing = sourceAction.signGlowing;
+                        targetAction.signWaxed = sourceAction.signWaxed;
+                        targetAction.bannerPatterns = copyStrings(sourceAction.bannerPatterns);
                         targetPart.actions.add(targetAction);
                     }
                 }
@@ -190,6 +218,13 @@ public final class WorkspaceTomlCodec {
                         action.mode = blankToEmpty(sourceAction.mode);
                         action.axis = blankToEmpty(sourceAction.axis);
                         action.facing = blankToEmpty(sourceAction.facing);
+                        action.blockEntity = blankToEmpty(sourceAction.blockEntity);
+                        action.signFront = copyStrings(sourceAction.signFront);
+                        action.signBack = copyStrings(sourceAction.signBack);
+                        action.signColor = blankToEmpty(sourceAction.signColor);
+                        action.signGlowing = sourceAction.signGlowing;
+                        action.signWaxed = sourceAction.signWaxed;
+                        action.bannerPatterns = copyStrings(sourceAction.bannerPatterns);
                         part.actions.add(action);
                     }
                 }
@@ -290,6 +325,10 @@ public final class WorkspaceTomlCodec {
         return copy;
     }
 
+    private static List<String> copyStrings(List<String> source) {
+        return source == null ? null : new ArrayList<>(source);
+    }
+
     private static String blankToEmpty(String value) {
         return value == null ? "" : value.trim();
     }
@@ -319,6 +358,20 @@ public final class WorkspaceTomlCodec {
                 sb.append(", ");
             }
             sb.append(intArray(points.get(i)));
+        }
+        sb.append(']');
+        return sb.toString();
+    }
+
+    private static String stringArray(List<String> values) {
+        StringBuilder sb = new StringBuilder("[");
+        if (values != null) {
+            for (int i = 0; i < values.size(); i++) {
+                if (i > 0) {
+                    sb.append(", ");
+                }
+                sb.append(stringValue(values.get(i)));
+            }
         }
         sb.append(']');
         return sb.toString();
@@ -361,6 +414,13 @@ public final class WorkspaceTomlCodec {
         public String mode = "";
         public String axis = "";
         public String facing = "";
+        public String blockEntity = "";
+        public List<String> signFront;
+        public List<String> signBack;
+        public String signColor = "";
+        public Boolean signGlowing;
+        public Boolean signWaxed;
+        public List<String> bannerPatterns;
     }
 
     private static final class Parser {
@@ -488,6 +548,13 @@ public final class WorkspaceTomlCodec {
                 case "mode" -> action.mode = requireString(value, lineNumber, "part.action.mode");
                 case "axis" -> action.axis = requireString(value, lineNumber, "part.action.axis");
                 case "facing" -> action.facing = requireString(value, lineNumber, "part.action.facing");
+                case "block_entity" -> action.blockEntity = requireString(value, lineNumber, "part.action.block_entity");
+                case "sign_front" -> action.signFront = requireStringArray(value, lineNumber, "part.action.sign_front");
+                case "sign_back" -> action.signBack = requireStringArray(value, lineNumber, "part.action.sign_back");
+                case "sign_color" -> action.signColor = requireString(value, lineNumber, "part.action.sign_color");
+                case "sign_glowing" -> action.signGlowing = requireBoolean(value, lineNumber, "part.action.sign_glowing");
+                case "sign_waxed" -> action.signWaxed = requireBoolean(value, lineNumber, "part.action.sign_waxed");
+                case "banner_patterns" -> action.bannerPatterns = requireStringArray(value, lineNumber, "part.action.banner_patterns");
                 default -> fail(lineNumber, "Unknown action key: " + key);
             }
         }
@@ -639,6 +706,28 @@ public final class WorkspaceTomlCodec {
             return result;
         }
 
+        private List<String> requireStringArray(Object value, int lineNumber, String label) {
+            if (!(value instanceof List<?>)) {
+                fail(lineNumber, label + " must be a string array");
+            }
+            List<String> result = new ArrayList<>();
+            for (Object entry : (List<?>) value) {
+                if (!(entry instanceof String)) {
+                    fail(lineNumber, label + " must contain only strings");
+                }
+                result.add((String) entry);
+            }
+            return result;
+        }
+
+        private Boolean requireBoolean(Object value, int lineNumber, String label) {
+            if (value instanceof Boolean booleanValue) {
+                return booleanValue;
+            }
+            fail(lineNumber, label + " must be a boolean");
+            return Boolean.FALSE;
+        }
+
         private Object parseValue(String rawValue, int lineNumber) {
             ValueParser parser = new ValueParser(rawValue, lineNumber);
             Object value = parser.parseValue();
@@ -736,6 +825,9 @@ public final class WorkspaceTomlCodec {
             if (ch == '-' || Character.isDigit(ch)) {
                 return parseInteger();
             }
+            if (startsWith("true") || startsWith("false")) {
+                return parseBoolean();
+            }
             throw error("Unsupported value syntax");
         }
 
@@ -806,6 +898,18 @@ public final class WorkspaceTomlCodec {
             }
         }
 
+        private Boolean parseBoolean() {
+            if (startsWith("true")) {
+                index += 4;
+                return Boolean.TRUE;
+            }
+            if (startsWith("false")) {
+                index += 5;
+                return Boolean.FALSE;
+            }
+            throw error("Invalid boolean");
+        }
+
         private void expect(char expected) {
             if (isEof() || text.charAt(index) != expected) {
                 throw error("Expected '" + expected + "'");
@@ -815,6 +919,10 @@ public final class WorkspaceTomlCodec {
 
         private boolean peek(char ch) {
             return !isEof() && text.charAt(index) == ch;
+        }
+
+        private boolean startsWith(String value) {
+            return text.startsWith(value, index);
         }
 
         private void skipWhitespace() {

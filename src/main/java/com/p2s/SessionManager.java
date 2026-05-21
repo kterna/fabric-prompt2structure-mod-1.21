@@ -17,6 +17,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.EntityBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Property;
 
@@ -121,6 +122,7 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
                 case "propose_patch" -> handleProposePatchTool(player, arguments);
                 case "search_block_ids" -> handleSearchBlockIds(arguments);
                 case "describe_block_state" -> handleDescribeBlockState(arguments);
+                case "describe_block_entity_template" -> handleDescribeBlockEntityTemplate(arguments);
                 case "debug_stage_blocks" -> handleDebugStageBlocksTool(player, arguments);
                 default -> buildToolErrorKey(normalizedTool, "message.p2s.tool.unknown_tool");
             };
@@ -723,6 +725,12 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         payload.addProperty("property_count", properties.size());
         payload.addProperty("syntax", formatBlockState(defaultState));
         payload.addProperty("notes", "Use these as block state properties in palette/action block strings. They are not block entity NBT.");
+        List<String> blockEntityTemplates = StructureBuilder.supportedBlockEntityTemplates(defaultState);
+        payload.addProperty("block_entity_template_count", blockEntityTemplates.size());
+        payload.add("block_entity_templates", toStringArray(blockEntityTemplates));
+        if (!blockEntityTemplates.isEmpty()) {
+            payload.addProperty("block_entity_template_note", "Call describe_block_entity_template with this block id before writing action block_entity fields.");
+        }
         if (requestedState != null) {
             payload.addProperty("requested_state_valid", true);
             payload.addProperty("requested_state", formatBlockState(requestedState));
@@ -755,6 +763,129 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
             payload.addProperty("closest", closest);
         }
         return payload;
+    }
+
+    private static JsonObject handleDescribeBlockEntityTemplate(JsonElement argsElem) {
+        JsonObject args = normalizeArgsObject(argsElem);
+        String requested = getString(args, "block_id").trim();
+        if (requested.isBlank()) {
+            return buildToolError("describe_block_entity_template", "block_id is required.");
+        }
+
+        ResourceLocation id = parseBlockResourceLocation(blockIdPart(requested));
+        if (id == null) {
+            return buildDescribeBlockEntityTemplateError(requested, "Invalid block id: " + requested);
+        }
+        Block block = BuiltInRegistries.BLOCK.getOptional(id).orElse(null);
+        if (block == null) {
+            return buildDescribeBlockEntityTemplateError(requested, "Unknown block id: " + id);
+        }
+
+        BlockState state = requested.contains("[") ? StructureBuilder.resolveDirectBlockState(requested) : block.defaultBlockState();
+        if (state == null) {
+            return buildDescribeBlockEntityTemplateError(requested, "Invalid block state syntax or property value: " + requested);
+        }
+
+        ResourceLocation normalizedId = BuiltInRegistries.BLOCK.getKey(block);
+        JsonObject payload = buildToolSuccess("describe_block_entity_template");
+        payload.addProperty("requested", requested);
+        payload.addProperty("block_id", normalizedId == null ? id.toString() : normalizedId.toString());
+        payload.addProperty("is_block_entity", block instanceof EntityBlock);
+        payload.addProperty("template_count", StructureBuilder.supportedBlockEntityTemplates(state).size());
+        payload.addProperty("notes", "These are safe templates for action-level block_entity fields. They are not raw NBT.");
+
+        JsonArray templates = new JsonArray();
+        if (StructureBuilder.supportsSignTextTemplate(state)) {
+            templates.add(describeSignTextTemplate());
+        }
+        if (StructureBuilder.supportsBannerPatternsTemplate(state)) {
+            templates.add(describeBannerPatternsTemplate());
+        }
+        payload.add("templates", templates);
+        if (templates.isEmpty() && block instanceof EntityBlock) {
+            addToolWarning(payload, "message.p2s.search.no_matches");
+        }
+        return payload;
+    }
+
+    private static JsonObject buildDescribeBlockEntityTemplateError(String requested, String error) {
+        JsonObject payload = buildToolError("describe_block_entity_template", error);
+        payload.addProperty("requested", requested == null ? "" : requested);
+        String closest = StructureBuilder.closestBlockId(blockIdPart(requested));
+        if (closest != null && !closest.isBlank()) {
+            payload.addProperty("closest", closest);
+        }
+        return payload;
+    }
+
+    private static JsonObject describeSignTextTemplate() {
+        JsonObject template = new JsonObject();
+        template.addProperty("type", "sign_text");
+        template.addProperty("description", "Plain text sign front/back lines, dye color, glowing flag, and waxed flag.");
+        JsonArray fields = new JsonArray();
+        fields.add(describeTemplateField("block_entity", "string", "Required literal: sign_text"));
+        fields.add(describeTemplateField("sign_front", "string_array", "Up to 4 plain text lines for front text."));
+        fields.add(describeTemplateField("sign_back", "string_array", "Optional up to 4 plain text lines for back text."));
+        fields.add(describeTemplateField("sign_color", "dye_color", "Optional text color. Defaults to black."));
+        fields.add(describeTemplateField("sign_glowing", "boolean", "Optional glowing text flag. Defaults to false."));
+        fields.add(describeTemplateField("sign_waxed", "boolean", "Optional waxed flag. Defaults to false."));
+        template.add("fields", fields);
+        template.add("dye_colors", toStringArray(StructureBuilder.supportedDyeColors()));
+        template.addProperty("max_lines", StructureBuilder.maxSignLines());
+        template.addProperty("max_line_chars", StructureBuilder.maxSignLineChars());
+        template.addProperty("example_toml",
+                """
+                block_entity = "sign_text"
+                sign_front = ["Line 1", "Line 2", "", ""]
+                sign_back = ["", "", "", ""]
+                sign_color = "black"
+                sign_glowing = false
+                sign_waxed = false
+                """.stripTrailing());
+        return template;
+    }
+
+    private static JsonObject describeBannerPatternsTemplate() {
+        JsonObject template = new JsonObject();
+        template.addProperty("type", "banner_patterns");
+        template.addProperty("description", "Banner pattern layers as pattern:color strings. Max 6 layers; base is rejected in layers.");
+        JsonArray fields = new JsonArray();
+        fields.add(describeTemplateField("block_entity", "string", "Required literal: banner_patterns"));
+        fields.add(describeTemplateField("banner_patterns", "string_array", "Required layers such as stripe_bottom:red or border:black."));
+        template.add("fields", fields);
+        template.add("patterns", toStringArray(StructureBuilder.supportedBannerLayerPatterns()));
+        template.add("dye_colors", toStringArray(StructureBuilder.supportedDyeColors()));
+        template.addProperty("max_layers", StructureBuilder.maxBannerPatternLayers());
+        JsonArray excludedPatterns = new JsonArray();
+        excludedPatterns.add("base");
+        template.add("excluded_layer_patterns", excludedPatterns);
+        template.addProperty("base_color_note", "Use the banner block id such as minecraft:red_banner for base color; do not put base in banner_patterns.");
+        template.addProperty("example_toml",
+                """
+                block_entity = "banner_patterns"
+                banner_patterns = ["stripe_bottom:white", "border:black"]
+                """.stripTrailing());
+        return template;
+    }
+
+    private static JsonObject describeTemplateField(String name, String type, String description) {
+        JsonObject field = new JsonObject();
+        field.addProperty("name", name);
+        field.addProperty("type", type);
+        field.addProperty("description", description);
+        return field;
+    }
+
+    private static JsonArray toStringArray(Iterable<String> values) {
+        JsonArray array = new JsonArray();
+        if (values != null) {
+            for (String value : values) {
+                if (value != null && !value.isBlank()) {
+                    array.add(value);
+                }
+            }
+        }
+        return array;
     }
 
     private static String blockIdPart(String raw) {

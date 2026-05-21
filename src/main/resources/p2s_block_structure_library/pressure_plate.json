@@ -1,0 +1,12 @@
+{
+  "id": "pressure_plate",
+  "unitKind": "pressure_plate",
+  "tags": ["pressure_plate", "redstone"],
+  "match": {
+    "blockSuffixes": ["_pressure_plate"],
+    "requiredProperties": ["powered"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

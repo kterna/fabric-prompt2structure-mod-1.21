@@ -1,0 +1,12 @@
+{
+  "id": "fence",
+  "unitKind": "fence",
+  "tags": ["fence", "connective", "waterloggable"],
+  "match": {
+    "blockSuffixes": ["_fence"],
+    "requiredProperties": ["north", "east", "south", "west", "waterlogged"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

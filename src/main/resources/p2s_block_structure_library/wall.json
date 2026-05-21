@@ -1,0 +1,12 @@
+{
+  "id": "wall",
+  "unitKind": "wall",
+  "tags": ["wall", "connective", "waterloggable"],
+  "match": {
+    "blockSuffixes": ["_wall"],
+    "requiredProperties": ["up", "north", "east", "south", "west", "waterlogged"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}

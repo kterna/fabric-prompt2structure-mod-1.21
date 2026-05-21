@@ -1,0 +1,13 @@
+{
+  "id": "pane",
+  "unitKind": "pane",
+  "tags": ["pane", "connective", "waterloggable"],
+  "match": {
+    "exactBlockIds": ["minecraft:iron_bars"],
+    "blockSuffixes": ["_pane"],
+    "requiredProperties": ["north", "east", "south", "west", "waterlogged"]
+  },
+  "grouping": {
+    "mode": "single"
+  }
+}
