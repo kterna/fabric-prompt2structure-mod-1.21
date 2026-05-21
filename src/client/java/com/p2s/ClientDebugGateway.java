@@ -12,6 +12,7 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 import net.minecraft.client.Minecraft;
+import net.minecraft.core.BlockPos;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
@@ -38,7 +39,7 @@ import java.util.concurrent.atomic.AtomicLong;
 public final class ClientDebugGateway {
     private static final Gson GSON = new Gson();
     private static final String ROOT_PATH = "/debug/agent";
-    private static final int MAX_BODY_BYTES = 64 * 1024;
+    private static final int MAX_BODY_BYTES = 1024 * 1024;
     private static final int MAX_EVENT_HISTORY = 256;
     private static final long MONITOR_INTERVAL_MS = 150L;
     private static final long SSE_KEEPALIVE_MS = 15_000L;
@@ -153,7 +154,15 @@ public final class ClientDebugGateway {
         if (effectiveSessionId != null && !effectiveSessionId.isBlank()) {
             subagents = SubagentManager.listSubagents(effectiveSessionId, false);
         }
-        return new GatewaySnapshot(session, busy, serverBridgeReady, effectiveSessionId == null ? "" : effectiveSessionId, subagents);
+        return new GatewaySnapshot(
+                session,
+                busy,
+                serverBridgeReady,
+                effectiveSessionId == null ? "" : effectiveSessionId,
+                subagents,
+                ClientSelectionManager.getPos1(),
+                ClientSelectionManager.getPos2()
+        );
     }
 
     private static void processSnapshot(DebugJob job, GatewaySnapshot snapshot) {
@@ -432,6 +441,66 @@ public final class ClientDebugGateway {
             handleState(exchange);
             return;
         }
+        if ((ROOT_PATH + "/capabilities").equals(path)) {
+            if (!"GET".equals(method)) {
+                sendJson(exchange, 405, errorPayload("method_not_allowed", "Use GET for capabilities."));
+                return;
+            }
+            handleCapabilities(exchange);
+            return;
+        }
+        if ((ROOT_PATH + "/selection").equals(path)) {
+            if ("GET".equals(method)) {
+                handleSelection(exchange);
+                return;
+            }
+            if ("POST".equals(method)) {
+                handleSetSelection(exchange);
+                return;
+            }
+            sendJson(exchange, 405, errorPayload("method_not_allowed", "Use GET or POST on /debug/agent/selection."));
+            return;
+        }
+        if ((ROOT_PATH + "/selection/clear").equals(path) && "POST".equals(method)) {
+            handleClearSelection(exchange);
+            return;
+        }
+        if ((ROOT_PATH + "/tools").equals(path)) {
+            if ("GET".equals(method)) {
+                handleListTools(exchange);
+                return;
+            }
+            sendJson(exchange, 405, errorPayload("method_not_allowed", "Use GET on /debug/agent/tools."));
+            return;
+        }
+        if ((ROOT_PATH + "/tools/call").equals(path)) {
+            if (!"POST".equals(method)) {
+                sendJson(exchange, 405, errorPayload("method_not_allowed", "Use POST on /debug/agent/tools/call."));
+                return;
+            }
+            handleToolCall(exchange);
+            return;
+        }
+        if ((ROOT_PATH + "/project/state").equals(path)) {
+            if (!"GET".equals(method)) {
+                sendJson(exchange, 405, errorPayload("method_not_allowed", "Use GET on /debug/agent/project/state."));
+                return;
+            }
+            handleProjectState(exchange);
+            return;
+        }
+        if ((ROOT_PATH + "/workspaces").equals(path)) {
+            if ("GET".equals(method)) {
+                handleListWorkspaces(exchange);
+                return;
+            }
+            sendJson(exchange, 405, errorPayload("method_not_allowed", "Use GET on /debug/agent/workspaces."));
+            return;
+        }
+        if ((ROOT_PATH + "/workspaces/select").equals(path) && "POST".equals(method)) {
+            handleSelectWorkspace(exchange);
+            return;
+        }
         if ((ROOT_PATH + "/jobs").equals(path)) {
             if (!"POST".equals(method)) {
                 sendJson(exchange, 405, errorPayload("method_not_allowed", "Use POST to create a job."));
@@ -525,6 +594,198 @@ public final class ClientDebugGateway {
     private static void handleState(HttpExchange exchange) throws Exception {
         GatewaySnapshot snapshot = callOnClientThread(ClientDebugGateway::captureSnapshotOnClient);
         sendJson(exchange, 200, buildStatePayload(snapshot));
+    }
+
+    private static void handleCapabilities(HttpExchange exchange) throws Exception {
+        GatewaySnapshot snapshot = callOnClientThread(ClientDebugGateway::captureSnapshotOnClient);
+        JsonObject payload = new JsonObject();
+        payload.addProperty("ok", true);
+        payload.addProperty("api_version", 1);
+        payload.addProperty("root_path", ROOT_PATH);
+        payload.addProperty("max_body_bytes", MAX_BODY_BYTES);
+        payload.addProperty("sse_enabled", P2SClientConfig.getDebugGatewayExposeSse());
+        payload.addProperty("server_bridge_ready", snapshot.serverBridgeReady());
+        payload.add("state", buildStatePayload(snapshot));
+        payload.add("endpoints", toStringArray(List.of(
+                "GET /debug/agent/state",
+                "GET /debug/agent/capabilities",
+                "GET /debug/agent/selection",
+                "POST /debug/agent/selection",
+                "POST /debug/agent/selection/clear",
+                "GET /debug/agent/tools",
+                "POST /debug/agent/tools/call",
+                "GET /debug/agent/project/state",
+                "GET /debug/agent/workspaces",
+                "POST /debug/agent/workspaces/select",
+                "GET /debug/agent/projects",
+                "POST /debug/agent/projects/create",
+                "POST /debug/agent/projects/open",
+                "POST /debug/agent/projects/update",
+                "POST /debug/agent/projects/delete",
+                "GET /debug/agent/sessions",
+                "POST /debug/agent/sessions/create",
+                "POST /debug/agent/sessions/update",
+                "POST /debug/agent/sessions/switch",
+                "POST /debug/agent/jobs",
+                "GET /debug/agent/jobs/{jobId}",
+                "GET /debug/agent/jobs/{jobId}/events",
+                "POST /debug/agent/jobs/{jobId}/cancel",
+                "POST /debug/agent/jobs/{jobId}/patch/apply",
+                "POST /debug/agent/jobs/{jobId}/patch/discard",
+                "POST /debug/agent/jobs/{jobId}/choice/select",
+                "POST /debug/agent/jobs/{jobId}/choice/custom"
+        )));
+        payload.add("tool_bridge_tools", knownToolNames());
+        sendJson(exchange, 200, payload);
+    }
+
+    private static void handleSelection(HttpExchange exchange) throws Exception {
+        GatewaySnapshot snapshot = callOnClientThread(ClientDebugGateway::captureSnapshotOnClient);
+        JsonObject payload = new JsonObject();
+        payload.addProperty("ok", true);
+        payload.add("selection", buildSelectionPayload(snapshot.selectionPos1(), snapshot.selectionPos2()));
+        sendJson(exchange, 200, payload);
+    }
+
+    private static void handleSetSelection(HttpExchange exchange) throws Exception {
+        JsonObject body = parseBodyObject(exchange);
+        if (getBoolean(body, "clear", false)) {
+            handleClearSelection(exchange);
+            return;
+        }
+
+        BlockPos pos1 = parseBlockPos(body, "pos1");
+        BlockPos pos2 = parseBlockPos(body, "pos2");
+        if (pos1 == null && pos2 == null) {
+            Integer point = getOptionalInt(body, "point");
+            if (point == null) {
+                point = getOptionalInt(body, "point_index");
+            }
+            BlockPos pointPos = parseBlockPos(body, "pos");
+            if (pointPos == null) {
+                pointPos = parseBlockPos(body, null);
+            }
+            if (point != null && pointPos != null) {
+                if (point == 0 || point == 1) {
+                    pos1 = point == 0 ? pointPos : null;
+                    pos2 = point == 1 ? pointPos : null;
+                } else {
+                    sendJson(exchange, 400, errorPayload("invalid_request", "point must be 0 or 1."));
+                    return;
+                }
+            }
+        }
+        if (pos1 == null && pos2 == null) {
+            sendJson(exchange, 400, errorPayload("invalid_request", "Provide pos1/pos2 or point plus pos."));
+            return;
+        }
+
+        BlockPos finalPos1 = pos1;
+        BlockPos finalPos2 = pos2;
+        SelectionUpdateResult result = callOnClientThread(() -> updateSelectionOnClient(finalPos1, finalPos2, false));
+        if (!result.ok()) {
+            sendJson(exchange, result.statusCode(), errorPayload(result.errorCode(), result.message()));
+            return;
+        }
+
+        JsonObject payload = new JsonObject();
+        payload.addProperty("ok", true);
+        payload.addProperty("action", "set_selection");
+        payload.add("selection", buildSelectionPayload(result.pos1(), result.pos2()));
+        sendJson(exchange, 200, payload);
+    }
+
+    private static void handleClearSelection(HttpExchange exchange) throws Exception {
+        SelectionUpdateResult result = callOnClientThread(() -> updateSelectionOnClient(null, null, true));
+        if (!result.ok()) {
+            sendJson(exchange, result.statusCode(), errorPayload(result.errorCode(), result.message()));
+            return;
+        }
+
+        JsonObject payload = new JsonObject();
+        payload.addProperty("ok", true);
+        payload.addProperty("action", "clear_selection");
+        payload.add("selection", buildSelectionPayload(result.pos1(), result.pos2()));
+        sendJson(exchange, 200, payload);
+    }
+
+    private static void handleListTools(HttpExchange exchange) throws IOException {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("ok", true);
+        payload.add("tools", knownToolNames());
+        sendJson(exchange, 200, payload);
+    }
+
+    private static void handleToolCall(HttpExchange exchange) throws Exception {
+        JsonObject body = parseBodyObject(exchange);
+        String toolName = getString(body, "tool_name");
+        if (toolName.isBlank()) {
+            toolName = getString(body, "tool");
+        }
+        if (toolName.isBlank()) {
+            sendJson(exchange, 400, errorPayload("invalid_request", "tool_name is required."));
+            return;
+        }
+
+        JsonObject args = getObject(body, "arguments");
+        if (args == null) {
+            args = getObject(body, "args");
+        }
+        JsonObject result = callToolBridge(toolName, args == null ? new JsonObject() : args);
+        if (!isToolOk(result)) {
+            sendJson(exchange, 422, result);
+            return;
+        }
+        sendJson(exchange, 200, result);
+    }
+
+    private static void handleProjectState(HttpExchange exchange) throws Exception {
+        JsonObject result = callToolBridge("get_project_state", new JsonObject());
+        if (!isToolOk(result)) {
+            sendJson(exchange, 422, result);
+            return;
+        }
+        sendJson(exchange, 200, result);
+    }
+
+    private static void handleListWorkspaces(HttpExchange exchange) throws Exception {
+        JsonObject result = callToolBridge("get_project_state", new JsonObject());
+        if (!isToolOk(result)) {
+            sendJson(exchange, 422, result);
+            return;
+        }
+        GatewaySnapshot snapshot = callOnClientThread(ClientDebugGateway::captureSnapshotOnClient);
+        JsonObject payload = new JsonObject();
+        payload.addProperty("ok", true);
+        payload.addProperty("action", "list_workspaces");
+        payload.addProperty("selected_workspace_path", safe(snapshot.session().selectedWorkspacePath()));
+        payload.add("project", result.has("project") ? result.get("project").deepCopy() : new JsonObject());
+        payload.add("workspace_files", result.has("workspace_files") ? result.get("workspace_files").deepCopy() : new JsonArray());
+        payload.add("pending_paths", result.has("pending_paths") ? result.get("pending_paths").deepCopy() : new JsonArray());
+        sendJson(exchange, 200, payload);
+    }
+
+    private static void handleSelectWorkspace(HttpExchange exchange) throws Exception {
+        requireNoActiveExternalJob();
+        JsonObject body = parseBodyObject(exchange);
+        String path = getString(body, "path");
+        if (path.isBlank()) {
+            sendJson(exchange, 400, errorPayload("invalid_request", "path is required."));
+            return;
+        }
+
+        boolean selected = callOnClientThread(() -> ClientAgentManager.selectWorkspacePath(path));
+        if (!selected) {
+            sendJson(exchange, 422, errorPayload("invalid_workspace", "path is invalid for the current project."));
+            return;
+        }
+        GatewaySnapshot snapshot = callOnClientThread(ClientDebugGateway::captureSnapshotOnClient);
+        JsonObject payload = new JsonObject();
+        payload.addProperty("ok", true);
+        payload.addProperty("action", "select_workspace");
+        payload.addProperty("selected_workspace_path", safe(snapshot.session().selectedWorkspacePath()));
+        payload.add("state", buildStatePayload(snapshot));
+        sendJson(exchange, 200, payload);
     }
 
     private static void handleListProjects(HttpExchange exchange) throws Exception {
@@ -1147,6 +1408,7 @@ public final class ClientDebugGateway {
         payload.addProperty("pending_patch", snapshot.session().hasPendingPatch());
         payload.addProperty("pending_choice", snapshot.session().pendingChoice() != null);
         payload.addProperty("current_job_id", currentJob == null || currentJob.isTerminal() ? "" : currentJob.id);
+        payload.add("selection", buildSelectionPayload(snapshot.selectionPos1(), snapshot.selectionPos2()));
         return payload;
     }
 
@@ -1181,6 +1443,110 @@ public final class ClientDebugGateway {
             payload.addProperty("status_url", ROOT_PATH + "/jobs/" + job.id);
             return payload;
         }
+    }
+
+    private static JsonArray knownToolNames() {
+        return toStringArray(List.of(
+                "list_projects",
+                "create_project",
+                "open_project",
+                "rename_project",
+                "delete_project",
+                "get_project_state",
+                "read_workspace_file",
+                "create_workspace_file",
+                "save_workspace_file",
+                "rename_workspace_file",
+                "delete_workspace_file",
+                "propose_patch",
+                "search_block_ids",
+                "describe_block_state",
+                "compose_block_state",
+                "describe_block_entity_template",
+                "debug_stage_blocks"
+        ));
+    }
+
+    private static JsonArray toStringArray(List<String> values) {
+        JsonArray array = new JsonArray();
+        if (values == null) {
+            return array;
+        }
+        for (String value : values) {
+            array.add(safe(value));
+        }
+        return array;
+    }
+
+    private static SelectionUpdateResult updateSelectionOnClient(BlockPos pos1, BlockPos pos2, boolean clear) {
+        if (!ClientServerBridge.canSyncSelection()) {
+            return SelectionUpdateResult.failure(409, "server_unavailable", "Compatible P2S selection bridge is not available.");
+        }
+        if (clear) {
+            if (!ClientServerBridge.sendSelection(-1, BlockPos.ZERO)) {
+                return SelectionUpdateResult.failure(409, "server_unavailable", "Failed sending selection clear request.");
+            }
+            ClientSelectionManager.onSyncFromServer(null, null);
+            return SelectionUpdateResult.success(null, null);
+        }
+
+        BlockPos nextPos1 = ClientSelectionManager.getPos1();
+        BlockPos nextPos2 = ClientSelectionManager.getPos2();
+        if (pos1 != null) {
+            if (!ClientServerBridge.sendSelection(0, pos1)) {
+                return SelectionUpdateResult.failure(409, "server_unavailable", "Failed sending pos1 selection request.");
+            }
+            nextPos1 = pos1;
+        }
+        if (pos2 != null) {
+            if (!ClientServerBridge.sendSelection(1, pos2)) {
+                return SelectionUpdateResult.failure(409, "server_unavailable", "Failed sending pos2 selection request.");
+            }
+            nextPos2 = pos2;
+        }
+
+        ClientSelectionManager.onSyncFromServer(nextPos1, nextPos2);
+        return SelectionUpdateResult.success(nextPos1, nextPos2);
+    }
+
+    private static JsonObject buildSelectionPayload(BlockPos pos1, BlockPos pos2) {
+        JsonObject payload = new JsonObject();
+        payload.add("pos1", blockPosJsonOrNull(pos1));
+        payload.add("pos2", blockPosJsonOrNull(pos2));
+        boolean complete = pos1 != null && pos2 != null;
+        payload.addProperty("complete", complete);
+        if (complete) {
+            BlockPos min = new BlockPos(
+                    Math.min(pos1.getX(), pos2.getX()),
+                    Math.min(pos1.getY(), pos2.getY()),
+                    Math.min(pos1.getZ(), pos2.getZ())
+            );
+            BlockPos max = new BlockPos(
+                    Math.max(pos1.getX(), pos2.getX()),
+                    Math.max(pos1.getY(), pos2.getY()),
+                    Math.max(pos1.getZ(), pos2.getZ())
+            );
+            payload.add("min", blockPosJson(min));
+            payload.add("max", blockPosJson(max));
+            JsonObject size = new JsonObject();
+            size.addProperty("x", max.getX() - min.getX() + 1);
+            size.addProperty("y", max.getY() - min.getY() + 1);
+            size.addProperty("z", max.getZ() - min.getZ() + 1);
+            payload.add("size", size);
+        }
+        return payload;
+    }
+
+    private static JsonElement blockPosJsonOrNull(BlockPos pos) {
+        return pos == null ? JsonNull.INSTANCE : blockPosJson(pos);
+    }
+
+    private static JsonObject blockPosJson(BlockPos pos) {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("x", pos == null ? 0 : pos.getX());
+        payload.addProperty("y", pos == null ? 0 : pos.getY());
+        payload.addProperty("z", pos == null ? 0 : pos.getZ());
+        return payload;
     }
 
     private static JsonObject parseBodyObject(HttpExchange exchange) throws IOException, RequestFailure {
@@ -1281,6 +1647,42 @@ public final class ClientDebugGateway {
         } catch (Exception ignored) {
             return null;
         }
+    }
+
+    private static Integer getOptionalInt(JsonObject obj, String key) {
+        if (obj == null || key == null || !obj.has(key) || !obj.get(key).isJsonPrimitive()) {
+            return null;
+        }
+        try {
+            return obj.get(key).getAsInt();
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private static JsonObject getObject(JsonObject obj, String key) {
+        if (obj == null || key == null || !obj.has(key) || !obj.get(key).isJsonObject()) {
+            return null;
+        }
+        try {
+            return obj.getAsJsonObject(key).deepCopy();
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private static BlockPos parseBlockPos(JsonObject obj, String key) {
+        JsonObject source = key == null ? obj : getObject(obj, key);
+        if (source == null) {
+            return null;
+        }
+        Integer x = getOptionalInt(source, "x");
+        Integer y = getOptionalInt(source, "y");
+        Integer z = getOptionalInt(source, "z");
+        if (x == null || y == null || z == null) {
+            return null;
+        }
+        return new BlockPos(x, y, z);
     }
 
     private static boolean getBoolean(JsonObject obj, String key, boolean defaultValue) {
@@ -1384,8 +1786,27 @@ public final class ClientDebugGateway {
             boolean busy,
             boolean serverBridgeReady,
             String effectiveSessionId,
-            JsonObject subagents
+            JsonObject subagents,
+            BlockPos selectionPos1,
+            BlockPos selectionPos2
     ) {
+    }
+
+    private record SelectionUpdateResult(
+            boolean ok,
+            int statusCode,
+            String errorCode,
+            String message,
+            BlockPos pos1,
+            BlockPos pos2
+    ) {
+        private static SelectionUpdateResult success(BlockPos pos1, BlockPos pos2) {
+            return new SelectionUpdateResult(true, 200, "", "", pos1, pos2);
+        }
+
+        private static SelectionUpdateResult failure(int statusCode, String errorCode, String message) {
+            return new SelectionUpdateResult(false, statusCode, errorCode, message, null, null);
+        }
     }
 
     private record SubmissionRequest(

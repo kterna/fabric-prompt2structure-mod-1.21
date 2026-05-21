@@ -1,0 +1,4 @@
+interface:
+  display_name: "P2S Debug Gateway"
+  short_description: "Use the local P2S debug gateway HTTP API."
+  default_prompt: "Use $p2s-debug-gateway to drive a P2S debug gateway agent job and handle patch or choice follow-up."
