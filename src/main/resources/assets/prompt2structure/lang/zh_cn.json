@@ -363,6 +363,7 @@
   "message.p2s.agent.tool.summary.propose_patch": "提交补丁",
   "message.p2s.agent.tool.summary.search_block_ids": "搜索方块 ID",
   "message.p2s.agent.tool.summary.describe_block_state": "查询方块状态",
+  "message.p2s.agent.tool.summary.compose_block_state": "生成方块状态",
   "message.p2s.agent.tool.summary.describe_block_entity_template": "查询方块实体模板",
   "message.p2s.agent.tool.summary.debug_stage_blocks": "摆放调试方块"
 }

@@ -27,6 +27,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -122,6 +123,7 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
                 case "propose_patch" -> handleProposePatchTool(player, arguments);
                 case "search_block_ids" -> handleSearchBlockIds(arguments);
                 case "describe_block_state" -> handleDescribeBlockState(arguments);
+                case "compose_block_state" -> handleComposeBlockState(arguments);
                 case "describe_block_entity_template" -> handleDescribeBlockEntityTemplate(arguments);
                 case "debug_stage_blocks" -> handleDebugStageBlocksTool(player, arguments);
                 default -> buildToolErrorKey(normalizedTool, "message.p2s.tool.unknown_tool");
@@ -715,6 +717,7 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
 
         ResourceLocation normalizedId = BuiltInRegistries.BLOCK.getKey(block);
         BlockState defaultState = block.defaultBlockState();
+        BlockState describedState = requestedState == null ? defaultState : requestedState;
         List<Property<?>> properties = new ArrayList<>(defaultState.getProperties());
         properties.sort(Comparator.comparing(property -> property.getName()));
 
@@ -725,7 +728,10 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         payload.addProperty("property_count", properties.size());
         payload.addProperty("syntax", formatBlockState(defaultState));
         payload.addProperty("notes", "Use these as block state properties in palette/action block strings. They are not block entity NBT.");
-        List<String> blockEntityTemplates = StructureBuilder.supportedBlockEntityTemplates(defaultState);
+        BlockStructureLibrary.ResolvedStructureFamily family = resolveStructureFamily(normalizedId == null ? id.toString() : normalizedId.toString(), describedState);
+        addStructureFamily(payload, family);
+        addBlockStateGenerationHints(payload, describedState, family);
+        List<String> blockEntityTemplates = StructureBuilder.supportedBlockEntityTemplates(describedState);
         payload.addProperty("block_entity_template_count", blockEntityTemplates.size());
         payload.add("block_entity_templates", toStringArray(blockEntityTemplates));
         if (!blockEntityTemplates.isEmpty()) {
@@ -752,6 +758,95 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
             propertyArray.add(item);
         }
         payload.add("properties", propertyArray);
+        return payload;
+    }
+
+    private static JsonObject handleComposeBlockState(JsonElement argsElem) {
+        JsonObject args = normalizeArgsObject(argsElem);
+        String requested = getString(args, "block_id").trim();
+        if (requested.isBlank()) {
+            return buildToolError("compose_block_state", "block_id is required.");
+        }
+
+        String idPart = blockIdPart(requested);
+        ResourceLocation id = parseBlockResourceLocation(idPart);
+        if (id == null) {
+            return buildComposeBlockStateError(requested, "Invalid block id: " + requested);
+        }
+        Block block = BuiltInRegistries.BLOCK.getOptional(id).orElse(null);
+        if (block == null) {
+            return buildComposeBlockStateError(requested, "Unknown block id: " + id);
+        }
+
+        BlockState state = requested.contains("[") ? StructureBuilder.resolveDirectBlockState(requested) : block.defaultBlockState();
+        if (state == null) {
+            return buildComposeBlockStateError(requested, "Invalid block state syntax or property value: " + requested);
+        }
+
+        List<String> errors = new ArrayList<>();
+        List<String> warnings = new ArrayList<>();
+        Map<String, String> requestedProperties = readPropertyOverrides(args.get("properties"), errors);
+        applyTopLevelPropertyShortcuts(args, state, requestedProperties);
+        applyConnectionShortcuts(args, state, requestedProperties, warnings);
+        if (!errors.isEmpty()) {
+            return buildComposeBlockStateError(requested, String.join("; ", errors));
+        }
+
+        BlockState composed = state;
+        Map<String, String> applied = new LinkedHashMap<>();
+        for (Map.Entry<String, String> entry : requestedProperties.entrySet()) {
+            String propertyName = normalize(entry.getKey());
+            String rawValue = normalize(entry.getValue());
+            Property<?> property = findProperty(composed, propertyName);
+            if (property == null) {
+                errors.add("unknown property '" + propertyName + "'");
+                continue;
+            }
+            Optional<? extends Comparable<?>> parsed = property.getValue(rawValue);
+            if (parsed.isEmpty()) {
+                errors.add("invalid value '" + rawValue + "' for property '" + propertyName + "'; allowed: " + String.join(", ", propertyAllowedValues(property)));
+                continue;
+            }
+            composed = setPropertyValue(composed, property, parsed.get());
+            applied.put(propertyName, propertyValueName(composed, property));
+        }
+        if (!errors.isEmpty()) {
+            return buildComposeBlockStateError(requested, String.join("; ", errors));
+        }
+
+        ResourceLocation normalizedId = BuiltInRegistries.BLOCK.getKey(block);
+        String blockId = normalizedId == null ? id.toString() : normalizedId.toString();
+        BlockStructureLibrary.ResolvedStructureFamily family = resolveStructureFamily(blockId, composed);
+
+        JsonObject payload = buildToolSuccess("compose_block_state");
+        payload.addProperty("requested", requested);
+        payload.addProperty("block_id", blockId);
+        payload.addProperty("block_state", formatBlockState(composed));
+        payload.add("applied_properties", toStringObject(applied));
+        payload.add("all_properties", toStringObject(blockStateProperties(composed)));
+        addStructureFamily(payload, family);
+        addBlockStateGenerationHints(payload, composed, family);
+        List<String> blockEntityTemplates = StructureBuilder.supportedBlockEntityTemplates(composed);
+        payload.addProperty("block_entity_template_count", blockEntityTemplates.size());
+        payload.add("block_entity_templates", toStringArray(blockEntityTemplates));
+        payload.addProperty("example_palette_toml", "new_value = \"" + formatBlockState(composed) + "\"");
+        if (!warnings.isEmpty()) {
+            JsonArray warningArray = new JsonArray();
+            for (String warning : warnings) {
+                warningArray.add(warning);
+            }
+            payload.add("warnings", warningArray);
+        }
+        return payload;
+    }
+
+    private static JsonObject buildComposeBlockStateError(String requested, String error) {
+        JsonObject payload = buildToolError("compose_block_state", error);
+        payload.addProperty("requested", requested == null ? "" : requested);
+        String closest = StructureBuilder.closestBlockId(blockIdPart(requested));
+        if (closest != null && !closest.isBlank()) {
+            payload.addProperty("closest", closest);
+        }
         return payload;
     }
 
@@ -888,6 +983,18 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         return array;
     }
 
+    private static JsonObject toStringObject(Map<String, String> values) {
+        JsonObject object = new JsonObject();
+        if (values != null) {
+            for (Map.Entry<String, String> entry : values.entrySet()) {
+                if (entry.getKey() != null && !entry.getKey().isBlank()) {
+                    object.addProperty(entry.getKey(), entry.getValue() == null ? "" : entry.getValue());
+                }
+            }
+        }
+        return object;
+    }
+
     private static String blockIdPart(String raw) {
         if (raw == null) {
             return "";
@@ -929,6 +1036,181 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
             sb.append(property.getName()).append('=').append(propertyValueName(state, property));
         }
         return sb.append(']').toString();
+    }
+
+    private static Map<String, String> readPropertyOverrides(JsonElement element, List<String> errors) {
+        Map<String, String> properties = new LinkedHashMap<>();
+        if (element == null || element.isJsonNull()) {
+            return properties;
+        }
+        if (!element.isJsonObject()) {
+            errors.add("properties must be an object");
+            return properties;
+        }
+        for (Map.Entry<String, JsonElement> entry : element.getAsJsonObject().entrySet()) {
+            String key = normalize(entry.getKey());
+            String value = jsonScalarAsString(entry.getValue());
+            if (key.isBlank()) {
+                continue;
+            }
+            if (value == null) {
+                errors.add("properties." + key + " must be a string, number, or boolean");
+                continue;
+            }
+            properties.put(key, normalize(value));
+        }
+        return properties;
+    }
+
+    private static void applyTopLevelPropertyShortcuts(JsonObject args, BlockState state, Map<String, String> properties) {
+        List<String> shortcutNames = List.of(
+                "facing", "rotation", "half", "shape", "type", "part", "hinge", "face", "attachment", "axis",
+                "open", "powered", "lit", "waterlogged", "hanging", "enabled", "up", "in_wall", "has_book", "signal_fire",
+                "power", "honey_level", "candles", "eggs", "layers", "bites", "level", "delay", "mode", "moisture", "age"
+        );
+        for (String name : shortcutNames) {
+            if (!args.has(name) || findProperty(state, name) == null) {
+                continue;
+            }
+            String value = jsonScalarAsString(args.get(name));
+            if (value != null) {
+                properties.put(name, normalize(value));
+            }
+        }
+    }
+
+    private static void applyConnectionShortcuts(JsonObject args, BlockState state, Map<String, String> properties, List<String> warnings) {
+        JsonElement element = args.get("connections");
+        if (element == null || element.isJsonNull()) {
+            return;
+        }
+
+        Map<String, String> requestedDirections = new LinkedHashMap<>();
+        if (element.isJsonArray()) {
+            for (JsonElement entry : element.getAsJsonArray()) {
+                String direction = normalize(jsonScalarAsString(entry));
+                if (isHorizontalDirection(direction)) {
+                    requestedDirections.put(direction, "true");
+                }
+            }
+            for (String direction : List.of("north", "east", "south", "west")) {
+                if (!requestedDirections.containsKey(direction)) {
+                    requestedDirections.put(direction, "false");
+                }
+            }
+        } else if (element.isJsonObject()) {
+            for (Map.Entry<String, JsonElement> entry : element.getAsJsonObject().entrySet()) {
+                String direction = normalize(entry.getKey());
+                String value = jsonScalarAsString(entry.getValue());
+                if (isHorizontalDirection(direction) && value != null) {
+                    requestedDirections.put(direction, normalize(value));
+                }
+            }
+        } else {
+            warnings.add("connections ignored because it must be an array or object");
+            return;
+        }
+
+        boolean appliedAny = false;
+        String wallHeight = normalize(jsonScalarAsString(args.get("wall_height")));
+        if (wallHeight.isBlank()) {
+            wallHeight = "low";
+        }
+        for (String direction : List.of("north", "east", "south", "west")) {
+            Property<?> property = findProperty(state, direction);
+            if (property == null || !requestedDirections.containsKey(direction)) {
+                continue;
+            }
+            List<String> allowed = propertyAllowedValues(property);
+            String requested = normalize(requestedDirections.get(direction));
+            String value = requested;
+            if (allowed.contains("true") && allowed.contains("false")) {
+                value = booleanLike(requested) ? "true" : "false";
+            } else if (allowed.contains("none") && allowed.contains("low")) {
+                if (allowed.contains(requested)) {
+                    value = requested;
+                } else {
+                    value = booleanLike(requested) ? wallHeight : "none";
+                }
+            }
+            properties.put(direction, value);
+            appliedAny = true;
+        }
+        if (!appliedAny) {
+            warnings.add("connections ignored because this block has no horizontal connection properties");
+        }
+    }
+
+    private static void addStructureFamily(JsonObject payload, BlockStructureLibrary.ResolvedStructureFamily family) {
+        if (payload == null) {
+            return;
+        }
+        if (family == null) {
+            payload.addProperty("structure_family_known", false);
+            return;
+        }
+        payload.addProperty("structure_family_known", true);
+        JsonObject familyObject = new JsonObject();
+        familyObject.addProperty("family_id", family.familyId());
+        familyObject.addProperty("unit_kind", family.unitKind());
+        familyObject.addProperty("grouping_mode", family.groupingMode().name().toLowerCase(Locale.ROOT));
+        familyObject.add("tags", toStringArray(family.tags()));
+        payload.add("structure_family", familyObject);
+    }
+
+    private static void addBlockStateGenerationHints(JsonObject payload, BlockState state, BlockStructureLibrary.ResolvedStructureFamily family) {
+        JsonArray hints = new JsonArray();
+        if (family != null && family.tags().contains("connective")) {
+            hints.add("Use compose_block_state with connections=[north,east,south,west] or a connections object instead of hand-writing every connection property.");
+        }
+        if (family != null && (family.groupingMode() == BlockStructureLibrary.GroupingMode.VERTICAL_PAIR
+                || family.groupingMode() == BlockStructureLibrary.GroupingMode.FACING_PAIR)) {
+            hints.add("Place only the anchor block once; the builder expands the counterpart block automatically.");
+        }
+        if (family != null && family.tags().contains("block_entity")) {
+            hints.add("Block entity data is separate; call describe_block_entity_template before writing block_entity fields.");
+        }
+        if (findProperty(state, "waterlogged") != null) {
+            hints.add("Set waterlogged=false unless intentionally placing into water.");
+        }
+        if (findProperty(state, "facing") != null) {
+            hints.add("For simple directional placement you may use action facing, but full block state strings are safer for reusable palette entries.");
+        }
+        payload.add("generation_hints", hints);
+    }
+
+    private static BlockStructureLibrary.ResolvedStructureFamily resolveStructureFamily(String blockId, BlockState state) {
+        return BlockStructureLibrary.resolve(blockId, blockStateProperties(state));
+    }
+
+    private static Map<String, String> blockStateProperties(BlockState state) {
+        Map<String, String> properties = new LinkedHashMap<>();
+        if (state == null) {
+            return properties;
+        }
+        List<Property<?>> sorted = new ArrayList<>(state.getProperties());
+        sorted.sort(Comparator.comparing(Property::getName));
+        for (Property<?> property : sorted) {
+            properties.put(property.getName(), propertyValueName(state, property));
+        }
+        return properties;
+    }
+
+    private static Property<?> findProperty(BlockState state, String name) {
+        if (state == null || name == null) {
+            return null;
+        }
+        for (Property<?> property : state.getProperties()) {
+            if (property.getName().equals(name)) {
+                return property;
+            }
+        }
+        return null;
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static BlockState setPropertyValue(BlockState state, Property property, Comparable value) {
+        return state.setValue(property, value);
     }
 
     private static List<String> propertyAllowedValues(Property<?> property) {
@@ -981,6 +1263,31 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
         }
         int expectedCount = max - min + 1;
         return expectedCount == values.size() ? "integer_range" : "integer_enum";
+    }
+
+    private static String normalize(String value) {
+        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private static String jsonScalarAsString(JsonElement element) {
+        if (element == null || element.isJsonNull() || !element.isJsonPrimitive()) {
+            return null;
+        }
+        try {
+            return element.getAsString();
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private static boolean isHorizontalDirection(String value) {
+        return "north".equals(value) || "east".equals(value) || "south".equals(value) || "west".equals(value);
+    }
+
+    private static boolean booleanLike(String value) {
+        String normalized = normalize(value);
+        return "true".equals(normalized) || "yes".equals(normalized) || "1".equals(normalized)
+                || "low".equals(normalized) || "tall".equals(normalized);
     }
 
     private static void addIntegerBounds(JsonObject item, List<String> values) {

@@ -12,6 +12,7 @@
     "read_workspace_file",
     "search_block_ids",
     "describe_block_state",
+    "compose_block_state",
     "describe_block_entity_template"
   ],
   "max_loops": 40,

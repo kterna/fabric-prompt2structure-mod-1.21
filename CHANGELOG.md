@@ -2,6 +2,7 @@
 
 ## 2026-05-21 方块状态与方块实体模板
 - Agent 工具链新增 `describe_block_state` / `describe_block_entity_template` 查询能力，用于在写 patch 前确认真实 block state 属性和值域，以及当前方块支持的安全方块实体模板。
+- 新增 `compose_block_state` 工具，可从 block id、属性覆盖和连接方向生成并验证完整 block state，降低玻璃板、栅栏、墙、楼梯、铁轨等复杂状态的生成错误率。
 - 工作区 TOML 与 patch TOML 支持 action 级安全方块实体字段，初期开放告示牌文字 `sign_text` 与旗帜图案 `banner_patterns`，并拒绝原始 NBT 与未列入白名单的枚举值。
 - 结构放置、预览与校验统一处理门 / 床的成对方块展开，避免 agent 需要手写上半门或床头方块。
 - `p2s_block_structure_library` 扩展常见建筑 block state 家族覆盖，包括玻璃板 / 铁栏杆、栅栏、墙、地毯、链条、灯笼、铁轨和压力板。

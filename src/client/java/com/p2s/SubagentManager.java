@@ -59,7 +59,7 @@ public final class SubagentManager {
     });
     private static final Set<String> PARALLEL_SAFE_TOOLS = Set.of(
             "list_skills", "read_skill", "read_subdoc", "search_skill", "update_plan",
-            "get_project_state", "read_workspace_file", "search_block_ids", "describe_block_state", "describe_block_entity_template"
+            "get_project_state", "read_workspace_file", "search_block_ids", "describe_block_state", "compose_block_state", "describe_block_entity_template"
     );
 
     private SubagentManager() {
@@ -586,7 +586,7 @@ public final class SubagentManager {
             case "update_plan" -> updatePlanPayload(call.arguments());
             case "get_project_state", "read_workspace_file",
                     "create_workspace_file", "rename_workspace_file", "delete_workspace_file",
-                    "propose_patch", "search_block_ids", "describe_block_state", "describe_block_entity_template" ->
+                    "propose_patch", "search_block_ids", "describe_block_state", "compose_block_state", "describe_block_entity_template" ->
                     callServerTool(toolName, normalizeArgsObject(call.arguments()));
             default -> toolError(toolName, "Unsupported tool");
         };

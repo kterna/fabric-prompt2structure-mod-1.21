@@ -808,6 +808,71 @@ public final class LLMService {
             tools.add(describeTool);
         }
 
+        if (allowsTool(allowedTools, "compose_block_state")) {
+            JsonObject composeTool = new JsonObject();
+            composeTool.addProperty("type", "function");
+            JsonObject composeFn = new JsonObject();
+            composeFn.addProperty("name", "compose_block_state");
+            composeFn.addProperty("description",
+                    "Compose and validate a full block state string from a block id plus semantic property overrides. " +
+                    "Use this for stairs, slabs, panes, fences, walls, rails, doors, beds, signs, banners, and other blocks with non-trivial state. " +
+                    "For connective blocks, pass connections as directions instead of hand-writing north/east/south/west properties.");
+            JsonObject composeParams = new JsonObject();
+            composeParams.addProperty("type", "object");
+            JsonObject composeProps = new JsonObject();
+
+            JsonObject composeBlockId = new JsonObject();
+            composeBlockId.addProperty("type", "string");
+            composeBlockId.addProperty("description", "Block id or full block state string used as the base, for example minecraft:glass_pane or minecraft:oak_stairs[facing=north].");
+            composeProps.add("block_id", composeBlockId);
+
+            JsonObject composeProperties = new JsonObject();
+            composeProperties.addProperty("type", "object");
+            composeProperties.addProperty("description", "Exact property overrides as key/value pairs, for example {\"facing\":\"north\",\"waterlogged\":false,\"shape\":\"straight\"}.");
+            composeProperties.addProperty("additionalProperties", true);
+            composeProps.add("properties", composeProperties);
+
+            JsonObject composeConnections = new JsonObject();
+            composeConnections.addProperty("description", "For panes/fences/walls, either an array such as [\"north\",\"south\"] or an object such as {\"north\":true,\"east\":false}.");
+            JsonArray connectionAnyOf = new JsonArray();
+            JsonObject connectionArray = new JsonObject();
+            connectionArray.addProperty("type", "array");
+            JsonObject connectionItem = new JsonObject();
+            connectionItem.addProperty("type", "string");
+            connectionArray.add("items", connectionItem);
+            connectionAnyOf.add(connectionArray);
+            JsonObject connectionObject = new JsonObject();
+            connectionObject.addProperty("type", "object");
+            connectionObject.addProperty("additionalProperties", true);
+            connectionAnyOf.add(connectionObject);
+            composeConnections.add("anyOf", connectionAnyOf);
+            composeProps.add("connections", composeConnections);
+
+            JsonObject composeWallHeight = new JsonObject();
+            composeWallHeight.addProperty("type", "string");
+            composeWallHeight.addProperty("description", "For wall connections, height to use for connected sides: low or tall. Defaults to low.");
+            composeProps.add("wall_height", composeWallHeight);
+
+            for (String shortcut : List.of(
+                    "facing", "rotation", "half", "shape", "type", "part", "hinge", "face", "attachment", "axis",
+                    "open", "powered", "lit", "waterlogged", "hanging", "enabled", "up", "in_wall", "has_book", "signal_fire",
+                    "power", "honey_level", "candles", "eggs", "layers", "bites", "level", "delay", "mode", "moisture", "age"
+            )) {
+                JsonObject shortcutProp = new JsonObject();
+                shortcutProp.addProperty("description", "Shortcut for the '" + shortcut + "' block state property when that property exists.");
+                composeProps.add(shortcut, shortcutProp);
+            }
+
+            composeParams.add("properties", composeProps);
+            JsonArray composeRequired = new JsonArray();
+            composeRequired.add("block_id");
+            composeParams.add("required", composeRequired);
+            composeParams.addProperty("additionalProperties", false);
+            composeFn.add("parameters", composeParams);
+            composeTool.add("function", composeFn);
+            tools.add(composeTool);
+        }
+
         if (allowsTool(allowedTools, "describe_block_entity_template")) {
             JsonObject describeEntityTool = new JsonObject();
             describeEntityTool.addProperty("type", "function");
@@ -950,6 +1015,7 @@ public final class LLMService {
                     "For actions, use nested [[operation.actions_add]], [[operation.old_actions]], [[operation.new_actions]]. " +
                     "For palette updates, use [[operation.entry]] where omitting old_value means add-new and omitting new_value means delete. " +
                     "Palette values may be block ids or full block state strings such as minecraft:oak_wall_sign[facing=north,waterlogged=false]. " +
+                    "Use compose_block_state for complex or connective block states before writing palette values. " +
                     "Action-level safe block entity templates are allowed only through block_entity=sign_text or block_entity=banner_patterns fields described by describe_block_entity_template.");
             properties.add("patch_toml", patchToml);
 

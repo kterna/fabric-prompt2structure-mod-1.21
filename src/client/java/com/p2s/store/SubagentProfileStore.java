@@ -43,6 +43,7 @@ public final class SubagentProfileStore {
             "propose_patch",
             "search_block_ids",
             "describe_block_state",
+            "compose_block_state",
             "describe_block_entity_template"
     );
 
@@ -154,6 +155,10 @@ public final class SubagentProfileStore {
                 filteredAllowedTools.add("describe_block_state");
             }
             if (filteredAllowedTools.contains("describe_block_state")
+                    && !filteredAllowedTools.contains("compose_block_state")) {
+                filteredAllowedTools.add("compose_block_state");
+            }
+            if (filteredAllowedTools.contains("describe_block_state")
                     && !filteredAllowedTools.contains("describe_block_entity_template")) {
                 filteredAllowedTools.add("describe_block_entity_template");
             }
@@ -214,17 +219,17 @@ public final class SubagentProfileStore {
     private static List<String> defaultAllowedTools(String profileId) {
         String id = normalizeId(profileId);
         if ("block-id-searcher".equals(id)) {
-            return new ArrayList<>(List.of("search_block_ids", "describe_block_state", "describe_block_entity_template", "list_skills", "read_skill", "read_subdoc", "search_skill"));
+            return new ArrayList<>(List.of("search_block_ids", "describe_block_state", "compose_block_state", "describe_block_entity_template", "list_skills", "read_skill", "read_subdoc", "search_skill"));
         }
         if ("patch-planner".equals(id)) {
             return new ArrayList<>(List.of(
-                    "get_project_state", "read_workspace_file", "search_block_ids", "describe_block_state", "describe_block_entity_template", "propose_patch",
+                    "get_project_state", "read_workspace_file", "search_block_ids", "describe_block_state", "compose_block_state", "describe_block_entity_template", "propose_patch",
                     "list_skills", "read_skill", "read_subdoc", "search_skill"
             ));
         }
         return new ArrayList<>(List.of(
                 "list_skills", "read_skill", "read_subdoc", "search_skill",
-                "get_project_state", "read_workspace_file", "search_block_ids", "describe_block_state", "describe_block_entity_template"
+                "get_project_state", "read_workspace_file", "search_block_ids", "describe_block_state", "compose_block_state", "describe_block_entity_template"
         ));
     }
 

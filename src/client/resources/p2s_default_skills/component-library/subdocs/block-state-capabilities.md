@@ -3,7 +3,7 @@
 本页描述方向、安装形态和常用 block state 规则。它们不是 NBT。生成时应写入 palette 的完整 block state 字符串，或使用 action 的 `facing` 覆盖已有 `DirectionProperty`。
 
 ## 精确查询优先
-生成具体方块前，优先调用 `describe_block_state(block_id)` 查询 registry 中真实存在的属性、默认值和允许值。本文中的枚举只作为通用参考，不能替代工具返回结果。
+生成具体方块前，优先调用 `describe_block_state(block_id)` 查询 registry 中真实存在的属性、默认值、允许值和 `structure_family`。需要写完整 block state 时，优先调用 `compose_block_state` 生成并验证。本文中的枚举只作为通用参考，不能替代工具返回结果。
 
 ## 写法
 推荐在 palette 中写完整方块状态：
@@ -19,6 +19,18 @@ new_value = "minecraft:oak_sign[rotation=4,waterlogged=false]"
 ```
 
 只有 4/5/6 向 `facing` 属性能用 action 的 `facing` 快速覆盖。`rotation=0..15`、`face=floor|wall|ceiling`、`attachment=*` 这类属性必须写在 palette 的 block state 中。
+
+复杂状态推荐用工具生成：
+
+```json
+{
+  "block_id": "minecraft:glass_pane",
+  "connections": ["north", "south"],
+  "waterlogged": false
+}
+```
+
+`compose_block_state` 会返回可直接写入 `new_value` 的完整 block state，并附带 family/tags 和生成提示。
 
 ## 成对方块锚点
 门和床是成对方块，但生成时只放置一次：
