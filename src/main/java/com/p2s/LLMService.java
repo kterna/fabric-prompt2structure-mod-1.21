@@ -780,6 +780,34 @@ public final class LLMService {
             tools.add(searchTool);
         }
 
+        if (allowsTool(allowedTools, "describe_block_state")) {
+            JsonObject describeTool = new JsonObject();
+            describeTool.addProperty("type", "function");
+            JsonObject describeFn = new JsonObject();
+            describeFn.addProperty("name", "describe_block_state");
+            describeFn.addProperty("description",
+                    "Describe valid block state properties for a block id or full block state string. " +
+                    "Returns the normalized block id, default state, property names, default values, and allowed values. " +
+                    "Use this before inventing direction, rotation, half, part, face, attachment, waterlogged, lit, or similar block state fields.");
+            JsonObject describeParams = new JsonObject();
+            describeParams.addProperty("type", "object");
+            JsonObject describeProps = new JsonObject();
+
+            JsonObject blockIdProp = new JsonObject();
+            blockIdProp.addProperty("type", "string");
+            blockIdProp.addProperty("description", "Block id or full block state string, for example minecraft:oak_wall_sign or minecraft:oak_wall_sign[facing=north,waterlogged=false].");
+            describeProps.add("block_id", blockIdProp);
+
+            describeParams.add("properties", describeProps);
+            JsonArray describeRequired = new JsonArray();
+            describeRequired.add("block_id");
+            describeParams.add("required", describeRequired);
+            describeParams.addProperty("additionalProperties", false);
+            describeFn.add("parameters", describeParams);
+            describeTool.add("function", describeFn);
+            tools.add(describeTool);
+        }
+
         if (P2SMod.DEBUG && allowsTool(allowedTools, "debug_stage_blocks")) {
             JsonObject debugStageTool = new JsonObject();
             debugStageTool.addProperty("type", "function");
@@ -893,7 +921,8 @@ public final class LLMService {
                     "Use [[operation]] with op=insert_part|delete_part|replace_part|insert_actions|delete_actions|replace_actions|move_actions|update_palette. " +
                     "Use insert_part for a brand-new part, and reserve insert_actions for appending to an existing part. " +
                     "For actions, use nested [[operation.actions_add]], [[operation.old_actions]], [[operation.new_actions]]. " +
-                    "For palette updates, use [[operation.entry]] where omitting old_value means add-new and omitting new_value means delete.");
+                    "For palette updates, use [[operation.entry]] where omitting old_value means add-new and omitting new_value means delete. " +
+                    "Palette values may be block ids or full block state strings such as minecraft:oak_wall_sign[facing=north,waterlogged=false].");
             properties.add("patch_toml", patchToml);
 
             params.add("properties", properties);

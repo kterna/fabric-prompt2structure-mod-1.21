@@ -52,6 +52,7 @@ public final class ClientAgentManager {
             - Use create_workspace_file / rename_workspace_file / delete_workspace_file for file management.
             - Propose edits with propose_patch and wait for user apply/discard decision.
             - Use search_block_ids when unsure about block id names.
+            - Use describe_block_state before inventing block state properties or enum values.
             - When DEBUG mode exposes debug_stage_blocks, use it to stage block-state experiments inside the current selection.
             - debug_stage_blocks uses relative coordinates from selection min; call it with inspect_only=true first if bounds are unknown.
             - After using debug_stage_blocks, ask the user to visually verify the generated variants before parsing logs.
@@ -70,7 +71,7 @@ public final class ClientAgentManager {
     private static final Set<String> PARALLEL_SAFE_TOOLS = Set.of(
             "list_skills", "read_skill", "read_subdoc", "search_skill",
             "update_plan",
-            "get_project_state", "read_workspace_file", "search_block_ids",
+            "get_project_state", "read_workspace_file", "search_block_ids", "describe_block_state",
             "list_subagents", "get_subagent", "list_profiles", "get_profile"
     );
 
@@ -774,7 +775,7 @@ public final class ClientAgentManager {
             case "get_profile" -> getProfilePayload(call.arguments());
             case "get_project_state", "read_workspace_file",
                     "create_workspace_file", "rename_workspace_file", "delete_workspace_file",
-                    "propose_patch", "search_block_ids", "debug_stage_blocks" ->
+                    "propose_patch", "search_block_ids", "describe_block_state", "debug_stage_blocks" ->
                     callServerTool(toolName, normalizeArgsObject(call.arguments()));
             default -> toolError(toolName, "Unknown tool");
         };
@@ -1235,6 +1236,7 @@ public final class ClientAgentManager {
             case "delete_workspace_file" -> "message.p2s.agent.tool.summary.delete_workspace_file";
             case "propose_patch" -> "message.p2s.agent.tool.summary.propose_patch";
             case "search_block_ids" -> "message.p2s.agent.tool.summary.search_block_ids";
+            case "describe_block_state" -> "message.p2s.agent.tool.summary.describe_block_state";
             case "debug_stage_blocks" -> "message.p2s.agent.tool.summary.debug_stage_blocks";
             default -> "";
         };

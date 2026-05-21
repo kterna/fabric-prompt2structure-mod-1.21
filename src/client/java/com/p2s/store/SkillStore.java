@@ -102,7 +102,9 @@ public final class SkillStore {
                     new TemplateFile("subdocs/scatter-patterns.md", "/p2s_default_skills/component-library/subdocs/scatter-patterns.md"),
                     new TemplateFile("subdocs/geometry-ellipsoid.md", "/p2s_default_skills/component-library/subdocs/geometry-ellipsoid.md"),
                     new TemplateFile("subdocs/hanging-decor.md", "/p2s_default_skills/component-library/subdocs/hanging-decor.md"),
-                    new TemplateFile("subdocs/roof-poly.md", "/p2s_default_skills/component-library/subdocs/roof-poly.md")
+                    new TemplateFile("subdocs/roof-poly.md", "/p2s_default_skills/component-library/subdocs/roof-poly.md"),
+                    new TemplateFile("subdocs/block-state-capabilities.md", "/p2s_default_skills/component-library/subdocs/block-state-capabilities.md"),
+                    new TemplateFile("subdocs/block-entity-templates.md", "/p2s_default_skills/component-library/subdocs/block-entity-templates.md")
             )),
             new DefaultSkillTemplate("subagent-orchestrator", List.of(
                     new TemplateFile("SKILL.md", "/p2s_default_skills/subagent-orchestrator/SKILL.md")

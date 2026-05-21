@@ -32,7 +32,7 @@ public final class P2SDefaults {
             - 创建全新 part 必须使用 insert_part；insert_actions 只允许追加到已存在的 part。
             - 动作内容使用 `[[operation.actions_add]]`、`[[operation.old_actions]]`、`[[operation.new_actions]]`。
             - palette 变更使用 `[[operation.entry]]`；省略 `old_value` 表示新增，省略 `new_value` 表示删除。
-            - actions 只支持 box / plane / line / points，并可选 facing。
+            - actions 只支持 box / plane / line / points，并可选 facing；rotation、face、attachment 等其它方块状态写在 palette 的完整 block state 中。
 
             ## 工具：read_workspace_file
             - 在编辑前读取工作区尺寸和当前 `workspace_toml` 内容。
@@ -43,8 +43,8 @@ public final class P2SDefaults {
 
             ## 规则
             - 坐标一律相对 (0,0,0)。
-            - palette 中使用合法的 Java 版方块 ID。
-            - action.block 可以是 palette key 或完整 block id，但优先使用 palette key。
+            - palette 中使用合法的 Java 版方块 ID 或完整 block state，例如 minecraft:oak_wall_sign[facing=north,waterlogged=false]。
+            - action.block 可以是 palette key、完整 block id 或完整 block state，但优先使用 palette key。
             - 修改尽量小、尽量增量。
             - 小范围调整优先使用 insert_actions / delete_actions / replace_actions。
             - 整块逻辑替换优先使用 replace_part；整块新增/删除分别使用 insert_part / delete_part。

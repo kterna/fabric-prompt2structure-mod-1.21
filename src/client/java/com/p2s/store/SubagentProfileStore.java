@@ -41,7 +41,8 @@ public final class SubagentProfileStore {
             "rename_workspace_file",
             "delete_workspace_file",
             "propose_patch",
-            "search_block_ids"
+            "search_block_ids",
+            "describe_block_state"
     );
 
     private SubagentProfileStore() {
@@ -147,6 +148,10 @@ public final class SubagentProfileStore {
             if (filteredAllowedTools.isEmpty()) {
                 filteredAllowedTools = defaultAllowedTools(id);
             }
+            if (filteredAllowedTools.contains("search_block_ids")
+                    && !filteredAllowedTools.contains("describe_block_state")) {
+                filteredAllowedTools.add("describe_block_state");
+            }
             if (!filteredAllowedTools.contains("read_subdoc")
                     && (filteredAllowedTools.contains("list_skills")
                     || filteredAllowedTools.contains("read_skill")
@@ -204,17 +209,17 @@ public final class SubagentProfileStore {
     private static List<String> defaultAllowedTools(String profileId) {
         String id = normalizeId(profileId);
         if ("block-id-searcher".equals(id)) {
-            return new ArrayList<>(List.of("search_block_ids", "list_skills", "read_skill", "read_subdoc", "search_skill"));
+            return new ArrayList<>(List.of("search_block_ids", "describe_block_state", "list_skills", "read_skill", "read_subdoc", "search_skill"));
         }
         if ("patch-planner".equals(id)) {
             return new ArrayList<>(List.of(
-                    "get_project_state", "read_workspace_file", "search_block_ids", "propose_patch",
+                    "get_project_state", "read_workspace_file", "search_block_ids", "describe_block_state", "propose_patch",
                     "list_skills", "read_skill", "read_subdoc", "search_skill"
             ));
         }
         return new ArrayList<>(List.of(
                 "list_skills", "read_skill", "read_subdoc", "search_skill",
-                "get_project_state", "read_workspace_file", "search_block_ids"
+                "get_project_state", "read_workspace_file", "search_block_ids", "describe_block_state"
         ));
     }
 

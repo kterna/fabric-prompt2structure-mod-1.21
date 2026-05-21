@@ -1,7 +1,7 @@
 {
   "id": "barrel",
   "unitKind": "barrel",
-  "tags": ["container", "directional"],
+  "tags": ["container", "directional", "block_entity"],
   "match": {
     "exactBlockIds": ["minecraft:barrel"],
     "requiredProperties": ["facing", "open"]

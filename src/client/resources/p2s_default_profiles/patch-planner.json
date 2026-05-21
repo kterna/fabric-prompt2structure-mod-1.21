@@ -7,6 +7,7 @@
     "get_project_state",
     "read_workspace_file",
     "search_block_ids",
+    "describe_block_state",
     "propose_patch",
     "list_skills",
     "read_skill",

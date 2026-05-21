@@ -20,7 +20,10 @@ description: "建筑总控规则：定义动作协议、补丁策略，并在细
 - `box.mode`: `solid|shell|walls`
 - `plane.mode`: `solid|outline`
 - `plane.axis`: `x|y|z`，并满足 `from[axis] == to[axis]`
-- 方向字段：需要时用 `facing`。
+- 方向字段：4/5/6 向 `DirectionProperty` 可用 action `facing`；`rotation=0..15`、墙上/地上/顶上等形态应写入 palette 的完整 block state。
+- 精确属性和值域：生成复杂方块状态前先调用 `describe_block_state(block_id)`，不要凭记忆编造枚举值。
+- 成对方块：门只放底部 `half=lower` 锚点，床只放脚部 `part=foot` 锚点；执行器会自动补 upper/head。
+- 复杂方块状态：读取 `component-library/subdocs/block-state-capabilities.md`。
 
 ## 任务分流（必须）
 - 内饰、桌椅、厨房、卧室等：读取 `interior-furniture`。
@@ -52,7 +55,7 @@ description: "建筑总控规则：定义动作协议、补丁策略，并在细
 - 整块新增/替换/删除优先 `insert_part` / `replace_part` / `delete_part`。
 - 创建全新 `part` 必须使用 `insert_part`；`insert_actions` 只用于给已存在的 `part` 追加动作。
 - 纯平移使用 `move_actions` + `offset = [dx, dy, dz]`。
-- palette 调整使用 `update_palette` + `[[operation.entry]]`。
+- palette 调整使用 `update_palette` + `[[operation.entry]]`；`new_value` 可为方块 ID 或完整 block state，例如 `minecraft:oak_wall_sign[facing=north,waterlogged=false]`。
 
 ## Patch 策略
 - 优先最小改动，尽量保留现有有效结构。

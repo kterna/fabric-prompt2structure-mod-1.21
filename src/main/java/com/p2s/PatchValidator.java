@@ -242,7 +242,7 @@ public final class PatchValidator {
             // new_value validation: if adding or modifying, new_value should resolve
             if (entry.newValue != null && !entry.newValue.isBlank()) {
                 if (StructureBuilder.resolveDirectBlockState(entry.newValue.trim()) == null) {
-                    result.addError(path + " new_value '" + entry.newValue + "' is not a valid block id");
+                    result.addError(path + " new_value '" + entry.newValue + "' is not a valid block id or block state");
                 }
             }
         }
@@ -296,7 +296,7 @@ public final class PatchValidator {
             if (isBlank(block)) continue;
             if (palette.containsKey(block)) continue;
             if (StructureBuilder.resolveDirectBlockState(block) != null) continue;
-            result.addError(path + " block '" + block + "' not in palette and not a valid block id");
+            result.addError(path + " block '" + block + "' not in palette and not a valid block id or block state");
         }
     }
 

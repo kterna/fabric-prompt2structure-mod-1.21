@@ -31,9 +31,13 @@ description: "移植并改写的组件模板库。通过 read_subdoc 按需读�
 - `subdocs/geometry-ellipsoid.md`：椭球体近似模板。
 - `subdocs/hanging-decor.md`：悬挂装饰模板（单点/环形）。
 - `subdocs/roof-poly.md`：多边形/圆锥屋顶模板。
+- `subdocs/block-state-capabilities.md`：方向、安装形态和常用方块状态枚举。
+- `subdocs/block-entity-templates.md`：方块实体 NBT 安全模板、枚举和值域。
 
 ## 约束
 - 仅使用 `box/plane/line/points`。
 - 禁止 `fill/frame/set`。
 - 示例坐标均为局部坐标，使用时请整体平移到目标位置。
 - 提交补丁时使用 `patch_toml` 的 TOML 格式，不使用旧 JSON `operations` 数组。
+- 方向、墙上/地上/顶上等形态属于 block state；优先调用 `describe_block_state` 查询目标方块的真实属性和值域，再读取 `subdocs/block-state-capabilities.md` 做通用规则参考，不要把它们写成 NBT。
+- 只有工具 schema 明确支持方块实体模板时，才使用 `subdocs/block-entity-templates.md`；否则不要输出原始 NBT 或自造字段。

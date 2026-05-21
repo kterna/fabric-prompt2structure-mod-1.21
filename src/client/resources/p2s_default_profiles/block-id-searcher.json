@@ -5,6 +5,7 @@
   "system_prompt": "你专注于方块选型与配色方案设计。先确认主 agent 是否给出建筑风格、目标氛围、预算/稀有度限制、用途分区（外墙/屋顶/地面/装饰）；若缺失需先指出。输出时请给出一到三套可执行方案，每套包含主材、辅材、点缀材及对应命名空间 ID，并说明配色逻辑与替代项。",
   "allowed_tools": [
     "search_block_ids",
+    "describe_block_state",
     "list_skills",
     "read_skill",
     "read_subdoc",

@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonSyntaxException;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -19,7 +20,9 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 public final class StructureBuilder {
@@ -188,16 +191,7 @@ public final class StructureBuilder {
         if (rawId == null || rawId.isBlank()) {
             return null;
         }
-        String trimmed = rawId.trim().toLowerCase();
-        ResourceLocation id = ResourceLocation.tryParse(trimmed);
-        if (id == null && !trimmed.contains(":")) {
-            id = ResourceLocation.tryParse("minecraft:" + trimmed);
-        }
-        if (id == null) {
-            return null;
-        }
-        Block block = BuiltInRegistries.BLOCK.getOptional(id).orElse(null);
-        return block == null ? null : block.defaultBlockState();
+        return resolveBlockStateExpression(rawId);
     }
 
     public static List<String> searchBlockIds(String query, int limit) {
@@ -437,8 +431,46 @@ public final class StructureBuilder {
 
     private static void place(ServerLevel world, BlockPos origin, BlockPos.MutableBlockPos mutable,
                               BlockState state, int x, int y, int z) {
+        if (placeDoorPair(world, origin, mutable, state, x, y, z)) {
+            return;
+        }
+        if (placeBedPair(world, origin, mutable, state, x, y, z)) {
+            return;
+        }
         mutable.set(origin.getX() + x, origin.getY() + y, origin.getZ() + z);
         world.setBlockAndUpdate(mutable, state);
+    }
+
+    private static boolean placeDoorPair(ServerLevel world, BlockPos origin, BlockPos.MutableBlockPos mutable,
+                                         BlockState state, int x, int y, int z) {
+        if (!isDoorState(state)) {
+            return false;
+        }
+        BlockState lower = setPropertyByName(state, "half", "lower");
+        BlockState upper = setPropertyByName(state, "half", "upper");
+        mutable.set(origin.getX() + x, origin.getY() + y, origin.getZ() + z);
+        world.setBlockAndUpdate(mutable, lower);
+        mutable.set(origin.getX() + x, origin.getY() + y + 1, origin.getZ() + z);
+        world.setBlockAndUpdate(mutable, upper);
+        return true;
+    }
+
+    private static boolean placeBedPair(ServerLevel world, BlockPos origin, BlockPos.MutableBlockPos mutable,
+                                        BlockState state, int x, int y, int z) {
+        if (!isBedState(state)) {
+            return false;
+        }
+        Direction facing = directionPropertyValue(state, "facing");
+        if (facing == null || facing == Direction.UP || facing == Direction.DOWN) {
+            return false;
+        }
+        BlockState foot = setPropertyByName(state, "part", "foot");
+        BlockState head = setPropertyByName(state, "part", "head");
+        mutable.set(origin.getX() + x, origin.getY() + y, origin.getZ() + z);
+        world.setBlockAndUpdate(mutable, foot);
+        mutable.set(origin.getX() + x + facing.getStepX(), origin.getY() + y, origin.getZ() + z + facing.getStepZ());
+        world.setBlockAndUpdate(mutable, head);
+        return true;
     }
 
     private interface PointVisitor {
@@ -544,10 +576,17 @@ public final class StructureBuilder {
     }
 
     private static BlockState resolveBlockState(String rawId, String paletteKey) {
-        ResourceLocation id = ResourceLocation.tryParse(rawId);
-        if (id == null && rawId != null && !rawId.contains(":")) {
-            id = ResourceLocation.tryParse("minecraft:" + rawId);
+        BlockState exact = resolveBlockStateExpression(rawId);
+        if (exact != null) {
+            return exact;
         }
+        if (rawId != null && rawId.contains("[")) {
+            P2SMod.LOGGER.warn("Palette key {} has invalid block state {}, fallback to stone", paletteKey, rawId);
+            return Blocks.STONE.defaultBlockState();
+        }
+
+        String blockIdPart = blockIdPart(rawId);
+        ResourceLocation id = parseBlockId(blockIdPart);
 
         if (id != null) {
             Block block = BuiltInRegistries.BLOCK.getOptional(id).orElse(null);
@@ -564,7 +603,7 @@ public final class StructureBuilder {
             return Blocks.STONE.defaultBlockState();
         }
 
-        ResourceLocation similar = findClosestBlock(rawId);
+        ResourceLocation similar = findClosestBlock(blockIdPart);
         if (similar != null) {
             Block similarBlock = BuiltInRegistries.BLOCK.get(similar);
             P2SMod.LOGGER.warn("Palette key {} has invalid id {}, using similar {}", paletteKey, rawId, similar);
@@ -573,6 +612,141 @@ public final class StructureBuilder {
 
         P2SMod.LOGGER.warn("Palette key {} has invalid id {}, fallback to stone", paletteKey, rawId);
         return Blocks.STONE.defaultBlockState();
+    }
+
+    private static BlockState resolveBlockStateExpression(String rawId) {
+        if (rawId == null || rawId.isBlank()) {
+            return null;
+        }
+        String trimmed = rawId.trim().toLowerCase(Locale.ROOT);
+        int bracket = trimmed.indexOf('[');
+        String idPart = bracket < 0 ? trimmed : trimmed.substring(0, bracket);
+        ResourceLocation id = parseBlockId(idPart);
+        if (id == null) {
+            return null;
+        }
+        Block block = BuiltInRegistries.BLOCK.getOptional(id).orElse(null);
+        if (block == null) {
+            return null;
+        }
+        BlockState state = block.defaultBlockState();
+        if (bracket < 0) {
+            return state;
+        }
+        if (!trimmed.endsWith("]")) {
+            return null;
+        }
+        String propertyList = trimmed.substring(bracket + 1, trimmed.length() - 1).trim();
+        if (propertyList.isBlank()) {
+            return null;
+        }
+        for (String assignment : propertyList.split(",")) {
+            int equals = assignment.indexOf('=');
+            if (equals <= 0 || equals == assignment.length() - 1) {
+                return null;
+            }
+            String name = assignment.substring(0, equals).trim();
+            String value = assignment.substring(equals + 1).trim();
+            Property<?> property = findProperty(state, name);
+            if (property == null) {
+                return null;
+            }
+            Optional<? extends Comparable<?>> parsed = property.getValue(value);
+            if (parsed.isEmpty()) {
+                return null;
+            }
+            state = setPropertyValue(state, property, parsed.get());
+        }
+        return state;
+    }
+
+    private static ResourceLocation parseBlockId(String rawId) {
+        if (rawId == null || rawId.isBlank()) {
+            return null;
+        }
+        String trimmed = rawId.trim().toLowerCase(Locale.ROOT);
+        ResourceLocation id = ResourceLocation.tryParse(trimmed);
+        if (id == null && !trimmed.contains(":")) {
+            id = ResourceLocation.tryParse("minecraft:" + trimmed);
+        }
+        return id;
+    }
+
+    private static String blockIdPart(String rawId) {
+        if (rawId == null) {
+            return "";
+        }
+        String trimmed = rawId.trim();
+        int bracket = trimmed.indexOf('[');
+        return bracket < 0 ? trimmed : trimmed.substring(0, bracket);
+    }
+
+    private static boolean isDoorState(BlockState state) {
+        return blockPath(state).endsWith("_door")
+                && hasPropertyValue(state, "half", "lower")
+                && hasPropertyValue(state, "half", "upper")
+                && propertyValueEquals(state, "half", "lower");
+    }
+
+    private static boolean isBedState(BlockState state) {
+        return blockPath(state).endsWith("_bed")
+                && hasPropertyValue(state, "part", "foot")
+                && hasPropertyValue(state, "part", "head")
+                && propertyValueEquals(state, "part", "foot")
+                && directionPropertyValue(state, "facing") != null;
+    }
+
+    private static String blockPath(BlockState state) {
+        if (state == null) {
+            return "";
+        }
+        ResourceLocation id = BuiltInRegistries.BLOCK.getKey(state.getBlock());
+        return id == null ? "" : id.getPath();
+    }
+
+    private static boolean hasPropertyValue(BlockState state, String name, String value) {
+        Property<?> property = findProperty(state, name);
+        return property != null && property.getValue(value).isPresent();
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static boolean propertyValueEquals(BlockState state, String name, String value) {
+        Property property = findProperty(state, name);
+        if (property == null) {
+            return false;
+        }
+        return property.getName(state.getValue(property)).equals(value);
+    }
+
+    private static BlockState setPropertyByName(BlockState state, String name, String value) {
+        Property<?> property = findProperty(state, name);
+        if (property == null) {
+            return state;
+        }
+        Optional<? extends Comparable<?>> parsed = property.getValue(value);
+        return parsed.isEmpty() ? state : setPropertyValue(state, property, parsed.get());
+    }
+
+    private static Direction directionPropertyValue(BlockState state, String name) {
+        Property<?> property = findProperty(state, name);
+        if (property instanceof DirectionProperty directionProperty) {
+            return state.getValue(directionProperty);
+        }
+        return null;
+    }
+
+    private static Property<?> findProperty(BlockState state, String name) {
+        for (Property<?> property : state.getProperties()) {
+            if (property.getName().equals(name)) {
+                return property;
+            }
+        }
+        return null;
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static BlockState setPropertyValue(BlockState state, Property property, Comparable value) {
+        return state.setValue(property, value);
     }
 
     private static ResourceLocation findClosestBlock(String raw) {

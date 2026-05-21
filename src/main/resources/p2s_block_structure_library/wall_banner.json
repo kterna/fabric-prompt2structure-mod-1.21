@@ -1,7 +1,7 @@
 {
   "id": "wall_banner",
   "unitKind": "wall_banner",
-  "tags": ["banner", "wall_mounted", "directional"],
+  "tags": ["banner", "wall_mounted", "directional", "block_entity"],
   "match": {
     "blockSuffixes": ["_wall_banner"],
     "requiredProperties": ["facing"]

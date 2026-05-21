@@ -12,8 +12,13 @@ import com.p2s.network.S2CToolBridgePayload;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.Property;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -115,6 +120,7 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
                 case "delete_workspace_file" -> handleDeleteWorkspaceFileTool(player, arguments);
                 case "propose_patch" -> handleProposePatchTool(player, arguments);
                 case "search_block_ids" -> handleSearchBlockIds(arguments);
+                case "describe_block_state" -> handleDescribeBlockState(arguments);
                 case "debug_stage_blocks" -> handleDebugStageBlocksTool(player, arguments);
                 default -> buildToolErrorKey(normalizedTool, "message.p2s.tool.unknown_tool");
             };
@@ -677,6 +683,194 @@ private static final AtomicLong CHECKPOINT_COUNTER = new AtomicLong();
             addToolWarning(payload, "message.p2s.search.no_matches");
         }
         return payload;
+    }
+
+    private static JsonObject handleDescribeBlockState(JsonElement argsElem) {
+        JsonObject args = normalizeArgsObject(argsElem);
+        String requested = getString(args, "block_id").trim();
+        if (requested.isBlank()) {
+            return buildToolError("describe_block_state", "block_id is required.");
+        }
+
+        String idPart = blockIdPart(requested);
+        ResourceLocation id = parseBlockResourceLocation(idPart);
+        if (id == null) {
+            return buildDescribeBlockStateError(requested, "Invalid block id: " + requested);
+        }
+
+        Block block = BuiltInRegistries.BLOCK.getOptional(id).orElse(null);
+        if (block == null) {
+            return buildDescribeBlockStateError(requested, "Unknown block id: " + id);
+        }
+
+        BlockState requestedState = null;
+        if (requested.contains("[")) {
+            requestedState = StructureBuilder.resolveDirectBlockState(requested);
+            if (requestedState == null) {
+                return buildDescribeBlockStateError(requested, "Invalid block state syntax or property value: " + requested);
+            }
+        }
+
+        ResourceLocation normalizedId = BuiltInRegistries.BLOCK.getKey(block);
+        BlockState defaultState = block.defaultBlockState();
+        List<Property<?>> properties = new ArrayList<>(defaultState.getProperties());
+        properties.sort(Comparator.comparing(property -> property.getName()));
+
+        JsonObject payload = buildToolSuccess("describe_block_state");
+        payload.addProperty("requested", requested);
+        payload.addProperty("block_id", normalizedId == null ? id.toString() : normalizedId.toString());
+        payload.addProperty("default_state", formatBlockState(defaultState));
+        payload.addProperty("property_count", properties.size());
+        payload.addProperty("syntax", formatBlockState(defaultState));
+        payload.addProperty("notes", "Use these as block state properties in palette/action block strings. They are not block entity NBT.");
+        if (requestedState != null) {
+            payload.addProperty("requested_state_valid", true);
+            payload.addProperty("requested_state", formatBlockState(requestedState));
+        }
+
+        JsonArray propertyArray = new JsonArray();
+        for (Property<?> property : properties) {
+            List<String> values = propertyAllowedValues(property);
+            JsonObject item = new JsonObject();
+            item.addProperty("name", property.getName());
+            item.addProperty("type", inferPropertyType(values));
+            item.addProperty("default", propertyValueName(defaultState, property));
+            JsonArray valueArray = new JsonArray();
+            for (String value : values) {
+                valueArray.add(value);
+            }
+            item.add("values", valueArray);
+            addIntegerBounds(item, values);
+            propertyArray.add(item);
+        }
+        payload.add("properties", propertyArray);
+        return payload;
+    }
+
+    private static JsonObject buildDescribeBlockStateError(String requested, String error) {
+        JsonObject payload = buildToolError("describe_block_state", error);
+        payload.addProperty("requested", requested == null ? "" : requested);
+        String closest = StructureBuilder.closestBlockId(blockIdPart(requested));
+        if (closest != null && !closest.isBlank()) {
+            payload.addProperty("closest", closest);
+        }
+        return payload;
+    }
+
+    private static String blockIdPart(String raw) {
+        if (raw == null) {
+            return "";
+        }
+        String trimmed = raw.trim();
+        int bracket = trimmed.indexOf('[');
+        return bracket < 0 ? trimmed : trimmed.substring(0, bracket);
+    }
+
+    private static ResourceLocation parseBlockResourceLocation(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        String trimmed = raw.trim().toLowerCase(Locale.ROOT);
+        ResourceLocation id = ResourceLocation.tryParse(trimmed);
+        if (id == null && !trimmed.contains(":")) {
+            id = ResourceLocation.tryParse("minecraft:" + trimmed);
+        }
+        return id;
+    }
+
+    private static String formatBlockState(BlockState state) {
+        if (state == null) {
+            return "";
+        }
+        ResourceLocation id = BuiltInRegistries.BLOCK.getKey(state.getBlock());
+        String blockId = id == null ? "" : id.toString();
+        List<Property<?>> properties = new ArrayList<>(state.getProperties());
+        if (properties.isEmpty()) {
+            return blockId;
+        }
+        properties.sort(Comparator.comparing(property -> property.getName()));
+        StringBuilder sb = new StringBuilder(blockId).append('[');
+        for (int i = 0; i < properties.size(); i++) {
+            Property<?> property = properties.get(i);
+            if (i > 0) {
+                sb.append(',');
+            }
+            sb.append(property.getName()).append('=').append(propertyValueName(state, property));
+        }
+        return sb.append(']').toString();
+    }
+
+    private static List<String> propertyAllowedValues(Property<?> property) {
+        List<String> values = new ArrayList<>();
+        appendPropertyAllowedValues(property, values);
+        return values;
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static void appendPropertyAllowedValues(Property property, List<String> values) {
+        if (property == null || values == null) {
+            return;
+        }
+        for (Object value : property.getPossibleValues()) {
+            if (value instanceof Comparable comparable) {
+                values.add(property.getName(comparable));
+            }
+        }
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static String propertyValueName(BlockState state, Property property) {
+        if (state == null || property == null) {
+            return "";
+        }
+        Object value = state.getValue(property);
+        return value instanceof Comparable comparable ? property.getName(comparable) : String.valueOf(value);
+    }
+
+    private static String inferPropertyType(List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return "enum";
+        }
+        if (values.size() == 2 && values.contains("true") && values.contains("false")) {
+            return "boolean";
+        }
+        Integer min = null;
+        Integer max = null;
+        for (String value : values) {
+            try {
+                int parsed = Integer.parseInt(value);
+                min = min == null ? parsed : Math.min(min, parsed);
+                max = max == null ? parsed : Math.max(max, parsed);
+            } catch (Exception ignored) {
+                return "enum";
+            }
+        }
+        if (min == null || max == null) {
+            return "enum";
+        }
+        int expectedCount = max - min + 1;
+        return expectedCount == values.size() ? "integer_range" : "integer_enum";
+    }
+
+    private static void addIntegerBounds(JsonObject item, List<String> values) {
+        if (item == null || values == null || values.isEmpty()) {
+            return;
+        }
+        Integer min = null;
+        Integer max = null;
+        for (String value : values) {
+            try {
+                int parsed = Integer.parseInt(value);
+                min = min == null ? parsed : Math.min(min, parsed);
+                max = max == null ? parsed : Math.max(max, parsed);
+            } catch (Exception ignored) {
+                return;
+            }
+        }
+        if (min != null && max != null) {
+            item.addProperty("min", min);
+            item.addProperty("max", max);
+        }
     }
 
     private static JsonObject handleDebugStageBlocksTool(ServerPlayer player, JsonElement argsElem) {

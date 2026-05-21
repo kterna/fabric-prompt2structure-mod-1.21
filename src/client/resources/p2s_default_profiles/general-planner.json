@@ -10,7 +10,8 @@
     "search_skill",
     "get_project_state",
     "read_workspace_file",
-    "search_block_ids"
+    "search_block_ids",
+    "describe_block_state"
   ],
   "max_loops": 40,
   "timeout_seconds": 180,

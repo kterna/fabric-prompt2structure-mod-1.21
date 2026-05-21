@@ -362,5 +362,6 @@
   "message.p2s.agent.tool.summary.delete_workspace_file": "删除文件",
   "message.p2s.agent.tool.summary.propose_patch": "提交补丁",
   "message.p2s.agent.tool.summary.search_block_ids": "搜索方块 ID",
+  "message.p2s.agent.tool.summary.describe_block_state": "查询方块状态",
   "message.p2s.agent.tool.summary.debug_stage_blocks": "摆放调试方块"
 }
